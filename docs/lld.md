@@ -26,11 +26,12 @@ One repository, npm workspaces, three packages:
 | Package | Published as | Holds |
 | --- | --- | --- |
 | `packages/sosie` | `sosie` | The CLI people run with `npx`, and the official sources it bundles |
-| `packages/core` | `sosie-core` | Everything that does not depend on a source: the source interface, the neutral schema, rules, faking, the store, `scan`, the MCP server |
-| `packages/postgres` | `sosie-postgres` | The Postgres source: endpoint, guard, rewriting, schema reading |
+| `packages/core` | `@sosie/core` | Everything that does not depend on a source: the source interface, the neutral schema, rules, faking, the store, `scan`, the MCP server |
+| `packages/postgres` | `@sosie/postgres` | The Postgres source: endpoint, guard, rewriting, schema reading |
 
-Later sources are packages of their own: `sosie-rest`, `sosie-graphql`,
-`sosie-mysql`. The names are free on npm.
+Later sources are packages of their own in the same scope: `@sosie/rest`,
+`@sosie/graphql`, `@sosie/mysql`. The `@sosie` scope is registered as an npm
+organisation before the first publish, so nobody else can take a name in it.
 
 **Dependency rule:** `core` depends on no source. A source depends on `core`
 only, never on another source. `sosie` depends on `core` and the official
@@ -405,5 +406,3 @@ domains make a person's email the same fake from the database and from the API.
 - Whether `pg-gateway` covers the extended protocol well enough, or a small
   endpoint of our own is simpler. `endpoint.ts` keeps the choice open.
 - How Prisma's engine asks for result formats, and whether text-only holds.
-- Whether the `@sosie` npm scope can be registered; if so, the packages move to
-  `@sosie/core` and `@sosie/postgres` before v0.1.
