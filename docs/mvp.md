@@ -9,7 +9,7 @@ a developer has to learn before the first query.
 
 ## In scope
 
-1. **`npx sosie`** starts a local endpoint that speaks the Postgres protocol.
+1. **`npx @sosie/cli`** starts a local endpoint that speaks the Postgres protocol.
    The agent, the app, its tests and `psql` connect to it unchanged. It reads
    the real database read-only and returns every value faked.
 2. **Faking by default.** Every value is faked by its column's type. The same
@@ -22,9 +22,9 @@ a developer has to learn before the first query.
 4. **`sosie.yml`, optional.** The team lists the columns that may pass
    unchanged (`orders.status`) and the format for a column Sosie can't tell from
    its name. Committed with the code, reviewed like code.
-5. **`npx sosie mcp`.** An MCP server with two tools, `describe` and `query`,
+5. **`npx @sosie/cli mcp`.** An MCP server with two tools, `describe` and `query`,
    for agents that prefer MCP to `psql`.
-6. **`npx sosie scan <paths>`.** Searches transcripts and logs for any real
+6. **`npx @sosie/cli scan <paths>`.** Searches transcripts and logs for any real
    value that passed through Sosie, and exits 1 if one is found. Proof, not
    trust.
 7. **Built to grow.** A core that knows nothing about Postgres decides every
@@ -45,7 +45,7 @@ a developer has to learn before the first query.
 
 ## Done means
 
-- From `npx sosie` to the first faked query in under a minute, with no config.
+- From `npx @sosie/cli` to the first faked query in under a minute, with no config.
 - `psql` and `node-postgres` work unchanged for reads; Prisma and Drizzle are
   checked before the release.
 - Planted canary values never show up: `sosie scan` finds none after a week of

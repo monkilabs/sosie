@@ -8,7 +8,7 @@ Current versions as of October 2026.
 
 | Need | Choice |
 | --- | --- |
-| Runtime | Node 26, the LTS line from 28 October 2026 (supported until April 2029). `engines` also allows Node 24, supported until April 2028, so `npx sosie` runs on machines that have not moved yet. Node 22 is out: its support ends in April 2027 |
+| Runtime | Node 26, the LTS line from 28 October 2026 (supported until April 2029). `engines` also allows Node 24, supported until April 2028, so `npx @sosie/cli` runs on machines that have not moved yet. Node 22 is out: its support ends in April 2027 |
 | Language and tests | TypeScript 7, Vitest 5 |
 | Mapping store | `node:sqlite`, built into Node: no native build |
 | Fake values | [`@faker-js/faker`](https://github.com/faker-js/faker) 10, seeded per value |
@@ -25,7 +25,7 @@ One repository, npm workspaces, three packages:
 
 | Package | Published as | Holds |
 | --- | --- | --- |
-| `packages/sosie` | `sosie` | The CLI people run with `npx`, and the official sources it bundles |
+| `packages/cli` | `@sosie/cli` | The CLI, run with `npx @sosie/cli` or installed as the `sosie` command, and the official sources it bundles |
 | `packages/core` | `@sosie/core` | Everything that does not depend on a source: the source interface, the neutral schema, rules, faking, the store, `scan`, the MCP server |
 | `packages/postgres` | `@sosie/postgres` | The Postgres source: endpoint, guard, rewriting, schema reading |
 
@@ -35,8 +35,11 @@ registered on 25 October 2026, so nobody else can take a name in it. Its team
 `developers` publishes.
 
 **Dependency rule:** `core` depends on no source. A source depends on `core`
-only, never on another source. `sosie` depends on `core` and the official
+only, never on another source. `cli` depends on `core` and the official
 sources. A lint rule enforces it.
+
+The CLI is not plain `sosie` because npm refuses that name as too similar to
+the popular `jose` package.
 
 ```
 packages/
@@ -59,7 +62,7 @@ packages/
     upstream.ts      pg.Pool, read-only session, timeout, row cap
     schema.ts        pg_catalog to the neutral schema
     results.ts       which field each result column came from
-  sosie/src/
+  cli/src/
     cli.ts           sosie, sosie mcp, sosie scan
     sources.ts       the sources this CLI knows, by upstream scheme
 test/
@@ -169,7 +172,7 @@ in the process list, where an agent can read them.
   ✓ Every value is faked; 3 fields pass (sosie.yml)
 
   Your agent, app and psql:  postgres://localhost:7674/app
-  Claude Code:               claude mcp add sosie -- npx sosie mcp
+  Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp
 ```
 
 ## `sosie.yml`
