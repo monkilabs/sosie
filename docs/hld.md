@@ -32,11 +32,11 @@ for secrets on the machine Sosie runs on (see [Threat model](#threat-model)).
 ## How a developer uses it
 
 1. In their own terminal, with the real connection string in `SOSIE_UPSTREAM`
-   (or typed at a hidden prompt), they run `npx sosie`.
+   (or typed at a hidden prompt), they run `npx @sosie/cli`.
 2. Sosie prints one local address. The agent, the app and `psql` use it.
-3. Agents that prefer MCP get `npx sosie mcp`, which talks to the same
+3. Agents that prefer MCP get `npx @sosie/cli mcp`, which talks to the same
    endpoint.
-4. When it matters, `npx sosie scan` checks transcripts and logs for any real
+4. When it matters, `npx @sosie/cli scan` checks transcripts and logs for any real
    value that passed through.
 5. If a fake breaks the app's logic (a status that must be a real one), the
    team lists that column in `sosie.yml` and commits it.

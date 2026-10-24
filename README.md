@@ -22,7 +22,7 @@ In your own terminal, not the agent's:
 
 ```sh
 export SOSIE_UPSTREAM='postgres://readonly:…@db.internal:5432/app'
-npx sosie
+npx @sosie/cli
 ```
 
 ```
@@ -30,17 +30,18 @@ npx sosie
   ✓ Every value is faked; 3 fields pass (sosie.yml)
 
   Your agent, app and psql:  postgres://localhost:7674/app
-  Claude Code:               claude mcp add sosie -- npx sosie mcp
+  Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp
 ```
 
 Then check that nothing real reached a transcript:
 
 ```sh
-npx sosie scan ~/.claude/projects
+npx @sosie/cli scan ~/.claude/projects
 ```
 
 That is the whole tool: three commands, no config to start, and an optional
-`sosie.yml` for the fields you decide may pass unchanged.
+`sosie.yml` for the fields you decide may pass unchanged. Installed once with
+`npm i -g @sosie/cli`, the command is just `sosie`.
 
 Postgres is the first source. More databases and your own REST and GraphQL
 APIs come next, each a package behind the same interface.
