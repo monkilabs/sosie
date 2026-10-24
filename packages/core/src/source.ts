@@ -49,8 +49,12 @@ export interface Faker {
   computed(value: Value, type: FieldType): Value
   /** Whether a field's values pass unchanged. */
   passes(field: Field): boolean
-  /** A scope per request, so its errors can be scrubbed of what it substituted. */
-  request(sent?: string): RequestScope
+  /**
+   * A scope per request, so its errors can be scrubbed of what it substituted.
+   * `sent` is what the client sent; `from` is an earlier scope of the same
+   * request, such as a prepared statement's, whose substitutions carry over.
+   */
+  request(sent?: string, from?: RequestScope): RequestScope
 }
 
 export interface RequestScope {

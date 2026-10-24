@@ -24,6 +24,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@sosie/core": "^0.1.0",
     "pg": "^8.23.1",
     "pgsql-parser": "^18.3.0"
   }

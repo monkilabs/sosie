@@ -13,6 +13,7 @@ const TRUE = /^(t|true|y|yes|on|1)$/i
 /** The core's Faker: every value a source returns goes through it, and every fake a client sends comes back through it. */
 export function createFaker({ schema, rules, store }: { schema: Schema; rules: Rules; store: Store }): Faker {
   const plans = planFields(schema, rules)
+  const substitutions = new WeakMap<RequestScope, Map<string, string>>()
   const fakerJs = new FakerJs({ locale: [en, base] })
 
   const planOf = (field: Field): FieldPlan =>
@@ -111,8 +112,8 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
       return planOf(field).domain === null
     },
 
-    request(sent = '') {
-      const substituted = new Map<string, string>()
+    request(sent = '', from) {
+      const substituted = new Map<string, string>(from ? substitutions.get(from) : undefined)
 
       const lookup = (fakeValue: string, near?: Field): string | undefined => {
         if (!near) {
@@ -145,7 +146,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
         return real
       }
 
-      return {
+      const scope: RequestScope = {
         lookup,
         scrub(text) {
           let out = text
@@ -155,7 +156,9 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
           // Anything quoted that the client did not send came from a row.
           return out.replace(/"([^"]*)"/g, (whole, inner: string) => (inner === '' || sent.includes(inner) ? whole : '"…"'))
         },
-      } satisfies RequestScope
+      }
+      substitutions.set(scope, substituted)
+      return scope
     },
   }
 }
