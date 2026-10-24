@@ -1,16 +1,21 @@
 # Sosie: high-level design
 
-Sosie is a read-only Postgres endpoint that fakes every value on the way out.
-An AI agent, the developer's app and `psql` connect to it as they would to the
-real database, and get the real shape with fake contents. This document covers
-v0.1, the [MVP](mvp.md); the [low-level design](lld.md) has the details.
+Sosie is a read-only endpoint in front of a data source that fakes every value
+on the way out. An AI agent, the developer's app and their tools connect to it
+as they would to the real source, and get the real shape with fake contents.
+v0.1's source is Postgres; more are packages behind the same interface. This
+document covers v0.1, the [MVP](mvp.md); the [low-level design](lld.md) has the
+details.
 
 ## Goals
 
 - **The model never sees a real value**: not in query results, not in errors,
   not in what an agent echoes back.
-- **Nothing to change in the client.** Anything that speaks Postgres works:
-  agents, ORMs, tests, `psql`, any Postgres MCP server.
+- **Nothing to change in the client.** Anything that speaks the source's
+  protocol works. For Postgres: agents, ORMs, tests, `psql`, any Postgres MCP
+  server.
+- **Built to grow.** A new database or API is a new source package; the core,
+  which decides every fake, does not change.
 - **Code written against the fakes works on the real data.** Same types, same
   formats, same relationships.
 - **No setup to start.** One command; configuration only when the defaults are
@@ -38,39 +43,69 @@ for secrets on the machine Sosie runs on (see [Threat model](#threat-model)).
 
 ## Architecture
 
+Sosie is a **core** that knows nothing about any database or API, and
+**sources** that each know one kind of upstream. v0.1 ships one source,
+Postgres. A source speaks its upstream's protocol to clients and reports which
+field each value came from; the core decides every fake.
+
 ```mermaid
 flowchart LR
   subgraph host["Your machine, or a host you choose"]
     agent["AI agent"] -->|SQL| endpoint
     app["App, tests, psql"] -->|SQL| endpoint
-    mcp["sosie mcp"] -->|SQL| endpoint
+    mcp["sosie mcp"] --> endpoint
     subgraph sosie["Sosie"]
-      endpoint["Postgres endpoint<br/>127.0.0.1:7674"] --> guard["Read-only guard"]
-      guard --> rewrite["Fakes in the query<br/>back to real values"]
-      rewrite --> upstream["Upstream client<br/>read-only session"]
-      upstream --> faker["Faker"]
+      subgraph pg["Source: Postgres"]
+        endpoint["Endpoint<br/>127.0.0.1:7674"] --> guard["Read-only guard"]
+        guard --> rewrite["Fakes in the query<br/>back to real values"]
+        rewrite --> upstream["Upstream client<br/>read-only session"]
+        upstream --> results["Which field<br/>each value came from"]
+      end
+      subgraph core["Core"]
+        faker["Faker"]
+        rules["sosie.yml"] --- faker
+        store[("Mapping store<br/>~/.sosie")] --- faker
+        schema["Neutral schema"] --- faker
+      end
+      results --> faker
+      rewrite -. lookup .-> faker
       faker --> endpoint
-      store[("Mapping store<br/>~/.sosie")] --- rewrite
-      store --- faker
-      rules["sosie.yml"] --- faker
-      schema["Schema cache"] --- faker
+      later["Later sources:<br/>REST, GraphQL, MySQL"] -.-> faker
     end
   end
   upstream -->|read-only login| db[("Your database")]
   agent -.->|fakes only| model["Model provider"]
 ```
 
-| Component | Job |
-| --- | --- |
-| Postgres endpoint | Speaks the Postgres wire protocol on 127.0.0.1, simple and extended query |
-| Read-only guard | Parses each statement; allows reads, refuses everything else and a short list of catalogs that hold real values |
-| Rewriter | Turns fakes the client sends (literals and parameters) back into real values |
-| Upstream client | One read-only session to the real database, with a timeout and a row cap |
-| Schema cache | Tables, columns, types, enums and foreign keys, read once at start |
-| Faker | Turns each result value into its fake, by column, type and rule |
-| Mapping store | Remembers each fake for each real value, so fakes are consistent and reversible |
-| `sosie mcp` | MCP server with `describe` and `query`, a client of the endpoint |
-| `sosie scan` | Finds real values in files, using the store's keyed hashes |
+| Part | Component | Job |
+| --- | --- | --- |
+| Core | Neutral schema | Entities, fields, types, keys and references, the same shape for every source |
+| Core | Rules | `sosie.yml`, checked against the neutral schema: what passes, which format |
+| Core | Faker | Turns each value into its fake by field, type and rule; looks fakes up for queries |
+| Core | Mapping store | Remembers each fake for each real value, so fakes are consistent and reversible |
+| Core | `sosie mcp` | MCP server: `describe` from the core, plus each source's tools |
+| Core | `sosie scan` | Finds real values in files, using the store's keyed hashes |
+| Postgres | Endpoint | Speaks the Postgres wire protocol on 127.0.0.1, simple and extended query |
+| Postgres | Guard | Allows reads; refuses everything else and the catalogs that store real values |
+| Postgres | Rewriter | Asks the core for the real value behind each fake in a query |
+| Postgres | Upstream client | One read-only session, with a timeout and a row cap |
+| Postgres | Results | Names the field of each result column, from the table and position Postgres reports |
+
+## How Sosie grows
+
+A source is a package with one interface: it connects to its upstream
+read-only, describes it in the neutral schema, serves an endpoint, and hands
+every value to the core. Rules, fakes, the store, `scan` and `describe` stay the
+same for every source.
+
+| Order | Source | Why then |
+| --- | --- | --- |
+| v0.1 | Postgres | Most personal data lives in databases, and teams least dare give an agent access to them |
+| Next | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
+| Later | MySQL and other databases; third-party APIs | On demand; many third-party APIs already offer a test mode |
+
+The core is tested through an in-memory test source, without Postgres, so
+nothing in it can come to depend on one source.
 
 ## A query, end to end
 
@@ -130,11 +165,13 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
 
 | Decision | Why | Alternatives |
 | --- | --- | --- |
-| Speak the Postgres protocol | One endpoint serves agents, apps, tests and any Postgres MCP server | An MCP-only server serves agents, not the app or its tests |
+| A source-agnostic core, with sources as packages behind one interface | Adding MySQL or an API is a new package, not a change to the core | Postgres wired into the core: quicker for v0.1, and the second source would mean a rewrite |
+| A neutral schema between sources and the core | Rules, domains and fakers are written once, for every source | Each source with its own rules and fakers: duplicated, and inconsistent across sources |
+| Speak each upstream's own protocol to clients | One endpoint serves agents, apps, tests and any MCP server for that database | An MCP-only server serves agents, not the app or its tests |
 | Read the live database | No copy to store, refresh or leak | Dump-and-mask tools ([Greenmask](https://greenmask.io), [Tonic Structural](https://www.tonic.ai)) work on a copy that goes stale |
 | Need nothing installed upstream | A read-only login is all the team grants | [PostgreSQL Anonymizer](https://postgresql-anonymizer.readthedocs.io) masks inside the database, which needs an extension and roles there |
 | Fake, not redact | Code needs valid values to run; blanks and tokens break it | Redaction gateways between an agent and a model provider see text, not columns |
-| TypeScript on Node 22, `npx` | One command, no install; the language of most agent tooling | A Go binary installs well but loses `npx` |
+| TypeScript 7 on Node 26, run with `npx` | One command, no install; the language of most agent tooling. Node 26 is the LTS line from 28 October 2026; Node 24 is still allowed | A Go binary installs well but loses `npx` |
 | A local mapping store | Consistent fakes across sessions, and queries by a fake | Format-preserving encryption needs no store but cannot give realistic emails or names |
 
 ## Risks

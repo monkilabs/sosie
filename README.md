@@ -2,8 +2,8 @@
 
 **Your AI agent sees a double of your data. Never the real thing.**
 
-Sosie sits between your Postgres database and your AI agent. The agent, your
-app and `psql` query it like any Postgres, and every value comes back as a
+Sosie sits between your data and your AI agent. The agent, your app and its
+tools query it as they would the real thing, and every value comes back as a
 realistic fake. The same real value is always the same fake, so joins hold and
 code written against the fakes runs unchanged on the real data. Real records,
 credentials and hostnames stay on your side.
@@ -27,7 +27,7 @@ npx sosie
 
 ```
   ✓ db.internal/app, read-only: 42 tables
-  ✓ Every value is faked; 3 columns pass (sosie.yml)
+  ✓ Every value is faked; 3 fields pass (sosie.yml)
 
   Your agent, app and psql:  postgres://localhost:7674/app
   Claude Code:               claude mcp add sosie -- npx sosie mcp
@@ -40,7 +40,10 @@ npx sosie scan ~/.claude/projects
 ```
 
 That is the whole tool: three commands, no config to start, and an optional
-`sosie.yml` for the columns you decide may pass unchanged.
+`sosie.yml` for the fields you decide may pass unchanged.
+
+Postgres is the first source. More databases and your own REST and GraphQL
+APIs come next, each a package behind the same interface.
 
 ## What Sosie is not
 

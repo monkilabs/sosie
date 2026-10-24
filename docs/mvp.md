@@ -27,14 +27,17 @@ a developer has to learn before the first query.
 6. **`npx sosie scan <paths>`.** Searches transcripts and logs for any real
    value that passed through Sosie, and exits 1 if one is found. Proof, not
    trust.
+7. **Built to grow.** A core that knows nothing about Postgres decides every
+   fake. Postgres is the first source, a package behind one interface, so a
+   later database or API is a new package, not a change to the core.
 
 ## Out of scope, and why
 
 | Not in v0.1 | Why |
 | --- | --- |
 | Writes | Read-only is the promise that makes Sosie safe to point at production |
-| MySQL, SQLite, MongoDB | Postgres first; the design keeps the database behind one module |
-| REST and GraphQL APIs | Next, faked consistently with the database (see the HLD) |
+| MySQL, SQLite, MongoDB | Postgres first; each is a later source package |
+| REST and GraphQL APIs | Next, as source packages, faked consistently with the database (see the HLD) |
 | Filtering the agent's shell output | `sosie scan` proves the result; a hook per assistant comes later |
 | Mappings shared across a team | Each developer's fakes are their own; nothing leaves the machine |
 | TLS and passwords on the local endpoint | It listens on 127.0.0.1 only |
@@ -48,6 +51,9 @@ a developer has to learn before the first query.
 - Planted canary values never show up: `sosie scan` finds none after a week of
   real agent work against a seeded database.
 - A feature built against the fakes passes its tests against the real data.
+- The core passes its tests through an in-memory test source, with no Postgres:
+  proof that it depends on no particular source.
+- Runs on Node 26, the LTS line from 28 October 2026, and on Node 24.
 
 ## Release
 
