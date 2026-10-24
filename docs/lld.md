@@ -30,8 +30,9 @@ One repository, npm workspaces, three packages:
 | `packages/postgres` | `@sosie/postgres` | The Postgres source: endpoint, guard, rewriting, schema reading |
 
 Later sources are packages of their own in the same scope: `@sosie/rest`,
-`@sosie/graphql`, `@sosie/mysql`. The `@sosie` scope is registered as an npm
-organisation before the first publish, so nobody else can take a name in it.
+`@sosie/graphql`, `@sosie/mysql`. The `@sosie` scope is an npm organisation,
+registered on 25 October 2026, so nobody else can take a name in it. Its team
+`developers` publishes.
 
 **Dependency rule:** `core` depends on no source. A source depends on `core`
 only, never on another source. `sosie` depends on `core` and the official
