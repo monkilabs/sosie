@@ -19,7 +19,9 @@
   "devDependencies": {
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
+    "drizzle-orm": "^0.45.4",
     "embedded-postgres": "^18.4.0-beta.17",
+    "postgres": "^3.4.9",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },
