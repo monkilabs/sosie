@@ -43,7 +43,8 @@ export interface ParamRef {
   array: boolean
 }
 
-export type Target = 'count' | 'star' | 'other'
+/** An item of the select list: count(…), a *, a column cast to another type (its field), or anything else. */
+export type Target = 'count' | 'star' | 'other' | Field
 
 export interface Analysis {
   refusal?: Refusal
@@ -148,8 +149,7 @@ class Analyzer {
     switch (type) {
       case 'SelectStmt':
         command = 'SELECT'
-        targets = targetsOf(body)
-        this.#select(body, undefined)
+        this.#select(body, undefined, (t) => (targets = t))
         break
       case 'VariableShowStmt':
       case 'ClosePortalStmt':
@@ -274,9 +274,10 @@ class Analyzer {
     }
   }
 
-  #select(body: Node, outer: Scope | undefined): void {
+  /** A select, in its own scope. `top` receives the select list of the statement's own result. */
+  #select(body: Node, outer: Scope | undefined, top?: (targets: Target[]) => void): void {
     if (body.op && body.op !== 'SETOP_NONE') {
-      this.#select(body.larg, outer)
+      this.#select(body.larg, outer, top)
       this.#select(body.rarg, outer)
       this.#walk([body.sortClause, body.limitCount, body.limitOffset], outer)
       return
@@ -292,6 +293,7 @@ class Analyzer {
     }
     const scope: Scope = { relations: [], ctes: new Set(), parent: withScope }
     for (const item of body.fromClause ?? []) this.#from(item, scope)
+    top?.((body.targetList ?? []).map((t: Node) => this.#target(t.ResTarget?.val, scope)))
     this.#walk(
       [
         body.targetList,
@@ -392,6 +394,15 @@ class Analyzer {
     }
   }
 
+  #target(value: Node | undefined, scope: Scope): Target {
+    if (value?.ColumnRef?.fields?.at(-1)?.A_Star) return 'star'
+    if (value?.FuncCall?.funcname?.at(-1)?.String?.sval === 'count') return 'count'
+    // users.role::text: Postgres reports a computed column; its values are still the field's.
+    const fields = value?.TypeCast ? column(value) : undefined
+    const near = fields ? this.#resolve(fields, scope) : undefined
+    return near && near !== 'catalog' ? near : 'other'
+  }
+
   #record(node: Node, near: Near, array: boolean): void {
     if (near === 'catalog') return
     const value = uncast(node)!
@@ -437,17 +448,6 @@ function literal(node: Node | undefined): boolean {
 
 function column(node: Node | undefined): Node[] | undefined {
   return uncast(node)?.ColumnRef?.fields
-}
-
-function targetsOf(body: Node): Target[] {
-  let select = body
-  while (select.op && select.op !== 'SETOP_NONE') select = select.larg
-  return (select.targetList ?? []).map((t: Node): Target => {
-    const value = t.ResTarget?.val
-    if (value?.ColumnRef?.fields?.at(-1)?.A_Star) return 'star'
-    const fn = value?.FuncCall?.funcname?.at(-1)?.String?.sval
-    return fn === 'count' ? 'count' : 'other'
-  })
 }
 
 /** The value of a constant: the text of a string, number or boolean. */

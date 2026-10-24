@@ -74,6 +74,15 @@ describe('the guard', () => {
     expect(check('SELECT count(*), u.*, id + 1 FROM users u').targets).toEqual(['count', 'star', 'other'])
     expect(check('SELECT count(*) FROM users UNION SELECT 1').targets).toEqual(['count'])
   })
+
+  it('names the field of a column that is only cast, as ORMs do with enums', () => {
+    const status = catalog.columns.get('100:3')
+    expect(check('SELECT "public"."users"."status"::text, id::text AS i, upper(email) FROM public.users').targets).toEqual([
+      status,
+      catalog.columns.get('100:1'),
+      'other',
+    ])
+  })
 })
 
 describe('what is compared with what', () => {

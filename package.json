@@ -13,15 +13,18 @@
   "scripts": {
     "build": "npm run build --workspaces",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
-    "check": "npm run typecheck && npm run build && npm test"
+    "test": "npm run build && vitest run",
+    "check": "npm run typecheck && npm test"
   },
   "devDependencies": {
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
     "drizzle-orm": "^0.45.4",
     "embedded-postgres": "^18.4.0-beta.17",
     "postgres": "^3.4.9",
+    "prisma": "^7.10.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },

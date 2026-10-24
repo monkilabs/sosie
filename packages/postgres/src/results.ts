@@ -24,8 +24,10 @@ export function planColumns(columns: ColumnDescription[], analysis: Analysis, ca
       if (field) return { field }
       if (column.tableID < FIRST_NORMAL_OID) return { pass: true }
     }
+    const target = targets?.[i]
     // count(…) holds no value from a row.
-    if (targets?.[i] === 'count') return { pass: true }
+    if (target === 'count') return { pass: true }
+    if (typeof target === 'object') return { field: target }
     return { type: typeByOid(column.dataTypeID, catalog.enums) }
   })
 }

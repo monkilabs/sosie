@@ -32,6 +32,11 @@ describe('result columns', () => {
     expect(planColumns([column(100, 2)], analysis({ catalogOnly: true }), catalog)).toEqual([{ pass: true }])
   })
 
+  it('fakes a cast column as its field', () => {
+    const status = catalog.columns.get('100:3')!
+    expect(planColumns([column(0, 0, 25)], analysis({ targets: [status] }), catalog)).toEqual([{ field: status }])
+  })
+
   it('fakes arrays element by element', () => {
     const faker = {
       value: (v: unknown) => (Array.isArray(v) ? v.map((x) => (x === null ? null : `f(${x})`)) : `f(${v})`),

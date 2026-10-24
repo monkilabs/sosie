@@ -7,5 +7,6 @@
       "@sosie/postgres": ["./packages/postgres/src/index.ts"]
     }
   },
-  "include": ["packages/*/src", "packages/*/test", "test", "vitest.config.ts"]
+  "include": ["packages/*/src", "packages/*/test", "test", "vitest.config.ts"],
+  "exclude": ["test/e2e/prisma/generated"]
 }
