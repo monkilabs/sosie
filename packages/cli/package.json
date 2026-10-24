@@ -1,11 +1,29 @@
 {
   "name": "@sosie/cli",
   "version": "0.1.0",
+  "description": "Your AI agent sees a double of your data. Never the real thing.",
   "type": "module",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/monkilabs/sosie.git", "directory": "packages/cli" },
-  "engines": { "node": ">=24" },
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "files": ["dist"],
-  "scripts": { "build": "tsc -p tsconfig.build.json" }
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monkilabs/sosie.git",
+    "directory": "packages/cli"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "sosie": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@sosie/core": "^0.1.0",
+    "@sosie/postgres": "^0.1.0"
+  }
 }

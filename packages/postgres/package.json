@@ -1,6 +1,7 @@
 {
   "name": "@sosie/postgres",
   "version": "0.1.0",
+  "description": "The Postgres source of Sosie: a read-only Postgres endpoint that fakes every value.",
   "type": "module",
   "license": "MIT",
   "repository": {

@@ -1,0 +1,237 @@
+#!/usr/bin/env node
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { parseArgs, styleText } from 'node:util'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import {
+  clearRunning,
+  createFaker,
+  loadRules,
+  NO_RULES,
+  readRunning,
+  RulesError,
+  scan,
+  serveMcp,
+  sosieHome,
+  Store,
+  storeDir,
+  storeDirs,
+  writeRunning,
+  type Rules,
+} from '@sosie/core'
+import { hiddenPrompt } from './prompt.js'
+import { sources } from './sources.js'
+
+const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
+
+const USAGE = `Sosie: your AI agent sees a double of your data. Never the real thing.
+
+Usage:
+  sosie                 Start. Reads SOSIE_UPSTREAM, or asks for it.
+  sosie mcp             MCP server over stdio, for the running sosie.
+  sosie scan <path>...  Search files and folders for real values; exit 1 if one is found.
+
+Options for sosie:
+  --port <n>       Port to listen on (7674)
+  --host <host>    Address to listen on (127.0.0.1)
+  --rules <file>   Rules file (./sosie.yml when present)
+  --max-rows <n>   Rows a query returns at most (1000)
+
+The connection string is never an argument: arguments show in shell history
+and the process list, where an agent can read them.
+`
+
+class Exit extends Error {
+  constructor(
+    readonly code: number,
+    message = '',
+  ) {
+    super(message)
+  }
+}
+
+const ok = (text: string) => `  ${styleText('green', '✓', { stream: process.stdout })} ${text}`
+const warn = (text: string) => `  ${styleText('yellow', '!', { stream: process.stdout })} ${text}`
+const fail = (text: string) => `  ${styleText('red', '✗', { stream: process.stderr })} ${text}`
+const found = (text: string) => `  ${styleText('red', '✗', { stream: process.stdout })} ${text}`
+
+async function main(argv: string[]): Promise<void> {
+  let parsed
+  try {
+    parsed = parseArgs({
+      args: argv,
+      allowPositionals: true,
+      options: {
+        port: { type: 'string' },
+        host: { type: 'string' },
+        rules: { type: 'string' },
+        'max-rows': { type: 'string' },
+        help: { type: 'boolean', short: 'h' },
+        version: { type: 'boolean', short: 'v' },
+      },
+    })
+  } catch (error) {
+    throw new Exit(2, `${(error as Error).message}\n\n${USAGE}`)
+  }
+  const { values, positionals } = parsed
+  if (values.help) return void process.stdout.write(USAGE)
+  if (values.version) return void process.stdout.write(`${VERSION}\n`)
+  const [command, ...rest] = positionals
+  if (command === 'mcp') return mcp()
+  if (command === 'scan') return scanCommand(rest)
+  if (command !== undefined) throw new Exit(2, `Unknown command: ${command}\n\n${USAGE}`)
+  return start({
+    port: number(values.port, 7674, '--port'),
+    host: values.host ?? '127.0.0.1',
+    rules: values.rules,
+    maxRows: number(values['max-rows'], 1000, '--max-rows'),
+  })
+}
+
+function number(value: string | undefined, fallback: number, name: string): number {
+  if (value === undefined) return fallback
+  const n = Number(value)
+  if (!Number.isInteger(n) || n < 0) throw new Exit(2, fail(`${name} takes a whole number, not ${value}.`))
+  return n
+}
+
+/* sosie */
+
+async function start(options: { port: number; host: string; rules: string | undefined; maxRows: number }): Promise<void> {
+  const upstream = await readUpstream()
+  const source = sources.find((s) => s.matches(upstream))
+  if (!source) {
+    throw new Exit(2, fail(`Sosie reads ${sources.map((s) => `${s.kind}://`).join(', ')} upstreams for now, not ${upstream.protocol}//.`))
+  }
+
+  let connection
+  try {
+    connection = await source.connect(upstream, { maxRows: options.maxRows, statementTimeout: 30_000 })
+  } catch (error) {
+    throw new Exit(1, fail((error as Error).message))
+  }
+
+  const rulesFile = options.rules ?? (existsSync('sosie.yml') ? 'sosie.yml' : undefined)
+  let rules: Rules = NO_RULES
+  if (rulesFile) {
+    if (!existsSync(rulesFile)) throw new Exit(2, fail(`No rules file at ${rulesFile}.`))
+    try {
+      rules = loadRules(readFileSync(rulesFile, 'utf8'), connection.schema, rulesFile)
+    } catch (error) {
+      await connection.close()
+      if (error instanceof RulesError) throw new Exit(1, error.problems.map(fail).join('\n'))
+      throw error
+    }
+  }
+
+  const home = sosieHome()
+  const store = Store.open(storeDir(home, connection.label))
+  const faker = createFaker({ schema: connection.schema, rules, store })
+  let endpoint
+  try {
+    endpoint = await connection.serve({ host: options.host, port: options.port }, faker)
+  } catch (error) {
+    store.close()
+    await connection.close()
+    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+      throw new Exit(1, fail(`Port ${options.port} is in use. Is Sosie already running? Choose another with --port.`))
+    }
+    throw error
+  }
+  writeRunning(home, { kind: source.kind, address: endpoint.address, schema: connection.schema, passing: [...rules.pass] })
+
+  const passing = rules.pass.size
+  const lines = [
+    '',
+    ok(`${connection.label}, read-only: ${connection.summary}`),
+    ok(passing ? `Every value is faked; ${passing} ${passing === 1 ? 'field passes' : 'fields pass'} (${rulesFile})` : 'Every value is faked'),
+    ...connection.warnings.map(warn),
+    '',
+    `  Your agent, app and psql:  ${endpoint.address}`,
+    `  Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp`,
+    '',
+  ]
+  process.stdout.write(lines.join('\n') + '\n')
+
+  await new Promise<void>((done) => {
+    const stop = async () => {
+      clearRunning(home)
+      await endpoint.close()
+      await connection.close()
+      store.close()
+      done()
+    }
+    process.once('SIGINT', stop)
+    process.once('SIGTERM', stop)
+  })
+}
+
+/** SOSIE_UPSTREAM, or a hidden prompt in a terminal. Never an argument, never echoed. */
+async function readUpstream(): Promise<URL> {
+  let text = process.env.SOSIE_UPSTREAM
+  if (!text) {
+    if (!process.stdin.isTTY) {
+      throw new Exit(2, fail("Set SOSIE_UPSTREAM to your database's connection string, or run sosie in a terminal to type it."))
+    }
+    try {
+      text = await hiddenPrompt('  Connection string (hidden): ', process.stdin, process.stdout)
+    } catch (error) {
+      throw new Exit(2, fail((error as Error).message))
+    }
+  }
+  try {
+    return new URL(text)
+  } catch {
+    throw new Exit(2, fail('The connection string is not a URL. It looks like postgres://user:password@host:5432/database.'))
+  }
+}
+
+/* sosie mcp */
+
+async function mcp(): Promise<void> {
+  const home = sosieHome()
+  await serveMcp({
+    version: VERSION,
+    tools: sources.flatMap((s) => (s.tools ?? []).map((tool) => ({ kind: s.kind, tool }))),
+    running: async () => readRunning(home),
+    transport: new StdioServerTransport(),
+  })
+}
+
+/* sosie scan */
+
+async function scanCommand(paths: string[]): Promise<void> {
+  if (!paths.length) throw new Exit(2, `Name the files or folders to scan.\n\n${USAGE}`)
+  for (const path of paths) if (!existsSync(path)) throw new Exit(2, fail(`No such file or folder: ${path}`))
+  const dirs = storeDirs(sosieHome())
+  if (!dirs.length) throw new Exit(2, fail('Nothing to compare with: Sosie has not faked any values on this machine yet.'))
+  const stores = dirs.map((dir) => Store.open(dir, { create: false }))
+  const result = await scan(
+    paths.map((p) => resolve(p)),
+    stores.map((s) => s.scanIndex()),
+  )
+  for (const store of stores) store.close()
+
+  const files = `${result.files} ${result.files === 1 ? 'file' : 'files'}`
+  for (const f of result.findings) process.stdout.write(`${found(`${f.file}:${f.line}`)}  a real value from ${f.domain}\n`)
+  if (result.findings.length) {
+    const n = result.findings.length
+    process.stdout.write(`  ${n} real ${n === 1 ? 'value' : 'values'} found in ${files}.\n`)
+    throw new Exit(1)
+  }
+  process.stdout.write(`${ok(`No real values found in ${files}.`)}\n`)
+}
+
+main(process.argv.slice(2)).then(
+  () => {
+    if (process.argv[2] !== 'mcp') process.exit(0)
+  },
+  (error) => {
+    if (error instanceof Exit) {
+      if (error.message) process.stderr.write(`${error.message}\n`)
+      process.exit(error.code)
+    }
+    process.stderr.write(`${fail((error as Error).stack ?? String(error))}\n`)
+    process.exit(1)
+  },
+)

@@ -1,6 +1,7 @@
 {
   "name": "@sosie/core",
   "version": "0.1.0",
+  "description": "The core of Sosie: rules, fakes, the mapping store, scan and MCP. It knows no source.",
   "type": "module",
   "license": "MIT",
   "repository": {
