@@ -106,8 +106,19 @@ const REFUSED_FUNCTIONS: Record<string, string> = {
   loread: READS,
   pg_terminate_backend: 'acts on other sessions',
   pg_cancel_backend: 'acts on other sessions',
+  pg_stat_get_backend_activity: 'returns other sessions’ queries with their values',
+  pg_prepared_statement: 'returns statements with the real values Sosie put in them',
+  pg_cursor: 'returns statements with the real values Sosie put in them',
+  ts_stat: READS,
+  ts_rewrite: READS,
+  get_raw_page: READS,
+  heap_page_items: READS,
+  heap_page_item_attrs: READS,
+  tuple_data_split: READS,
+  bt_page_items: READS,
 }
-const XML_READERS = /^(query|table|cursor|schema|database)_to_xml/
+/** Functions that run SQL given as text, or read raw data: the guard cannot see what they read. */
+const READERS = /^((query|table|cursor|schema|database)_to_xml|dblink|pg_logical_slot_|pg_get_wal_)/
 
 /** Settings a client may not change through Sosie: they keep the session read-only and its login what it is. */
 const PROTECTED = new Set(['default_transaction_read_only', 'transaction_read_only', 'session_authorization', 'role'])
@@ -349,7 +360,7 @@ class Analyzer {
     const names: string[] = (body.funcname ?? []).map((n: Node) => n.String?.sval)
     const name = names.at(-1) ?? ''
     const schema = names.length > 1 ? names[0] : undefined
-    const reason = REFUSED_FUNCTIONS[name] ?? (XML_READERS.test(name) || name.startsWith('dblink') ? READS : undefined)
+    const reason = REFUSED_FUNCTIONS[name] ?? (READERS.test(name) ? READS : undefined)
     if (reason) this.#refuse({ code: '42501', message: `Sosie does not run ${name}(): it ${reason}.` })
     if (name === 'set_config') {
       const setting = body.args?.[0]?.A_Const?.sval?.sval

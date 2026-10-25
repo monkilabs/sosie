@@ -54,6 +54,9 @@ describe('the guard', () => {
     ['SELECT dblink_exec(\'x\')', '42501'],
     ["SELECT table_to_xml('users', true, false, '')", '42501'],
     ['SELECT set_config(name, setting, false) FROM pg_settings', '42501'],
+    ["SELECT * FROM ts_stat('SELECT body FROM posts')", '42501'],
+    ["SELECT * FROM pg_logical_slot_peek_changes('s', NULL, NULL)", '42501'],
+    ['SELECT * FROM pg_prepared_statement()', '42501'],
     ['PREPARE TRANSACTION \'x\'', '0A000'],
     ['EXPLAIN ANALYZE SELECT 1', '0A000'],
   ])('refuses %s', (sql, code) => {

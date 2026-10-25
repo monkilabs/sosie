@@ -138,6 +138,20 @@ describe('fakes by type', async () => {
     }
   })
 
+  it('json keys: structure kept, values that are keys faked', async () => {
+    const { faker } = await serve()
+    const built = JSON.parse(
+      faker.computed(JSON.stringify({ 'quill.vantablack@canary-mail.test': 1, 'Quillon Vantablack': { city: 'Vantaville' }, total: 3 }), {
+        kind: 'json',
+      }) as string,
+    )
+    const keys = Object.keys(built)
+    expect(keys[2]).toBe('total')
+    expect(keys[0]).toMatch(/@example\.(com|net|org)$/)
+    expect(JSON.stringify(built).toLowerCase()).not.toMatch(/quill|vanta/)
+    expect(Object.keys(built[keys[1]!])).toEqual(['city'])
+  })
+
   it('arrays: each element faked, nulls kept', () => {
     for (const [real, fake] of pairs('tags')) {
       expect((fake as Value[]).length).toBe((real as Value[]).length)
@@ -200,5 +214,8 @@ describe('requests', async () => {
     expect(request.scrub(`invalid input: "${CANARIES.email}"`)).toBe(`invalid input: "${users[0]!.email}"`)
     expect(request.scrub('invalid input syntax for type integer: "Jan Novák"')).toBe('invalid input syntax for type integer: "…"')
     expect(request.scrub('column "id" does not exist')).toBe('column "id" does not exist')
+    expect(request.scrub('Perhaps you meant to reference the column "users.email".')).toBe(
+      'Perhaps you meant to reference the column "users.email".',
+    )
   })
 })

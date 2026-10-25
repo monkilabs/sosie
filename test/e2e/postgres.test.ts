@@ -104,6 +104,13 @@ describe('reading through Sosie', () => {
     expect(direct.e).not.toBe('quill.vantablack@canary-mail.test')
   })
 
+  it('fakes JSON built from rows, keys included', async () => {
+    const [{ map }] = await query('SELECT json_object_agg(email, full_name) AS map FROM users WHERE email IS NOT NULL')
+    expect(Object.keys(map)).toHaveLength(40)
+    const [{ doc }] = await query('SELECT jsonb_build_object(full_name, email, \'id\', id) AS doc FROM users ORDER BY id LIMIT 1')
+    expect(Object.keys(doc)).toContain('id')
+  })
+
   it('runs several statements in one query, and transactions', async () => {
     const results = (await client.query('SELECT 1 AS one; SELECT count(*) FROM orders')) as unknown as pg.QueryResult[]
     expect(results.map((r) => r.rows[0])).toEqual([{ one: 1 }, { count: '5' }])
@@ -167,6 +174,7 @@ describe('the guard', () => {
     ['SELECT * FROM pg_catalog.pg_stat_activity', '42501'],
     ['SELECT inet_server_addr()', '42501'],
     ["SELECT query_to_xml('SELECT * FROM users', true, false, '')", '42501'],
+    ["SELECT * FROM ts_stat('SELECT to_tsvector(full_name) FROM users')", '42501'],
     ['COPY users TO STDOUT', '0A000'],
     ['LISTEN news', '0A000'],
   ])('refuses %s', async (sql, code) => {
@@ -224,6 +232,8 @@ describe('errors and limits', () => {
     expect(error.message).toBe('syntax error at or near "SELEC"')
     expect(error.position).toBe('1')
     expect((await failure('SELECT nope FROM users')).message).toBe('column "nope" does not exist')
+    const hinted = (await failure('SELECT u.emial FROM users u')) as { hint?: string }
+    expect(hinted.hint).toBe('Perhaps you meant to reference the column "u.email".')
   })
 
   it('cuts results at the row cap, and says so', async () => {

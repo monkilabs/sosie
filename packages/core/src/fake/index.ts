@@ -9,10 +9,17 @@ import { fakeScalar, type ScalarKind } from './types.js'
 
 const SCANNABLE = new Set<FieldType['kind']>(['string', 'integer', 'decimal', 'uuid', 'ip'])
 const TRUE = /^(t|true|y|yes|on|1)$/i
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
 
 /** The core's Faker: every value a source returns goes through it, and every fake a client sends comes back through it. */
 export function createFaker({ schema, rules, store }: { schema: Schema; rules: Rules; store: Store }): Faker {
   const plans = planFields(schema, rules)
+  /** Names of entities and fields: an error quoting one quotes structure, not a value. */
+  const names = new Set(
+    schema.entities.flatMap((e) => [e.id, e.name, ...e.fields.flatMap((f) => [f.id, f.name, `${e.name}.${f.name}`])]),
+  )
+  /** A name in the schema, or alias.column as Postgres hints it. */
+  const named = (text: string) => names.has(text) || (/^[A-Za-z_]\w*\.[A-Za-z_]\w*$/.test(text) && names.has(text.split('.')[1]!))
   const substitutions = new WeakMap<RequestScope, Map<string, string>>()
   const fakerJs = new FakerJs({ locale: [en, base] })
 
@@ -53,7 +60,13 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
       if (node === null) return null
       if (Array.isArray(node)) return node.map((item) => walk(item, `${path}[]`, key))
       if (typeof node === 'object') {
-        return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, walk(v, `${path}.${k}`, k)]))
+        return Object.fromEntries(
+          Object.entries(node).map(([k, v]) => {
+            // A key like city or createdAt is structure; a key like an email is a value, faked, and never named in a domain.
+            if (IDENTIFIER.test(k)) return [k, walk(v, `${path}.${k}`, k)]
+            return [scalar(k, { kind: 'string' }, `${domain}.$${path}.*key`, { unique: true }), walk(v, `${path}.*`, '')]
+          }),
+        )
       }
       const format = formatByName({ name: key })
       const leafDomain = format && PERSONAL.has(format) ? `format:${format}` : `${domain}.$${path}`
@@ -153,8 +166,10 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
           for (const [real, fakeValue] of [...substituted].sort((a, b) => b[0].length - a[0].length)) {
             out = out.split(real).join(fakeValue)
           }
-          // Anything quoted that the client did not send came from a row.
-          return out.replace(/"([^"]*)"/g, (whole, inner: string) => (inner === '' || sent.includes(inner) ? whole : '"…"'))
+          // Anything quoted that the client did not send, and that names no table or column, came from a row.
+          return out.replace(/"([^"]*)"/g, (whole, inner: string) =>
+            inner === '' || sent.includes(inner) || named(inner) ? whole : '"…"',
+          )
         },
       }
       substitutions.set(scope, substituted)
