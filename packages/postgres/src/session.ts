@@ -369,12 +369,23 @@ export class Session {
     }
   }
 
-  /** An upstream error or notice for the client: its message scrubbed, its detail dropped. */
+  /**
+   * An upstream error or notice for the client: its message scrubbed, its
+   * detail dropped. Postgres quotes the values its own messages include, so
+   * scrubbing catches them; a function's message (RAISE in PL/pgSQL, anything
+   * with a context) may hold a row value unquoted, so its text is hidden.
+   */
   #scrubbed(message: UpstreamMessage, scope: RequestScope, prepared: Prepared | undefined): Report {
+    const severity = String(message.severity ?? 'ERROR')
+    const code = String(message.code ?? 'XX000')
+    if (message.where || code.startsWith('P0')) {
+      const what = message.name === 'notice' ? 'sent a notice' : 'raised an error'
+      return { severity, code, message: `A function in the database ${what}; Sosie hides its text, which may quote rows.` }
+    }
     const unchanged = !prepared || prepared.text === prepared.sent
     return {
-      severity: String(message.severity ?? 'ERROR'),
-      code: String(message.code ?? 'XX000'),
+      severity,
+      code,
       message: scope.scrub(String(message.message ?? '')),
       hint: message.hint ? scope.scrub(String(message.hint)) : undefined,
       position: unchanged && message.position ? String(message.position) : undefined,

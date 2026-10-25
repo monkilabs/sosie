@@ -232,6 +232,19 @@ describe('errors and limits', () => {
     expect(substituted.message).not.toMatch(/canary/)
   })
 
+  it('hides the text of errors and notices raised by functions, which may quote rows unquoted', async () => {
+    const error = await failure('SELECT check_user(id) FROM users ORDER BY id LIMIT 1')
+    expect(error.code).toBe('P0001')
+    expect(error.message).toBe('A function in the database raised an error; Sosie hides its text, which may quote rows.')
+    const notices: string[] = []
+    const listen = (n: { message?: string }) => notices.push(n.message ?? '')
+    client.on('notice', listen)
+    await query('SELECT greet(id) FROM users ORDER BY id LIMIT 1')
+    client.off('notice', listen)
+    seen.push(notices)
+    expect(notices).toEqual(['A function in the database sent a notice; Sosie hides its text, which may quote rows.'])
+  })
+
   it('reports syntax errors with their position', async () => {
     const error = await failure('SELEC 1')
     expect(error.code).toBe('42601')

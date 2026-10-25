@@ -42,6 +42,17 @@ CREATE TABLE billing.invoices (id int PRIMARY KEY, order_id bigint REFERENCES or
 
 CREATE FUNCTION user_email(uid int) RETURNS text LANGUAGE sql STABLE AS $$ SELECT email FROM users WHERE id = uid $$;
 
+-- Functions that put row values in their messages, unquoted, as application code does.
+CREATE FUNCTION check_user(uid int) RETURNS int LANGUAGE plpgsql STABLE AS $$
+BEGIN
+  RAISE EXCEPTION 'user % is not allowed', (SELECT email FROM users WHERE id = uid);
+END $$;
+CREATE FUNCTION greet(uid int) RETURNS int LANGUAGE plpgsql STABLE AS $$
+BEGIN
+  RAISE NOTICE 'hello %', (SELECT full_name FROM users WHERE id = uid);
+  RETURN uid;
+END $$;
+
 INSERT INTO countries VALUES ('CZ', 'Czechia'), ('SK', 'Slovakia'), ('AT', 'Austria');
 
 INSERT INTO users (email, full_name, phone, city, api_key, account, active, role, created_at, born_on, profile, tags, last_ip, avatar, score, external_id, country) VALUES

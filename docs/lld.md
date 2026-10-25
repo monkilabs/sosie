@@ -454,7 +454,10 @@ Sosie substituted is turned back into its fake, and quoted text the client did
 not send is masked as `"…"` unless it names a table or column, since Postgres
 quotes the value that failed (`invalid input syntax for type integer: "…"`).
 Detail and context are dropped, because they quote rows; the hint is kept,
-scrubbed the same way. The position is kept only when the statement went
+scrubbed the same way. Postgres quotes the values its own messages include;
+a function's message need not (`RAISE EXCEPTION 'user % is not allowed',
+email`), so an error or notice raised in function code, one with a context or
+a `P0` code, keeps its code and loses its text. The position is kept only when the statement went
 upstream as the client wrote it.
 
 | Situation | Message |
