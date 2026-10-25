@@ -40,6 +40,8 @@ export interface UpstreamOptions {
   statementTimeout: number
 }
 
+export const IDLE_IN_TRANSACTION = 300_000
+
 /** Connection-string parameters pg sends as start-up settings, which Postgres applies after `options`. */
 const STARTUP_SETTINGS = ['statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout', 'client_encoding', 'replication']
 
@@ -57,6 +59,8 @@ export function config(upstream: URL, { statementTimeout }: UpstreamOptions): pg
     own,
     '-c default_transaction_read_only=on',
     `-c statement_timeout=${statementTimeout}`,
+    // A transaction an agent leaves open holds locks on the database: it ends after five idle minutes.
+    `-c idle_in_transaction_session_timeout=${IDLE_IN_TRANSACTION}`,
     '-c DateStyle=ISO,MDY',
     '-c IntervalStyle=postgres',
     '-c bytea_output=hex',

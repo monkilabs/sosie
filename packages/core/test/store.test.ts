@@ -12,6 +12,7 @@ describe('the mapping store', () => {
     const dir = fresh()
     Store.open(dir).close()
     expect(statSync(join(dir, 'key')).mode & 0o777).toBe(0o600)
+    expect(statSync(join(dir, 'store.db')).mode & 0o777).toBe(0o600)
     expect(statSync(dir).mode & 0o777).toBe(0o700)
     expect(readFileSync(join(dir, 'key'))).toHaveLength(32)
   })

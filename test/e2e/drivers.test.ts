@@ -15,7 +15,10 @@ let sosie: Started
 beforeAll(async () => {
   sosie = await startSosie()
 })
-afterAll(() => sosie.close())
+afterAll(async () => {
+  await sosie.close()
+  expect(canariesIn(JSON.stringify(seen))).toEqual([])
+})
 
 describe('postgres.js', () => {
   it('reads, and finds rows by fakes in its prepared statements', async () => {

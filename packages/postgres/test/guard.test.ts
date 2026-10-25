@@ -53,6 +53,7 @@ describe('the guard', () => {
     ['SET TRANSACTION READ WRITE', '25006'],
     ['SET session_authorization = postgres', '42501'],
     ['SET statement_timeout = 0', '42501'],
+    ['SET idle_in_transaction_session_timeout = 0', '42501'],
     ['SELECT * FROM pg_statistic', '42501'],
     ['SELECT * FROM pg_catalog.pg_stats_ext', '42501'],
     ['SELECT pg_read_file(\'/etc/passwd\')', '42501'],

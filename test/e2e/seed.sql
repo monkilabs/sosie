@@ -37,6 +37,9 @@ CREATE TABLE events (id int PRIMARY KEY, user_id int REFERENCES users (id), kind
 
 CREATE VIEW active_users AS SELECT id, email, full_name FROM users WHERE active;
 
+-- A view that computes a column named like one that may pass: it must not pass with it.
+CREATE VIEW user_labels AS SELECT u.id, c.name || ' / ' || u.full_name AS name FROM users u JOIN countries c ON c.code = u.country;
+
 CREATE SCHEMA billing;
 CREATE TABLE billing.invoices (id int PRIMARY KEY, order_id bigint REFERENCES orders (id), amount numeric(10, 2));
 

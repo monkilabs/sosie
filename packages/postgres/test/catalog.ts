@@ -1,4 +1,7 @@
+import { loadModule } from 'pgsql-parser'
 import { buildCatalog } from '../src/schema.js'
+
+await loadModule()
 
 /** A small catalog, as readCatalog would build it from pg_catalog rows. */
 export const catalog = buildCatalog({
@@ -33,10 +36,7 @@ export const catalog = buildCatalog({
     { conrelid: 104, contype: 'f', conkey: [2], confrelid: 101, confkey: [1] },
   ],
   enums: new Map([[900, ['sad', 'ok', 'happy']]]),
-  views: [
-    { view: 103, relation: 100, attnum: 1 },
-    { view: 103, relation: 100, attnum: 2 },
-  ],
+  views: [{ view: 103, definition: ' SELECT users.id, users.email FROM users WHERE users.id > 0;' }],
   functions: ['user_email'],
   operators: ['###'],
   types: ['mood', 'short_code'],

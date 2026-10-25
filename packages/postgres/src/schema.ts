@@ -1,5 +1,6 @@
 import type { Entity, Field, FieldType, Schema } from '@sosie/core'
 import type pg from 'pg'
+import { parseSync } from 'pgsql-parser'
 
 /** What the Postgres source knows about the upstream, beyond the neutral schema. */
 export interface Catalog {
@@ -55,10 +56,9 @@ export interface ConstraintRow {
   confkey: number[] | null
 }
 
-export interface ViewSourceRow {
+export interface ViewRow {
   view: number
-  relation: number
-  attnum: number
+  definition: string
 }
 
 const SYSTEM = `n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp%'`
@@ -95,11 +95,10 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
   const enums = await client.query<{ oid: number; labels: string[] }>(
     `SELECT enumtypid::int AS oid, array_agg(enumlabel::text ORDER BY enumsortorder) AS labels FROM pg_enum GROUP BY enumtypid`,
   )
-  const views = await client.query<ViewSourceRow>(`
-    SELECT DISTINCT r.ev_class::int AS view, d.refobjid::int AS relation, d.refobjsubid::int AS attnum
-    FROM pg_rewrite r
-    JOIN pg_depend d ON d.objid = r.oid AND d.classid = 'pg_rewrite'::regclass AND d.refclassid = 'pg_class'::regclass
-    WHERE d.refobjsubid > 0 AND r.ev_class <> d.refobjid`)
+  const views = await client.query<ViewRow>(`
+    SELECT c.oid::int AS view, pg_get_viewdef(c.oid) AS definition
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind IN ('v', 'm') AND ${SYSTEM}`)
   const functions = await client.query<{ proname: string }>(`
     SELECT DISTINCT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE ${SYSTEM}`)
   const operators = await client.query<{ oprname: string }>(`
@@ -135,7 +134,7 @@ export interface CatalogRows {
   columns: ColumnRow[]
   constraints: ConstraintRow[]
   enums: Map<number, string[]>
-  views: ViewSourceRow[]
+  views: ViewRow[]
   functions: string[]
   operators: string[]
   types: string[]
@@ -208,17 +207,21 @@ export function buildCatalog(rows: CatalogRows): Catalog {
     }
   }
 
-  // A view column shares the values of the one source column of the same name and kind: a computed column named like one does not.
-  const sources = new Map<number, Field[]>()
-  for (const v of rows.views) {
-    const field = fieldAt(v.relation, v.attnum)
-    if (field) sources.set(v.view, [...(sources.get(v.view) ?? []), field])
+  // A view column shares the values of the column it selects unchanged; a column it computes fakes on its own.
+  const relationOf = (schema: string | undefined, name: string) => {
+    const matches = rows.relations.filter((r) => r.relname === name && (schema ? r.nspname === schema : true))
+    return (schema ? matches : matches.filter((r) => r.nspname === 'public'))[0] ?? (matches.length === 1 ? matches[0] : undefined)
   }
-  for (const [view, used] of sources) {
-    for (const field of fieldsByOid.get(view)?.values() ?? []) {
-      const same = used.filter((f) => f.name === field.name && f.type.kind === field.type.kind)
-      if (same.length === 1 && !field.references) field.references = same[0]!.id
-    }
+  const columnOf = (relation: RelationRow, column: string) => {
+    const row = (columnsOf.get(relation.oid) ?? []).find((c) => c.attname === column)
+    return row ? fieldAt(relation.oid, row.attnum) : undefined
+  }
+  for (const { view, definition } of rows.views) {
+    const fields = [...(fieldsByOid.get(view)?.values() ?? [])]
+    viewSources(definition, relationOf, columnOf).forEach((source, i) => {
+      const field = fields[i]
+      if (field && source && source !== field && source.type.kind === field.type.kind) field.references = source.id
+    })
   }
 
   for (const [oid, fields] of fieldsByOid) for (const [attnum, field] of fields) catalog.columns.set(`${oid}:${attnum}`, field)
@@ -232,6 +235,49 @@ export function buildCatalog(rows: CatalogRows): Catalog {
     })
   }
   return catalog
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any -- the parse tree is Postgres's own, untyped here. */
+type Node = Record<string, any>
+
+/**
+ * For each column of a view, the field it selects unchanged, from the view's
+ * own definition: `SELECT u.email FROM users u` names users.email;
+ * `upper(u.email)`, a cast, or a column of a subquery or a UNION names none.
+ */
+function viewSources(
+  definition: string,
+  relationOf: (schema: string | undefined, name: string) => RelationRow | undefined,
+  columnOf: (relation: RelationRow, column: string) => Field | undefined,
+): (Field | undefined)[] {
+  let select: Node | undefined
+  try {
+    select = (parseSync(definition) as { stmts?: { stmt: Node }[] }).stmts?.[0]?.stmt.SelectStmt
+  } catch {
+    return []
+  }
+  if (!select || (select.op && select.op !== 'SETOP_NONE')) return []
+  const from: { alias?: string; relation?: RelationRow; name: string }[] = []
+  const collect = (item: Node) => {
+    if (item.RangeVar) {
+      const rv = item.RangeVar
+      from.push({ name: rv.relname, alias: rv.alias?.aliasname, relation: relationOf(rv.schemaname, rv.relname) })
+    } else if (item.JoinExpr) {
+      collect(item.JoinExpr.larg)
+      collect(item.JoinExpr.rarg)
+    } else from.push({ name: '' }) // A subquery or a function: its columns name no field.
+  }
+  for (const item of select.fromClause ?? []) collect(item)
+  return (select.targetList ?? []).map((target: Node) => {
+    const names: (string | undefined)[] = (target.ResTarget?.val?.ColumnRef?.fields ?? []).map((f: Node) => f.String?.sval)
+    if (!names.length || names.some((n) => n === undefined)) return undefined
+    const column = names.at(-1)!
+    const candidates = names.length === 1 ? from : from.filter((r) => (r.alias ?? r.name) === names.at(-2))
+    // One known relation must hold it, and nothing unknown may.
+    if (candidates.some((r) => !r.relation)) return undefined
+    const holding = candidates.flatMap((r) => columnOf(r.relation!, column) ?? [])
+    return holding.length === 1 ? holding[0] : undefined
+  })
 }
 
 const STRING = new Set(['text', 'varchar', 'bpchar', 'char', 'name', 'citext'])

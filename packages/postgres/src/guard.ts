@@ -170,6 +170,12 @@ const READERS = /^((query|table|cursor|schema|database)_to_xml|dblink|pg_logical
 const ADMIN =
   /^(pg_(create|drop|copy)_\w+|pg_replication_\w+|pg_switch_wal|pg_reload_conf|pg_rotate_logfile|pg_stat_reset\w*|pg_stat_statements_reset|pg_notify|pg_(try_)?advisory_\w+|pg_backup_(start|stop)|pg_(start|stop)_backup|pg_promote|pg_wal_replay_\w+|pg_log_\w+|pg_logical_\w+|pg_sync_replication_slots|pg_file_\w+|pg_(restore|clear|set)_\w+_stats|pg_import_system_collations|lo_\w+|lowrite)$/
 
+/** Timeouts that protect the database: a client may lower them, never lift them. */
+const TIMEOUTS = (limits: Limits): Record<string, number> => ({
+  statement_timeout: limits.statementTimeout,
+  idle_in_transaction_session_timeout: 300_000,
+})
+
 /** Settings a client may not change through Sosie: they keep the session read-only and its login what it is. */
 const PROTECTED = new Set(['default_transaction_read_only', 'transaction_read_only', 'session_authorization', 'role'])
 
@@ -300,13 +306,11 @@ class Analyzer {
       }
     } else if (name === 'transaction' || name === 'session characteristics') {
       this.#transaction({ options: body.args })
-    } else if (name === 'statement_timeout' && body.kind === 'VAR_SET_VALUE') {
+    } else if (name in TIMEOUTS(this.limits) && body.kind === 'VAR_SET_VALUE') {
+      const limit = TIMEOUTS(this.limits)[name]!
       const ms = milliseconds(body.args?.[0]?.A_Const)
-      if (ms === undefined || ms <= 0 || ms > this.limits.statementTimeout) {
-        this.#refuse({
-          code: '42501',
-          message: `Sosie allows statement_timeout up to ${this.limits.statementTimeout} ms, the limit it was started with.`,
-        })
+      if (ms === undefined || ms <= 0 || ms > limit) {
+        this.#refuse({ code: '42501', message: `Sosie allows ${name} up to ${limit} ms, the limit it was started with.` })
       }
     }
   }

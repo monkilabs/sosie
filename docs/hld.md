@@ -160,7 +160,7 @@ substituted, and transcripts kept afterwards.
   machine can; on another `--host`, anyone who reaches that address can query
   the fakes and filter on the real values.
 - **The schema and the server.** Table and column names, the definitions of
-  views and functions, the login's role name, the server's version and most of
+  views and functions, the names of the server's databases and roles, the server's version and most of
   its settings are visible: drivers and agents need them, and they are not
   values from your tables. A literal written into a view or function, such as
   a hard-coded address, is visible with it. Settings that say

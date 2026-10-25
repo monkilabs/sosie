@@ -51,9 +51,16 @@ async function visit(path: string, indexes: ScanIndex[], result: ScanResult): Pr
   }
 }
 
+/** JSON string escapes decoded, so a value after a \n in a transcript is a word of its own. */
+function unescape(text: string): string {
+  return text.replace(/\\(u[0-9a-fA-F]{4}|.)/g, (_, e: string) =>
+    e.length === 5 ? String.fromCharCode(parseInt(e.slice(1), 16)) : ({ n: '\n', t: '\t', r: '\r', b: ' ', f: ' ' } as Record<string, string>)[e] ?? e,
+  )
+}
+
 /** The domain of the first real value in a line of text. */
 export function findIn(text: string, indexes: ScanIndex[]): string | undefined {
-  const words = tokens(text)
+  const words = tokens(unescape(text))
   for (let i = 0; i < words.length; i++) {
     let run = ''
     for (let n = 0; n < MAX_WORDS && i + n < words.length; n++) {

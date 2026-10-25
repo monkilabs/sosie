@@ -10,7 +10,7 @@ describe('the upstream session', () => {
     const string = new URL(c.connectionString!)
     expect([...string.searchParams.keys()]).toEqual(['sslmode'])
     expect(c.options).toBe(
-      '-c search_path=billing -c default_transaction_read_only=on -c statement_timeout=30000 -c DateStyle=ISO,MDY -c IntervalStyle=postgres -c bytea_output=hex -c standard_conforming_strings=on -c client_encoding=UTF8',
+      '-c search_path=billing -c default_transaction_read_only=on -c statement_timeout=30000 -c idle_in_transaction_session_timeout=300000 -c DateStyle=ISO,MDY -c IntervalStyle=postgres -c bytea_output=hex -c standard_conforming_strings=on -c client_encoding=UTF8',
     )
   })
 })

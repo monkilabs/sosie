@@ -71,7 +71,7 @@ describe('sosie', () => {
 
   it('prints where it reads from and where clients connect, and no credentials', () => {
     const out = sosie.stdout()
-    expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 5 tables, 1 view/)
+    expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 5 tables, 2 views/)
     expect(out).toContain('✓ Every value is faked')
     expect(out).toMatch(/Your agent, app and psql:\s+postgres:\/\/localhost:\d+\/sosie_test_\w+/)
     expect(out).toContain('claude mcp add sosie -- npx @sosie/cli mcp')

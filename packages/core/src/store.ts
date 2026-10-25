@@ -97,6 +97,8 @@ export class Store {
       CREATE INDEX IF NOT EXISTS value_fake ON value (fake, domain);
       CREATE INDEX IF NOT EXISTS value_scan ON value (mac_ci) WHERE scannable = 1;
     `)
+    // Readable by the owner only, like the key; the folder already is.
+    for (const file of ['store.db', 'store.db-wal', 'store.db-shm']) if (existsSync(join(dir, file))) chmodSync(join(dir, file), 0o600)
     return new Store(dir, db, readFileSync(keyFile))
   }
 

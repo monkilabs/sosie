@@ -35,6 +35,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await truth.end()
   await sosie.close()
+  // Also here, so a run of a few tests (-t) still checks what they returned.
+  expect(canariesIn(JSON.stringify(seen))).toEqual([])
 })
 
 describe('reading through Sosie', () => {
@@ -127,8 +129,10 @@ describe('reading through Sosie', () => {
   })
 
   it('fakes keys a query builds from rows, and keys a json column holds data in', async () => {
-    await query('SELECT json_object_agg(city, id) AS by_city, json_object_agg(api_key, id) AS by_key FROM users WHERE api_key <> \'\'')
-    await query('SELECT profile FROM users WHERE id IN (1, 2, 3)')
+    const built = await query('SELECT json_object_agg(city, id) AS by_city, json_object_agg(api_key, id) AS by_key FROM users WHERE api_key <> \'\'')
+    const profiles = await query('SELECT profile FROM users WHERE profile IS NOT NULL')
+    expect(Object.keys(built[0].by_city).length).toBeGreaterThan(1)
+    expect(canariesIn(JSON.stringify([built, profiles]))).toEqual([])
   })
 
   it('fakes what user-defined operators return', async () => {
@@ -421,6 +425,11 @@ describe('a team that lets some values pass', () => {
     expect(statuses).toEqual(['new', 'paid', 'shipped', 'cancelled'])
     const users = (await c.query(`SELECT country FROM users WHERE country = 'CZ'`)).rows
     expect(users).toEqual([{ country: 'CZ' }])
+    // A view that computes a column named like a passing one passes nothing.
+    const labels = (await c.query('SELECT * FROM user_labels ORDER BY id')).rows
+    expect(labels.length).toBeGreaterThan(0)
+    expect(canariesIn(JSON.stringify(labels))).toEqual([])
+    seen.push(labels)
     // A passing field in the first arm of a UNION lets nothing pass from the others.
     const mixed = (await c.query('SELECT name::text FROM countries UNION ALL SELECT full_name FROM users')).rows
     expect(mixed.length).toBeGreaterThan(40)

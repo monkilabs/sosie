@@ -25,6 +25,15 @@ describe('sosie scan', () => {
       '{"role":"tool","content":"account 7739182046"}',
     ].join('\n'),
   )
+  // As transcripts hold them: values right after JSON escapes.
+  writeFileSync(
+    join(dir, 'escaped.jsonl'),
+    [
+      '{"content":"email\\nquill.vantablack@canary-mail.test\\n(1 row)"}',
+      '{"content":"name\\tQuillon Vantablack"}',
+      '{"content":"\\u0051uillon Vantablack"}',
+    ].join('\n'),
+  )
   writeFileSync(join(dir, 'clean.md'), 'Kim Novak (kim@example.net) owns account 1234567890.\n')
   writeFileSync(join(dir, 'image.bin'), Buffer.concat([Buffer.from([0, 1, 2]), Buffer.from('Quillon Vantablack')]))
   mkdirSync(join(dir, 'node_modules'))
@@ -33,6 +42,9 @@ describe('sosie scan', () => {
   it('finds real values whatever their case and punctuation, and says where, never what', async () => {
     const result = await scan([dir], [index])
     expect(result.findings).toEqual([
+      { file: join(dir, 'escaped.jsonl'), line: 1, domain: 'format:email' },
+      { file: join(dir, 'escaped.jsonl'), line: 2, domain: 'format:full_name' },
+      { file: join(dir, 'escaped.jsonl'), line: 3, domain: 'format:full_name' },
       { file: join(dir, 'leaky.jsonl'), line: 2, domain: 'format:full_name' },
       { file: join(dir, 'leaky.jsonl'), line: 4, domain: 'format:email' },
       { file: join(dir, 'leaky.jsonl'), line: 5, domain: 'users.account' },
@@ -40,7 +52,7 @@ describe('sosie scan', () => {
   })
 
   it('counts the text files it read, skipping binaries and node_modules', async () => {
-    expect((await scan([dir], [index])).files).toBe(2)
+    expect((await scan([dir], [index])).files).toBe(3)
   })
 
   it('finds nothing in fakes', async () => {

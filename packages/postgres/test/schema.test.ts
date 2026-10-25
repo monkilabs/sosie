@@ -29,27 +29,46 @@ describe('reading the catalog', () => {
     expect(field('active_users.email')!.references).toBe('users.email')
   })
 
-  it('shares a view column with its source only when their types agree', () => {
-    const odd = buildCatalog({
-      relations: [
-        { oid: 1, nspname: 'public', relname: 'users', relkind: 'r', parent: null },
-        { oid: 2, nspname: 'public', relname: 'odd', relkind: 'v', parent: null },
-      ],
-      columns: [
-        { attrelid: 1, attnum: 1, attname: 'status', atttypmod: -1, typname: 'text', typtype: 'b', typcategory: 'S', element: null, element_type: null, basetype: null, enumtypid: null },
-        { attrelid: 2, attnum: 1, attname: 'status', atttypmod: -1, typname: 'int4', typtype: 'b', typcategory: 'N', element: null, element_type: null, basetype: null, enumtypid: null },
-      ],
-      constraints: [],
-      enums: new Map(),
-      views: [{ view: 2, relation: 1, attnum: 1 }],
-      functions: [],
-      operators: [],
-      types: [],
-      setReturning: [],
-      writable: 0,
-      admin: false,
+  it('links a view column to the column it selects unchanged, and nothing it computes', () => {
+    const col = (attrelid: number, attnum: number, attname: string, typname: string) => ({
+      attrelid, attnum, attname, atttypmod: -1, typname, typtype: 'b', typcategory: 'S',
+      element: null, element_type: null, basetype: null, enumtypid: null,
     })
-    expect(odd.columns.get('2:1')!.references).toBeUndefined()
+    const views: [string, string[]][] = [
+      [' SELECT u.id, upper(u.email) AS email FROM users u;', ['users.id', undefined as never]],
+      [" SELECT u.id, (c.name || ' / '::text) || u.email AS email FROM users u JOIN countries c ON c.code = u.id;", ['users.id', undefined as never]],
+      [' SELECT users.id::text AS id, users.email FROM users;', [undefined as never, 'users.email']],
+      [' SELECT o.id, u.email FROM orders o JOIN users u ON u.id = o.id;', ['orders.id', 'users.email']],
+      [' SELECT s.id, email FROM (SELECT users.id, users.email FROM users) s;', [undefined as never, undefined as never]],
+      [' SELECT users.id, users.email FROM users UNION SELECT orders.id, orders.email FROM orders;', [undefined as never, undefined as never]],
+    ]
+    views.forEach(([definition, expected], i) => {
+      const view = 10 + i
+      const built = buildCatalog({
+        relations: [
+          { oid: 1, nspname: 'public', relname: 'users', relkind: 'r', parent: null },
+          { oid: 2, nspname: 'public', relname: 'orders', relkind: 'r', parent: null },
+          { oid: 3, nspname: 'public', relname: 'countries', relkind: 'r', parent: null },
+          { oid: view, nspname: 'public', relname: 'v', relkind: 'v', parent: null },
+        ],
+        columns: [
+          col(1, 1, 'id', 'int4'), col(1, 2, 'email', 'text'),
+          col(2, 1, 'id', 'int4'), col(2, 2, 'email', 'text'),
+          col(3, 1, 'code', 'int4'), col(3, 2, 'name', 'text'),
+          col(view, 1, 'id', i === 2 ? 'text' : 'int4'), col(view, 2, 'email', 'text'),
+        ],
+        constraints: [],
+        enums: new Map(),
+        views: [{ view, definition }],
+        functions: [],
+        operators: [],
+        types: [],
+        setReturning: [],
+        writable: 0,
+        admin: false,
+      })
+      expect([built.columns.get(`${view}:1`)!.references, built.columns.get(`${view}:2`)!.references], definition).toEqual(expected)
+    })
   })
 
   it('types computed values by their OID', () => {

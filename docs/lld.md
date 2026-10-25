@@ -273,7 +273,7 @@ Values a query computes fake in `computed:<type>`.
 | `decimal` | Digits replaced: the same sign, digits and scale. `NaN` and `Infinity` stay; other text is shaped |
 | `uuid` | A random UUID |
 | `boolean` | Flipped or not, decided once per domain by its key |
-| `enum` | Another label of the same enum, by a fixed shuffle per domain |
+| `enum` | A label of the same enum, by a fixed shuffle per domain; the shuffle may leave a label in place |
 | `date`, `datetime`, `time` | Shifted by up to a year, the same shift for the same value, in the same format |
 | Any type, a value with no letter or digit (`''`, `-`, `NaN`, `infinity`) | Itself: there is nothing in it to fake |
 | `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked |
@@ -306,7 +306,7 @@ CREATE INDEX value_scan ON value (mac_ci) WHERE scannable = 1;
 ```
 
 - **Keys.** `~/.sosie/<id>/key` holds 32 random bytes, created on first start
-  with mode 0600 in a folder of mode 0700. The HMAC, sealing and seeding keys
+  with mode 0600 in a folder of mode 0700; the database files are 0600 too. The HMAC, sealing and seeding keys
   are derived from it with HKDF.
 - **Allocation.** The fake is drawn from a seed taken from the value's keyed
   hash. A fake is never the value itself, unless the value has no letter or
@@ -324,7 +324,8 @@ CREATE INDEX value_scan ON value (mac_ci) WHERE scannable = 1;
 ## Core: `sosie scan`
 
 Reads every text file under the paths given, skipping `.git`, `node_modules`
-and binary files. Splits each line into words, lower-cased and without the
+and binary files. Decodes JSON string escapes, since transcripts are JSON lines
+(`email\nkim@…`). Splits each line into words, lower-cased and without the
 punctuation around them, and compares every run of one to four words, by
 keyed hash, with the store's real values. Only distinctive values are looked
 for: one to four words of at least four characters, and numbers of six digits
@@ -369,8 +370,10 @@ One `pg` connection per client, opened at its start-up. pg's Client connects
 it; Sosie then takes over the connection's messages and relays each frontend
 message with a Flush, so its own errors fall in the right place among
 upstream's replies. The session is read-only from its start-up options:
-`default_transaction_read_only=on`, `statement_timeout=30s`, ISO dates, hex
-bytea. Two more settings are pinned because they change how Postgres reads a
+`default_transaction_read_only=on`, `statement_timeout=30s`,
+`idle_in_transaction_session_timeout=5min` (a transaction an agent leaves open
+would hold locks on the database), ISO dates, hex bytea. A client may lower
+either timeout, never lift it. Two more settings are pinned because they change how Postgres reads a
 statement's text, which Sosie's parser must read the same way:
 `standard_conforming_strings=on` (off, `'a\''` ends elsewhere) and
 `client_encoding=UTF8`. Settings in the connection string's own `options`, and
@@ -390,8 +393,11 @@ labels, single-column primary and unique keys, and foreign keys (each column
 of a composite one), read once from `pg_catalog` and mapped to the neutral
 schema; and the names of user-defined functions, operators and types. Field ids are `table.column`, or `schema.table.column` outside
 `public`. A partition's columns are its parent's fields. A view column shares
-the values of the one column of the same name and kind among those the view
-reads.
+the values of the column it selects unchanged, read from the view's own
+definition (`pg_get_viewdef`) with Postgres's parser: `SELECT u.email FROM
+users u` shares `users.email`; a column the view computes (`upper(email)`, a
+cast, `name || full_name`), or takes from a subquery or a `UNION`, fakes in its
+own domain and passes only if `sosie.yml` lists it.
 
 | Postgres | Neutral |
 | --- | --- |
@@ -530,6 +536,9 @@ upstream as the client wrote it.
   fakes may show flipped ones; `active = true` is turned back.
 - A value Sosie never showed is used as written, so it filters on the real
   value it happens to be.
+- Values passed to a prepared statement in SQL (`EXECUTE p('…')`) are used as
+  written; fakes in Bind parameters and in the statement itself are turned
+  back.
 - Composite values (`SELECT u FROM users u`) and types Sosie does not know come
   back as `NULL`.
 - Rows fetched from a cursor carry no source column, so they are faked by type,

@@ -24,6 +24,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await prisma?.$disconnect()
   await sosie?.close()
+  expect(canariesIn(JSON.stringify(seen))).toEqual([])
 })
 
 describe('Prisma, through its node-postgres adapter', () => {
