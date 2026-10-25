@@ -88,7 +88,7 @@ flowchart LR
 | Postgres | Endpoint | Speaks the Postgres wire protocol on 127.0.0.1, simple and extended query |
 | Postgres | Guard | Allows reads; refuses everything else and the catalogs that store real values |
 | Postgres | Rewriter | Asks the core for the real value behind each fake in a query |
-| Postgres | Upstream client | One read-only session, with a timeout and a row cap |
+| Postgres | Upstream client | One read-only session per client, with a timeout and a row cap |
 | Postgres | Results | Names the field of each result column, from the table and position Postgres reports |
 
 ## How Sosie grows
@@ -177,10 +177,14 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
 ## Risks
 
 - **Driver coverage.** The extended query protocol and binary formats vary
-  between drivers. v0.1 is tested with `psql` and `node-postgres`; Prisma and
-  Drizzle before release.
+  between drivers. v0.1 is tested with `psql`, `node-postgres`, `postgres.js`,
+  Drizzle and Prisma 7. Drivers that ask for binary results (asyncpg, pgx,
+  JDBC after its prepare threshold) get a clear error until binary formats
+  come.
 - **Computed values.** A value a query computes (`length(email)`) has no
   column, so it is faked by type, which can surprise. `count(...)` passes.
+- **Real order.** Sorting and ranges run upstream, on the real values, so
+  fakes come back in an order of their own.
 - **The store holds sealed real values** on the machine Sosie runs on. It is
   readable by that machine's user; the threat model says where to run Sosie when
   that matters.

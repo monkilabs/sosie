@@ -13,10 +13,11 @@ credentials and hostnames stay on your side.
 
 ## Status
 
-Design. Nothing is published yet. Read the [MVP](docs/mvp.md), the
-[high-level design](docs/hld.md) and the [low-level design](docs/lld.md).
+v0.1 works end to end with PostgreSQL 15 to 18, on Node 26 and 24. It is not
+published yet. The [MVP](docs/mvp.md), the [high-level design](docs/hld.md)
+and the [low-level design](docs/lld.md) say what it does and how.
 
-## How it will work
+## How it works
 
 In your own terminal, not the agent's:
 
@@ -26,25 +27,74 @@ npx @sosie/cli
 ```
 
 ```
-  ✓ db.internal/app, read-only: 42 tables
+  ✓ db.internal:5432/app, read-only: 42 tables, 3 views
   ✓ Every value is faked; 3 fields pass (sosie.yml)
 
   Your agent, app and psql:  postgres://localhost:7674/app
   Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp
 ```
 
-Then check that nothing real reached a transcript:
+Without `SOSIE_UPSTREAM`, Sosie asks for the connection string at a hidden
+prompt. It is never an argument: arguments show in shell history and the
+process list, where an agent can read them.
+
+Then point the agent, the app and its tests at the address Sosie printed:
+
+```
+$ psql postgres://localhost:7674/app -c 'SELECT u.full_name, o.status, o.total FROM orders o JOIN users u ON u.id = o.user_id'
+    full_name     |  status   |  total
+------------------+-----------+---------
+ Janick Dach      | cancelled |  749.20
+ Janick Dach      | paid      |    3.38
+ Cristian Kuhlman | shipped   | 8274.94
+```
+
+Every value is a fake of the real one, of the same type and format. The same
+real value is always the same fake, so joins hold, and a value the agent saw
+finds its row again: `WHERE email = 'van29@example.com'` reads the real row
+behind that fake. Writes are refused.
+
+When it matters, check that nothing real reached a transcript:
 
 ```sh
 npx @sosie/cli scan ~/.claude/projects
 ```
 
-That is the whole tool: three commands, no config to start, and an optional
-`sosie.yml` for the fields you decide may pass unchanged. Installed once with
-`npm i -g @sosie/cli`, the command is just `sosie`.
+```
+  ✓ No real values found in 412 files.
+```
 
+That is the whole tool: three commands, no config to start, and an optional
+`sosie.yml` for the fields you decide may pass unchanged:
+
+```yaml
+pass:
+  - orders.status
+  - countries.*
+format:
+  users.handle: username
+```
+
+Installed once with `npm i -g @sosie/cli`, the command is just `sosie`.
+Options: `--port` (7674), `--host` (127.0.0.1), `--rules` (`./sosie.yml`) and
+`--max-rows` (1000).
+
+Tested with `psql`, `node-postgres`, `postgres.js`, Drizzle and Prisma.
 Postgres is the first source. More databases and your own REST and GraphQL
 APIs come next, each a package behind the same interface.
+
+## Good to know
+
+- **Order and ranges follow the real values.** `ORDER BY id` sorts by the
+  real ids, so the fakes come back out of order; `WHERE total > 100`
+  compares real totals.
+- **Values a query computes are faked by type.** `length(email)` or
+  `max(id)` are not the length or maximum of the fakes. `count(…)` passes
+  unchanged.
+- **Partial matches do not find fakes.** `LIKE '%van%'` filters the real
+  values, so a piece of a fake finds nothing.
+- **Results are text.** Drivers that ask for binary results get an error that
+  says so.
 
 ## What Sosie is not
 
@@ -54,6 +104,18 @@ APIs come next, each a package behind the same interface.
 - **Not a wall against an agent hunting for secrets** on the machine Sosie runs
   on. For that, run Sosie on another host and give the agent only its address.
   See the [threat model](docs/hld.md#threat-model).
+
+## Develop
+
+```sh
+npm install
+npm run check   # typecheck, build, and every test
+```
+
+The end-to-end tests start an embedded PostgreSQL 18. To run them against
+another server, set `SOSIE_TEST_DATABASE_URL` to a superuser connection
+string; the tests create their own database and role, and drop them after.
+The `psql` tests run when `psql` is on the PATH, or at `PSQL`.
 
 ## License
 
