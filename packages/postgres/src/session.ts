@@ -127,10 +127,16 @@ export class Session {
   }
 
   async #handle(message: FrontendMessage): Promise<void> {
-    if (message.type === 'query') return this.#simple(message.text)
     if (message.type === 'sync') return this.#sync()
-    if (message.type === 'flush') return
-    if (this.#skipping) return
+    // After an error, Postgres discards everything up to the next Sync, a simple Query too.
+    if (this.#skipping || message.type === 'flush') return
+    if (message.type === 'query') return this.#simple(message.text)
+    if (message.type === 'unsupported' && message.code === 'F') {
+      // A function call is answered like a query: an error, then ReadyForQuery.
+      this.#write(backend.error({ severity: 'ERROR', code: '0A000', message: 'Sosie does not support function calls: only queries.' }))
+      this.#refused = true
+      return this.#sync()
+    }
     try {
       switch (message.type) {
         case 'parse':

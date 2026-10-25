@@ -9,6 +9,7 @@ import { fakeScalar, type ScalarKind } from './types.js'
 
 const SCANNABLE = new Set<FieldType['kind']>(['string', 'integer', 'decimal', 'uuid', 'ip'])
 const TRUE = /^(t|true|y|yes|on|1)$/i
+const BOOLEAN = /^(t|f|true|false|y|n|yes|no|on|off|1|0)$/i
 /** A key of a json column that looks like structure: a lowercase or camelCase word, perhaps ending in a number. */
 const KEY_WORD = /^[a-z_]+(?:[A-Z][a-z]*)*\d{0,2}$/
 /** A word with a digit in it, as Postgres prints some values unquoted: 'date field value out of range: 1988-14-29'. */
@@ -49,6 +50,8 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
   /** Booleans flip or not, once per domain, by the key. */
   const flips = (domain: string) => (store.seed(domain, '\0boolean')[0]! & 1) === 1
   const flip = (real: string, domain: string) => {
+    // Text that is not a boolean, if it ever arrives here, is shaped, never passed.
+    if (!BOOLEAN.test(real)) return shape(real, new Random(store.seed(domain, real)))
     if (!flips(domain)) return real
     const truthy = TRUE.test(real)
     const [yes, no] = real.length === 1 ? ['t', 'f'] : real === real.toUpperCase() ? ['TRUE', 'FALSE'] : ['true', 'false']

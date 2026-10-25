@@ -17,6 +17,8 @@ export interface Catalog {
   types: Set<string>
   /** Names of every function that returns rows, in any schema: a count of their rows may be a value. */
   setReturning: Set<string>
+  /** Names of the system catalogs and information_schema views. */
+  system: Set<string>
   /** Tables and views, for the terminal. */
   tables: number
   views: number
@@ -104,6 +106,9 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
   const operators = await client.query<{ oprname: string }>(`
     SELECT DISTINCT o.oprname FROM pg_operator o JOIN pg_namespace n ON n.oid = o.oprnamespace WHERE ${SYSTEM}`)
   const setReturning = await client.query<{ proname: string }>(`SELECT DISTINCT proname FROM pg_proc WHERE proretset`)
+  const system = await client.query<{ relname: string }>(`
+    SELECT DISTINCT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname IN ('pg_catalog', 'information_schema')`)
   const types = await client.query<{ typname: string }>(`
     SELECT DISTINCT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE ${SYSTEM}`)
   const role = await client.query<{ admin: boolean }>(
@@ -124,6 +129,7 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     operators: operators.rows.map((o) => o.oprname),
     types: types.rows.map((t) => t.typname),
     setReturning: setReturning.rows.map((f) => f.proname),
+    system: system.rows.map((r) => r.relname),
     writable: writable.rows[0]?.count ?? 0,
     admin: role.rows[0]?.admin ?? false,
   })
@@ -139,6 +145,7 @@ export interface CatalogRows {
   operators: string[]
   types: string[]
   setReturning: string[]
+  system: string[]
   writable: number
   admin: boolean
 }
@@ -159,6 +166,7 @@ export function buildCatalog(rows: CatalogRows): Catalog {
     operators: new Set(rows.operators),
     types: new Set(rows.types),
     setReturning: new Set(rows.setReturning),
+    system: new Set(rows.system),
     tables: 0,
     views: 0,
     writable: rows.writable,

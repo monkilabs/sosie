@@ -44,7 +44,7 @@ export interface ParamRef {
 }
 
 /** An item of the select list: count(…), a *, a column cast to another type (its field), or anything else. */
-export type Target = 'count' | 'star' | 'other' | Field
+export type Target = 'count' | 'star' | 'constant' | 'other' | Field
 
 export interface Analysis {
   refusal?: Refusal
@@ -116,6 +116,11 @@ const LOCATION = new Set([
   'external_pid_file',
   'unix_socket_directories',
   'cluster_name',
+  'archive_command',
+  'archive_library',
+  'archive_cleanup_command',
+  'restore_command',
+  'recovery_end_command',
   'primary_conninfo',
   'primary_slot_name',
   'krb_server_keyfile',
@@ -134,6 +139,10 @@ const ROWS_FROM_VALUES =
 const REFUSED_FUNCTIONS: Record<string, string> = {
   inet_server_addr: WHERE,
   inet_server_port: WHERE,
+  inet_client_addr: WHERE,
+  inet_client_port: WHERE,
+  pg_config: WHERE,
+  pg_tablespace_location: WHERE,
   pg_read_file: READS,
   pg_read_binary_file: READS,
   pg_ls_dir: READS,
@@ -479,9 +488,16 @@ class Analyzer {
     }
     if (!schema) for (let s = scope; s; s = s.parent) if (s.ctes.has(name)) return { name, catalog: false, ...(alias && { alias }) }
     const known = this.catalog.relations.get(`${schema ?? 'public'}.${name}`) ?? (schema ? undefined : this.#unique(name))
-    const catalog = !known && (schema === 'pg_catalog' || schema === 'information_schema' || (!schema && name.startsWith('pg_')))
+    // Unqualified, a name is a catalog only if Postgres has a catalog of that name and no user table shares it.
+    const catalog =
+      !known &&
+      (schema === 'pg_catalog' ||
+        schema === 'information_schema' ||
+        (!schema && this.catalog.system.has(name) && ![...this.catalog.relations.keys()].some((k) => k.endsWith(`.${name}`))))
     if (!catalog) this.#data = true
-    return { name, catalog, ...(alias && { alias }), ...(schema && { schema }), ...(known && { fields: known.byName }) }
+    // An alias that renames columns (users AS u(a, b)) makes names mean other columns: Sosie does not place them.
+    const fields = known && !rv.alias?.colnames ? known.byName : undefined
+    return { name, catalog, ...(alias && { alias }), ...(schema && { schema }), ...(fields && { fields }) }
   }
 
   #unique(name: string) {
@@ -548,10 +564,21 @@ class Analyzer {
     if (name?.at(-1) === 'count' && (name.length === 1 || name[0] === 'pg_catalog') && !this.catalog.functions.has('count')) {
       return 'count'
     }
-    // users.role::text: Postgres reports a computed column; its values are still the field's.
-    const fields = value?.TypeCast ? column(value) : undefined
-    const near = fields ? this.#resolve(fields, scope) : undefined
-    return near && near !== 'catalog' ? near : 'other'
+    // A constant the client wrote holds nothing from a row.
+    if (uncast(value)?.A_Const) return 'constant'
+    // "public"."users"."role"::text, as Prisma selects enums: Postgres reports a computed column, but its values
+    // are the field's. Only a column named in full, of a table named in full with no alias: anything shorter
+    // could mean another column (search_path, an alias's column list), and the field's rules would apply to it.
+    const names = value?.TypeCast ? column(value)?.map((f: Node) => f.String?.sval as string | undefined) : undefined
+    if (names?.length === 3 && names.every(Boolean)) {
+      const [schema, table, name] = names as [string, string, string]
+      for (let s: Scope | undefined = scope; s; s = s.parent) {
+        const relation = s.relations.find((r) => r.schema === schema && r.name === table && !r.alias)
+        const field = relation?.fields?.get(name)
+        if (field) return field
+      }
+    }
+    return 'other'
   }
 
   #record(node: Node, near: Near, array: boolean): void {

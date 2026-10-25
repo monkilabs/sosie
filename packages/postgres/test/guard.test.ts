@@ -91,6 +91,9 @@ describe('the guard', () => {
     ['SELECT * FROM pg_show_all_file_settings()', '42501'],
     ['SELECT setconfig FROM pg_db_role_setting', '42501'],
     ['SELECT * FROM information_schema._pg_user_mappings', '42501'],
+    ['SELECT * FROM pg_config()', '42501'],
+    ['SHOW archive_command', '42501'],
+    ['SELECT inet_client_addr()', '42501'],
     ['WITH gone AS (DELETE FROM users RETURNING id) SELECT 1 UNION SELECT 2', '25006'],
     ['PREPARE TRANSACTION \'x\'', '0A000'],
     ['EXPLAIN ANALYZE SELECT 1', '0A000'],
@@ -134,13 +137,24 @@ describe('the guard', () => {
     expect(check("SELECT count(*) FROM (SELECT ts_parse('default', email) FROM users) s").targets).toEqual(['other'])
   })
 
-  it('names the field of a column that is only cast, as ORMs do with enums', () => {
+  it('names the field of a column that is only cast, when it is named in full, as ORMs do with enums', () => {
     const status = catalog.columns.get('100:3')
-    expect(check('SELECT "public"."users"."status"::text, id::text AS i, upper(email) FROM public.users').targets).toEqual([
+    expect(check('SELECT "public"."users"."status"::text, id::text AS i, upper(email), 1, \'x\'::text FROM public.users').targets).toEqual([
       status,
-      catalog.columns.get('100:1'),
       'other',
+      'other',
+      'constant',
+      'constant',
     ])
+    // A table with an alias, or one search_path finds, may not be the one Sosie would place.
+    expect(check('SELECT "public"."users"."status"::text FROM public.users u').targets).toEqual(['other'])
+    expect(check('SELECT status::text FROM users AS u(a, b, status)').targets).toEqual(['other'])
+  })
+
+  it('reads an alias that renames columns as unknown, and a pg_ name as a catalog only if it is one', () => {
+    expect(near("SELECT * FROM users AS u(a, email) WHERE email = 'x@example.com'")).toEqual([['x@example.com', undefined]])
+    expect(check('SELECT upper(secret) FROM pg_people').catalogOnly).toBe(false)
+    expect(check('SELECT relname FROM pg_class').catalogOnly).toBe(true)
   })
 })
 

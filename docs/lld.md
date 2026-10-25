@@ -361,8 +361,11 @@ answered no), any user and database name, no password; protocol 3.0 (a client
 asking for 3.2 is told 3.0); the simple query protocol; the extended protocol
 (Parse, Bind, Describe, Execute, Close, Sync, Flush) with results in text
 format; cancel requests, forwarded upstream. Refused with a clear error:
-binary result formats, COPY, function calls. A message that does not parse
-closes its own connection, never the process.
+binary result formats, COPY, function calls (answered with an error and
+ReadyForQuery, as Postgres answers them). After an error, every message up to
+the next Sync is discarded, a simple Query too, as Postgres does. A message
+that does not parse closes its own connection, never the process; a malformed
+array literal is an error, never a loop.
 
 ### Upstream
 
@@ -440,8 +443,9 @@ settings may hold secrets), and in `information_schema`
 `foreign_server_options`, `user_mapping_options` and the `_pg_` views behind
 them; and the functions behind the refused views. `SHOW` and
 `current_setting()` refuse the settings that say where the database is
-(`listen_addresses`, `port`, `data_directory`, `primary_conninfo` and the
-like, and `SHOW ALL`); `pg_settings` and `pg_show_all_settings()`, which list
+(`listen_addresses`, `port`, `data_directory`, `primary_conninfo`,
+`archive_command` and the like, and `SHOW ALL`), as do `inet_client_addr()`,
+`pg_config()` and `pg_tablespace_location()`; `pg_settings` and `pg_show_all_settings()`, which list
 them all, are refused. `RESET` of the settings that keep the session
 read-only is refused like `SET`. Refused functions: those that reveal where the
 database is (`inet_server_addr`), read files or raw pages, run SQL given as
@@ -455,6 +459,10 @@ could run them: functions that change the server (replication slots,
 objects, `pg_notify`) or hold locks other sessions wait on (advisory locks).
 The session is read-only too, so a statement the guard misses still cannot
 write.
+
+A relation named without a schema is a catalog only if Postgres has a catalog
+of that name and no user table shares it; an alias that renames columns
+(`users AS u(a, b)`) makes Sosie place none of its columns.
 
 **Catalog-only reads** touch no user table and run no user-defined code (a
 function, operator or type, which could read one), and read no setting that
@@ -484,7 +492,8 @@ views.
 | The result column | Goes to |
 | --- | --- |
 | A table column | `Faker.value` with its field |
-| A column only cast to another type (`role::text`, as Prisma selects enums) | `Faker.value` with its field |
+| A column only cast to another type, named in full from a table named in full (`"public"."users"."role"::text`, as Prisma selects enums) | `Faker.value` with its field. A shorter name could mean another column (`search_path`, an alias's column list), so it is computed |
+| A constant the client wrote (`SELECT 1 FROM users`) | Unchanged |
 | A column of a system catalog | Unchanged |
 | A column of a table Sosie knows, in a statement the guard took for catalog-only | `Faker.value` with its field: Postgres's word wins |
 | A column of a table Sosie does not know | `Faker.computed` with its type |

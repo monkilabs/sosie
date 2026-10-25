@@ -41,6 +41,7 @@ export const catalog = buildCatalog({
   operators: ['###'],
   types: ['mood', 'short_code'],
   setReturning: ['generate_series', 'unnest', 'ts_parse'],
+  system: ['pg_class', 'pg_namespace', 'pg_attribute', 'pg_type', 'columns', 'tables'],
   writable: 0,
   admin: false,
 })

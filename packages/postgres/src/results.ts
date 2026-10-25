@@ -26,8 +26,9 @@ export function planColumns(columns: ColumnDescription[], analysis: Analysis, ca
     if (column.tableID) return column.tableID < FIRST_NORMAL_OID ? { pass: true } : { type: typeByOid(column.dataTypeID, catalog.enums) }
     if (analysis.catalogOnly) return { pass: true }
     const target = targets?.[i]
-    // count(…) holds no value from a row: a bigint, from Postgres's own count.
+    // count(…) holds no value from a row: a bigint, from Postgres's own count. Nor does a constant the client wrote.
     if (target === 'count' && column.dataTypeID === INT8) return { pass: true }
+    if (target === 'constant') return { pass: true }
     if (typeof target === 'object') return { field: target }
     return { type: typeByOid(column.dataTypeID, catalog.enums) }
   })

@@ -38,6 +38,10 @@ describe('result columns', () => {
     expect(planColumns([column(0, 0, 25)], analysis({ targets: ['count'] }), catalog)).toEqual([{ type: { kind: 'string' } }])
   })
 
+  it('passes constants the client wrote', () => {
+    expect(planColumns([column(0, 0, 23)], analysis({ targets: ['constant'] }), catalog)).toEqual([{ pass: true }])
+  })
+
   it('fakes a cast column as its field', () => {
     const status = catalog.columns.get('100:3')!
     expect(planColumns([column(0, 0, 25)], analysis({ targets: [status] }), catalog)).toEqual([{ field: status }])

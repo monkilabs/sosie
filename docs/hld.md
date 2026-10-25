@@ -154,6 +154,10 @@ substituted, and transcripts kept afterwards.
   only Sosie's address.
 - **Inference through filters.** A query filters on real data, so a careful
   sequence of queries can answer yes-or-no questions about it.
+- **Decoding by comparison.** A value a query computes is faked consistently,
+  so an agent set on it can compute fakes of values it chose (`chr(65)`) beside
+  fakes of real ones (`substr(email, 1, 1)`) and match them. Like filters, this
+  takes a deliberate sequence of queries, not normal work.
 - **Shape.** Row counts, which values are null, and the rough size of values are
   visible.
 - **Who can reach the endpoint.** It has no password. On 127.0.0.1, only this

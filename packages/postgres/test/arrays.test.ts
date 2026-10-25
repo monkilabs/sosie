@@ -13,6 +13,10 @@ describe('array text', () => {
     expect(serializeArray(parseArray(text).items)).toBe(text)
   })
 
+  it.each(['{1', 'abc', '{"ab', '{a,', '{"a\\', '{a}b', ''])('throws, never loops, on %j', (text) => {
+    expect(() => parseArray(text)).toThrow()
+  })
+
   it('keeps bounds', () => {
     expect(parseArray('[0:1]={x,y}')).toEqual({ bounds: '[0:1]=', items: ['x', 'y'] })
     expect(serializeArray(['x', 'y'], '[0:1]=')).toBe('[0:1]={x,y}')

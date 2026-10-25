@@ -108,6 +108,12 @@ describe('fakes by type', async () => {
     for (const u of users) expect(['t', 'f']).toContain(u.active)
   })
 
+  it('booleans: text that is not a boolean is shaped, never passed', async () => {
+    const { faker } = await serve()
+    const active = data.schema.entities[0]!.fields.find((f) => f.name === 'active')!
+    expect(faker.value('quill.vantablack@canary-mail.test', active)).not.toBe('quill.vantablack@canary-mail.test')
+  })
+
   it('enums: another label of the same enum, one for one', () => {
     const map = new Map(pairs('role'))
     expect(new Set(map.values()).size).toBe(map.size)

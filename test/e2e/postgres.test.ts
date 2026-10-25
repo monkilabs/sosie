@@ -1,4 +1,5 @@
 import { connect } from 'node:net'
+import { raw, typed } from './wire.js'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { canariesIn } from './canaries.js'
@@ -68,7 +69,7 @@ describe('reading through Sosie', () => {
   })
 
   it('returns values with nothing to fake as they are, and goes on', async () => {
-    const rows = await query(`SELECT city, api_key, score, born_on::text AS born, profile, coalesce(NULL, '') AS blank FROM users WHERE api_key = ''`)
+    const rows = await query(`SELECT city, api_key, score, "public"."users"."born_on"::text AS born, profile, coalesce(NULL, '') AS blank FROM public.users WHERE api_key = ''`)
     // city is a format by its name, so even '-' becomes a city; the rest hold nothing to fake.
     expect(rows).toEqual([
       { city: expect.any(String), api_key: '', score: 'NaN', born: 'infinity', profile: { note: '', tags: ['...'] }, blank: '' },
@@ -329,6 +330,39 @@ describe('the guard', () => {
       await admin.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`)
       await admin.end()
     }
+  })
+
+  it('answers a malformed array literal with an error, and goes on', async () => {
+    expect((await failure("SELECT id FROM users WHERE id = ANY('{1')")).code).toBe('22P02')
+    expect((await failure('SELECT id FROM users WHERE id = ANY($1)', ['{1'])).code).toBe('22P02')
+    expect((await query('SELECT 1 AS ok'))[0].ok).toBe(1)
+  })
+
+  it('does not apply a field’s rules to a column an alias or search_path renames', async () => {
+    await query('SELECT active::text FROM users AS u(a, active, c, d, e, f, g, h)')
+    const admin = await real()
+    const reader = new URL(inject('upstream')).username
+    await admin.query(`CREATE SCHEMA s1; CREATE TABLE s1.users (id int, active text);
+      INSERT INTO s1.users VALUES (1, 'Quillon Vantablack'); GRANT USAGE ON SCHEMA s1 TO ${reader}; GRANT SELECT ON s1.users TO ${reader}`)
+    try {
+      const c = await sosie.client()
+      await c.query('SET search_path = s1, public')
+      seen.push((await c.query('SELECT active::varchar FROM users')).rows)
+    } finally {
+      await admin.query('DROP SCHEMA s1 CASCADE')
+      await admin.end()
+    }
+  })
+
+  it('answers a function call with an error and ReadyForQuery; discards a query sent before Sync after an error', async () => {
+    const port = Number(new URL(sosie.address).port)
+    const replies = await raw(port, [
+      typed('F', Buffer.from([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])),
+      typed('P', Buffer.from('\0SELEC\0\0\0')),
+      typed('Q', Buffer.from('SELECT 1\0')),
+      typed('S', Buffer.alloc(0)),
+    ])
+    expect(replies).toEqual(['E', 'Z', 'E', 'Z'])
   })
 
   it('closes a connection that sends a malformed message, and serves the others', async () => {
