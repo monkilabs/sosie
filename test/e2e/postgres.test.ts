@@ -136,6 +136,13 @@ describe('reading through Sosie', () => {
     expect(e).not.toBe('quill.vantablack@canary-mail.test')
   })
 
+  it('does not count rows any set-returning function made from a value', async () => {
+    const [{ count }] = await query(
+      "SELECT count(*) FROM (SELECT ts_parse('default', repeat('a ', score::int)) FROM users WHERE external_id = 'd3adb33f-0000-4000-8000-c0ffee000001') s",
+    )
+    expect(count).not.toBe('2470')
+  })
+
   it('does not count rows a value made', async () => {
     const [{ count }] = await query(
       "SELECT count(*) FROM generate_series(1, (SELECT (score * 100)::int FROM users WHERE external_id = 'd3adb33f-0000-4000-8000-c0ffee000001'))",
@@ -202,6 +209,10 @@ describe('the guard', () => {
     ["SELECT set_config('default_transaction_read_only', 'off', false)", '42501'],
     ["SELECT set_config('app.v', email, false) FROM users WHERE id = 1", '42501'],
     ['SHOW port', '42501'],
+    ["SELECT name, setting FROM pg_settings WHERE name = 'port'", '42501'],
+    ['SELECT last_value FROM pg_sequences', '42501'],
+    ['SELECT * FROM information_schema.foreign_server_options', '42501'],
+    ['RESET transaction_read_only', '42501'],
     ["SET statement_timeout = '1h'", '42501'],
     ['EXPLAIN SELECT * FROM users', '0A000'],
     ['SELECT * FROM pg_stats', '42501'],
@@ -320,9 +331,12 @@ describe('the guard', () => {
 
 describe('errors and limits', () => {
   it('scrubs errors of real values', async () => {
+    // Raised while reading rows: only the code and what it means come back.
     const error = await failure('SELECT full_name::int FROM users')
     expect(error.code).toBe('22P02')
-    expect(error.message).toBe('invalid input syntax for type integer: "…"')
+    expect(error.message).toBe('invalid text representation (22P02): Sosie hides the rest of this message, which may quote a value from your rows.')
+    // Raised before any row is read: the message comes back, scrubbed.
+    expect((await failure("SELECT 'x'::int")).message).toBe('invalid input syntax for type integer: "x"')
     const [first] = await query('SELECT email FROM users WHERE external_id IS NOT NULL ORDER BY id LIMIT 1')
     const substituted = await failure(`SELECT email::int FROM users WHERE email = '${first.email}'`)
     expect(substituted.message).not.toMatch(/canary/)
@@ -345,9 +359,17 @@ describe('errors and limits', () => {
     // The planted row, by its real uuid: an id like 1 may already be a fake that names another row.
     const planted = "external_id = 'd3adb33f-0000-4000-8000-c0ffee000001'"
     const date = await failure(`SELECT make_date(extract(year FROM born_on)::int, extract(month FROM born_on)::int + 12, 1) FROM users WHERE ${planted}`)
-    expect(date.message).toBe('date field value out of range: …')
+    expect(date.message).toMatch(/^datetime field overflow \(22008\): Sosie hides the rest/)
     const bit = await failure(`SELECT set_bit('\\x00'::bytea, account::bigint, 1) FROM users WHERE ${planted}`)
-    expect(bit.message).toBe('index … out of valid range, …')
+    expect(bit.message).toMatch(/: Sosie hides the rest of this message/)
+    // Unquoted and without a digit: no pattern finds these, so no message read with rows comes back.
+    for (const sql of [
+      `SELECT city::regoper FROM users WHERE ${planted}`,
+      `SELECT split_part(full_name, ' ', 2)::regoper FROM users WHERE ${planted}`,
+      `SELECT email::regoper FROM users WHERE ${planted}`,
+    ]) {
+      expect((await failure(sql)).message).toMatch(/: Sosie hides the rest of this message/)
+    }
   })
 
   it('reports syntax errors with their position', async () => {

@@ -14,6 +14,8 @@ export interface Catalog {
   functions: Set<string>
   operators: Set<string>
   types: Set<string>
+  /** Names of every function that returns rows, in any schema: a count of their rows may be a value. */
+  setReturning: Set<string>
   /** Tables and views, for the terminal. */
   tables: number
   views: number
@@ -102,6 +104,7 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     SELECT DISTINCT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE ${SYSTEM}`)
   const operators = await client.query<{ oprname: string }>(`
     SELECT DISTINCT o.oprname FROM pg_operator o JOIN pg_namespace n ON n.oid = o.oprnamespace WHERE ${SYSTEM}`)
+  const setReturning = await client.query<{ proname: string }>(`SELECT DISTINCT proname FROM pg_proc WHERE proretset`)
   const types = await client.query<{ typname: string }>(`
     SELECT DISTINCT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE ${SYSTEM}`)
   const role = await client.query<{ admin: boolean }>(
@@ -121,6 +124,7 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     functions: functions.rows.map((f) => f.proname),
     operators: operators.rows.map((o) => o.oprname),
     types: types.rows.map((t) => t.typname),
+    setReturning: setReturning.rows.map((f) => f.proname),
     writable: writable.rows[0]?.count ?? 0,
     admin: role.rows[0]?.admin ?? false,
   })
@@ -135,6 +139,7 @@ export interface CatalogRows {
   functions: string[]
   operators: string[]
   types: string[]
+  setReturning: string[]
   writable: number
   admin: boolean
 }
@@ -154,6 +159,7 @@ export function buildCatalog(rows: CatalogRows): Catalog {
     functions: new Set(rows.functions),
     operators: new Set(rows.operators),
     types: new Set(rows.types),
+    setReturning: new Set(rows.setReturning),
     tables: 0,
     views: 0,
     writable: rows.writable,

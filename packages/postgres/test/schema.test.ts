@@ -45,6 +45,7 @@ describe('reading the catalog', () => {
       functions: [],
       operators: [],
       types: [],
+      setReturning: [],
       writable: 0,
       admin: false,
     })

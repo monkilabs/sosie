@@ -88,6 +88,12 @@ const REFUSED_RELATIONS: Record<string, string> = {
   pg_shadow: 'holds password hashes',
   pg_user_mapping: 'holds credentials',
   pg_user_mappings: 'holds credentials',
+  user_mapping_options: 'holds credentials',
+  pg_subscription: 'holds credentials',
+  pg_sequences: 'holds real key values',
+  pg_settings: WHERE,
+  pg_foreign_server: WHERE,
+  foreign_server_options: WHERE,
   pg_stat_wal_receiver: WHERE,
   pg_stat_replication: WHERE,
   pg_hba_file_rules: WHERE,
@@ -146,6 +152,9 @@ const REFUSED_FUNCTIONS: Record<string, string> = {
   pg_prepared_statement: 'returns statements with the real values Sosie put in them',
   pg_cursor: 'returns statements with the real values Sosie put in them',
   pg_get_backend_memory_contexts: 'returns statements with the real values Sosie put in them',
+  pg_show_all_settings: WHERE,
+  pg_stat_get_wal_receiver: WHERE,
+  pg_sequence_last_value: 'returns real key values',
   ts_stat: READS,
   ts_rewrite: READS,
   get_raw_page: READS,
@@ -277,6 +286,9 @@ class Analyzer {
 
   #set(body: Node): void {
     const name = String(body.name ?? '').toLowerCase()
+    if (body.kind === 'VAR_RESET' && PROTECTED.has(name)) {
+      return this.#refuse({ code: '42501', message: `Sosie keeps ${name} as it is: the session stays read-only.` })
+    }
     if (body.kind === 'VAR_RESET' || body.kind === 'VAR_RESET_ALL') return
     const pinned = PINNED[name]
     if (PROTECTED.has(name)) {
@@ -439,7 +451,7 @@ class Analyzer {
     const name: string = rv.relname
     const schema: string | undefined = rv.schemaname
     const alias: string | undefined = rv.alias?.aliasname
-    const reason = !schema || schema === 'pg_catalog' ? REFUSED_RELATIONS[name] : undefined
+    const reason = !schema || schema === 'pg_catalog' || schema === 'information_schema' ? REFUSED_RELATIONS[name] : undefined
     if (reason) this.#refuse({ code: '42501', message: `${name} ${reason}, so Sosie does not read it.` })
     if (schema === 'pg_toast' || name.startsWith('pg_toast')) {
       this.#refuse({ code: '42501', message: `${name} holds your tables' values in raw form, so Sosie does not read it.` })
@@ -470,7 +482,7 @@ class Analyzer {
       const setting = body.args?.[0]?.A_Const?.sval?.sval
       this.#setting(typeof setting === 'string' ? setting.toLowerCase() : undefined)
     }
-    if (ROWS_FROM_VALUES.test(name)) this.#rowsFromValues = true
+    if (ROWS_FROM_VALUES.test(name) || this.catalog.setReturning.has(name)) this.#rowsFromValues = true
     if (this.catalog.functions.has(name) && schema !== 'pg_catalog') this.#data = this.#rowsFromValues = true
   }
 

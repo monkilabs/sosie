@@ -40,6 +40,7 @@ export const catalog = buildCatalog({
   functions: ['user_email'],
   operators: ['###'],
   types: ['mood', 'short_code'],
+  setReturning: ['generate_series', 'unnest', 'ts_parse'],
   writable: 0,
   admin: false,
 })

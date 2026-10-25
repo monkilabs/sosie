@@ -40,15 +40,19 @@ export interface UpstreamOptions {
   statementTimeout: number
 }
 
+/** Connection-string parameters pg sends as start-up settings, which Postgres applies after `options`. */
+const STARTUP_SETTINGS = ['statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout', 'client_encoding', 'replication']
+
 /**
  * A read-only session: set at start-up, where a statement cannot undo it
  * without the guard seeing. Settings in the connection string's own
- * `options` are kept, before Sosie's, so Sosie's win.
+ * `options` are kept, before Sosie's, so Sosie's win; start-up settings in
+ * the connection string, which Postgres would apply after Sosie's, are dropped.
  */
-function config(upstream: URL, { statementTimeout }: UpstreamOptions): pg.ClientConfig {
+export function config(upstream: URL, { statementTimeout }: UpstreamOptions): pg.ClientConfig {
   const url = new URL(upstream.href)
   const own = url.searchParams.get('options') ?? ''
-  url.searchParams.delete('options')
+  for (const name of ['options', ...STARTUP_SETTINGS]) url.searchParams.delete(name)
   const settings = [
     own,
     '-c default_transaction_read_only=on',

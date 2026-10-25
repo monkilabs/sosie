@@ -37,6 +37,8 @@ describe('the guard', () => {
     "SET client_encoding = 'UTF8'",
     'SET standard_conforming_strings = on',
     'SET client_encoding TO DEFAULT',
+    'RESET ALL',
+    'RESET statement_timeout',
   ])('allows %s', (sql) => {
     expect(check(sql).refusal).toBeUndefined()
   })
@@ -74,6 +76,15 @@ describe('the guard', () => {
     ['SELECT * FROM pg_toast.pg_toast_16384', '42501'],
     ['SELECT chunk_data FROM pg_toast_16384', '42501'],
     ['SELECT * FROM pg_hba_file_rules', '42501'],
+    ['SELECT * FROM pg_settings', '42501'],
+    ['SELECT * FROM pg_show_all_settings()', '42501'],
+    ['SELECT * FROM pg_sequences', '42501'],
+    ["SELECT pg_sequence_last_value('users_id_seq')", '42501'],
+    ['SELECT subconninfo FROM pg_subscription', '42501'],
+    ['SELECT srvoptions FROM pg_foreign_server', '42501'],
+    ['SELECT * FROM information_schema.foreign_server_options', '42501'],
+    ['RESET transaction_read_only', '42501'],
+    ['RESET default_transaction_read_only', '42501'],
     ['WITH gone AS (DELETE FROM users RETURNING id) SELECT 1 UNION SELECT 2', '25006'],
     ['PREPARE TRANSACTION \'x\'', '0A000'],
     ['EXPLAIN ANALYZE SELECT 1', '0A000'],
@@ -113,6 +124,8 @@ describe('the guard', () => {
     ).toEqual(['other'])
     expect(check('SELECT count(*) FROM users u JOIN orders o ON o.user_id = u.id').targets).toEqual(['count'])
     expect(check('SELECT count(*), (u).* FROM users u').targets).toEqual(['count', 'star'])
+    // Any set-returning function the catalog knows, not only those Sosie names.
+    expect(check("SELECT count(*) FROM (SELECT ts_parse('default', email) FROM users) s").targets).toEqual(['other'])
   })
 
   it('names the field of a column that is only cast, as ORMs do with enums', () => {

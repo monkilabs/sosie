@@ -326,7 +326,12 @@ export class Session {
     this.#up!.flush()
     let count = 0
     for (;;) {
-      const message = await this.#expect(['dataRow', 'commandComplete', 'portalSuspended', 'emptyQuery'], portal.scope, portal.prepared)
+      const message = await this.#expect(
+        ['dataRow', 'commandComplete', 'portalSuspended', 'emptyQuery'],
+        portal.scope,
+        portal.prepared,
+        !portal.prepared.analysis.catalogOnly,
+      )
       if (message.name === 'dataRow') {
         if (count++ < allowed) this.#write(backend.dataRow(fakeRow(message.fields as (string | null)[], portal.plans ?? [], this.#ctx.faker, portal.prepared.sent)))
         continue
@@ -352,16 +357,21 @@ export class Session {
   /**
    * The next message upstream sends, which must be one of `names`. Notices and
    * setting changes are relayed on the way; an error is scrubbed, relayed,
-   * and stops the request.
+   * and stops the request. `reading`: a statement that reads rows is running.
    */
-  async #expect(names: string | string[], scope: RequestScope, prepared: Prepared | undefined): Promise<UpstreamMessage> {
+  async #expect(
+    names: string | string[],
+    scope: RequestScope,
+    prepared: Prepared | undefined,
+    reading = false,
+  ): Promise<UpstreamMessage> {
     const wanted = typeof names === 'string' ? [names] : names
     for (;;) {
       const message = await this.#up!.next()
       if (wanted.includes(message.name)) return message
       switch (message.name) {
         case 'notice':
-          this.#write(backend.notice(this.#scrubbed(message, scope, prepared)))
+          this.#write(backend.notice(this.#scrubbed(message, scope, prepared, reading)))
           continue
         case 'parameterStatus':
           if (message.parameterName !== 'session_authorization') {
@@ -372,7 +382,7 @@ export class Session {
           continue
         case 'error':
           this.#failed = true
-          this.#write(backend.error(this.#scrubbed(message, scope, prepared)))
+          this.#write(backend.error(this.#scrubbed(message, scope, prepared, reading)))
           if (message.severity === 'FATAL' || message.severity === 'PANIC') throw new Error(String(message.message))
           throw new Stop()
         default:
@@ -382,17 +392,23 @@ export class Session {
   }
 
   /**
-   * An upstream error or notice for the client: its message scrubbed, its
-   * detail dropped. Postgres quotes the values its own messages include, so
-   * scrubbing catches them; a function's message (RAISE in PL/pgSQL, anything
-   * with a context) may hold a row value unquoted, so its text is hidden.
+   * An upstream error or notice for the client, its detail dropped. While
+   * Postgres prepares a statement it has read no row, so its message holds
+   * only what the client wrote and the schema, and is scrubbed of what Sosie
+   * substituted. While a statement that reads rows runs, a message can quote
+   * a row value in any form ('operator does not exist: Vantaville'), so only
+   * its code and what the code means come back. So it is with a function's
+   * message (RAISE in PL/pgSQL, anything with a context).
    */
-  #scrubbed(message: UpstreamMessage, scope: RequestScope, prepared: Prepared | undefined): Report {
+  #scrubbed(message: UpstreamMessage, scope: RequestScope, prepared: Prepared | undefined, reading = false): Report {
     const severity = String(message.severity ?? 'ERROR')
     const code = String(message.code ?? 'XX000')
     if (message.where || code.startsWith('P0')) {
       const what = message.name === 'notice' ? 'sent a notice' : 'raised an error'
       return { severity, code, message: `A function in the database ${what}; Sosie hides its text, which may quote rows.` }
+    }
+    if (reading && !VALUELESS.has(code)) {
+      return { severity, code, message: `${condition(code)}: Sosie hides the rest of this message, which may quote a value from your rows.` }
     }
     const unchanged = !prepared || prepared.text === prepared.sent
     return {
@@ -414,6 +430,45 @@ export class Session {
   #write(buffer: Buffer): void {
     this.#socket.write(buffer)
   }
+}
+
+/** Errors whose messages never quote a value: their text comes back while rows are read. */
+const VALUELESS = new Set(['57014', '57P01', '57P02', '57P03', '25001', '25006', '25P02', '22012', '53100', '53200', '53300', '54001', '40001', '40P01'])
+
+/** What an SQLSTATE means, from Postgres's table of error codes. */
+const CONDITIONS: Record<string, string> = {
+  '22000': 'data exception',
+  '22001': 'string data right truncation',
+  '22003': 'numeric value out of range',
+  '22004': 'null value not allowed',
+  '22007': 'invalid datetime format',
+  '22008': 'datetime field overflow',
+  '22021': 'character not in repertoire',
+  '22023': 'invalid parameter value',
+  '22025': 'invalid escape sequence',
+  '2201B': 'invalid regular expression',
+  '2202E': 'array subscript error',
+  '22P02': 'invalid text representation',
+  '22P05': 'untranslatable character',
+  '22032': 'invalid json text',
+  '0A000': 'feature not supported',
+  '42804': 'datatype mismatch',
+  '42846': 'cannot coerce',
+  '42883': 'undefined function',
+  '42704': 'undefined object',
+  '42P01': 'undefined table',
+}
+const CLASSES: Record<string, string> = {
+  '22': 'data exception',
+  '42': 'syntax error or access rule violation',
+  '0A': 'feature not supported',
+  '23': 'integrity constraint violation',
+  '54': 'program limit exceeded',
+  XX: 'internal error',
+}
+
+function condition(code: string): string {
+  return `${CONDITIONS[code] ?? CLASSES[code.slice(0, 2)] ?? 'error'} (${code})`
 }
 
 function columns(message: UpstreamMessage): ColumnDescription[] {

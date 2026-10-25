@@ -374,7 +374,10 @@ bytea. Two more settings are pinned because they change how Postgres reads a
 statement's text, which Sosie's parser must read the same way:
 `standard_conforming_strings=on` (off, `'a\''` ends elsewhere) and
 `client_encoding=UTF8`. Settings in the connection string's own `options`, and
-a role's or database's defaults, are overridden: Sosie's come last.
+a role's or database's defaults, are overridden: Sosie's come last. Start-up
+settings in the connection string itself (`statement_timeout`,
+`client_encoding`, `replication` and the like), which Postgres would apply
+after Sosie's, are dropped.
 
 A simple query is run upstream with the extended protocol, statement by
 statement, executing at most `--max-rows` + 1 rows: a result cut at the cap
@@ -424,12 +427,18 @@ credentials, or where the database is: `pg_stats`, `pg_stats_ext`,
 `pg_stat_statements`, `pg_prepared_statements`, `pg_cursors`,
 `pg_backend_memory_contexts`, `pg_authid`, `pg_shadow`, `pg_user_mappings`,
 `pg_stat_wal_receiver`, `pg_stat_replication`, `pg_hba_file_rules`,
-`pg_ident_file_mappings`, `pg_file_settings`. `SHOW` and `current_setting()`
-refuse the settings that say where the database is (`listen_addresses`,
-`port`, `data_directory`, `primary_conninfo` and the like, and `SHOW ALL`). Refused functions: those that reveal where the
+`pg_ident_file_mappings`, `pg_file_settings`, `pg_settings`, `pg_sequences`,
+`pg_subscription`, `pg_foreign_server`, and in `information_schema`
+`foreign_server_options` and `user_mapping_options`. `SHOW` and
+`current_setting()` refuse the settings that say where the database is
+(`listen_addresses`, `port`, `data_directory`, `primary_conninfo` and the
+like, and `SHOW ALL`); `pg_settings` and `pg_show_all_settings()`, which list
+them all, are refused. `RESET` of the settings that keep the session
+read-only is refused like `SET`. Refused functions: those that reveal where the
 database is (`inet_server_addr`), read files or raw pages, run SQL given as
 text (`query_to_xml` and its family, `ts_stat`, `ts_rewrite`, `dblink`), read
-logical decoding or WAL, or return other sessions' queries; and `set_config`,
+logical decoding or WAL, return other sessions' queries or real key values
+(`pg_sequence_last_value`); and `set_config`,
 which could copy a value from the rows into a setting: `SET` takes only what
 the client writes. Refused too, because a superuser or replication login
 could run them: functions that change the server (replication slots,
@@ -470,25 +479,35 @@ views.
 | A column of a system catalog | Unchanged |
 | A column of a table Sosie knows, in a statement the guard took for catalog-only | `Faker.value` with its field: Postgres's word wins |
 | A column of a table Sosie does not know | `Faker.computed` with its type |
-| Postgres's own `count(…)`, a bigint, over rows that come from tables | Unchanged: it holds no value from a row. A count over rows a value made (`generate_series`, `unnest`, a recursive CTE, user code) is faked |
+| Postgres's own `count(…)`, a bigint, over rows that come from tables | Unchanged: it holds no value from a row. A count over rows a value made (any set-returning function in the catalog, such as `generate_series`, `unnest` or `ts_parse`; a recursive CTE; user code) is faked |
 | A column of `UNION`, `INTERSECT` or `EXCEPT` | `Faker.computed` with its type: Postgres reports no source for it, and the arms differ |
 | Anything else a query computes | `Faker.computed` with the type of its OID |
 | From a catalog-only read | Unchanged |
 
 ### Errors
 
-An upstream error's message goes through `RequestScope.scrub`: each real value
-Sosie substituted is turned back into its fake, and quoted text the client did
-not send is masked as `"…"` unless it names a table or column, since Postgres
-quotes the value that failed (`invalid input syntax for type integer: "…"`).
-Detail and context are dropped, because they quote rows; the hint is kept,
-scrubbed the same way. Postgres also prints some values unquoted (`date field
-value out of range: 1988-14-29`, `index 7739182046 out of valid range`), so any
-word with a digit in it that the client did not write is masked too. Quoted
-text counts as the client's only when it appears in the query as a whole
-token. A function's message can hold anything (`RAISE EXCEPTION 'user % is not
-allowed', email`), so an error or notice raised in function code, one with a
-context or a `P0` code, keeps its code and loses its text.
+What an upstream error or notice says depends on when Postgres raised it,
+because no pattern finds every value a message may quote: Postgres prints
+some quoted, some unquoted (`date field value out of range: 1988-14-29`), and
+some with no digit at all (`operator does not exist: Vantaville`).
+
+- **Before any row is read**, while Postgres parses, checks and plans a
+  statement, a message holds only what the client wrote and the schema:
+  `column "nope" does not exist`, `invalid input syntax for type integer:
+  "x"`. It comes back through `RequestScope.scrub`: each real value Sosie
+  substituted is turned back into its fake, and quoted text or a word with a
+  digit that the client did not write, and that names no table or column, is
+  masked. The hint is kept, scrubbed the same way.
+- **While a statement that reads rows runs**, only the code comes back, with
+  what it means: `invalid text representation (22P02): Sosie hides the rest of
+  this message, which may quote a value from your rows.` Codes whose messages
+  never quote a value keep their text: a cancel or timeout, read-only, division
+  by zero, running out of resources, serialisation failures.
+- **From function code** (an error or notice with a context, or a `P0` code),
+  the text is hidden whenever it comes: `RAISE EXCEPTION 'user % is not
+  allowed', email` can say anything.
+
+Detail and context are always dropped, because they quote rows.
 
 A statement Sosie refuses aborts the transaction it is in, as an error does in
 Postgres: what follows fails until `ROLLBACK`, and `COMMIT` rolls back. The position is kept only when the statement went

@@ -160,8 +160,10 @@ substituted, and transcripts kept afterwards.
   machine can; on another `--host`, anyone who reaches that address can query
   the fakes and filter on the real values.
 - **The schema and the server.** Table and column names, the login's role
-  name, the server's version and its settings are visible: drivers and agents
-  need them, and they are not values from your tables.
+  name, the server's version and most of its settings are visible: drivers and
+  agents need them, and they are not values from your tables. Settings that say
+  where the database is (its address, port, files, replication source) are
+  refused.
 
 The defaults narrow the rest: a read-only login and session, a statement
 timeout and a row cap protect the database; errors are scrubbed of anything Sosie
