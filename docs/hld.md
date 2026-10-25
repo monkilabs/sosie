@@ -88,7 +88,7 @@ flowchart LR
 | Postgres | Endpoint | Speaks the Postgres wire protocol on 127.0.0.1, simple and extended query |
 | Postgres | Guard | Allows reads; refuses everything else and the catalogs that store real values |
 | Postgres | Rewriter | Asks the core for the real value behind each fake in a query |
-| Postgres | Upstream client | One read-only session, with a timeout and a row cap |
+| Postgres | Upstream client | One read-only session per client, with a timeout and a row cap |
 | Postgres | Results | Names the field of each result column, from the table and position Postgres reports |
 
 ## How Sosie grows
@@ -154,8 +154,22 @@ substituted, and transcripts kept afterwards.
   only Sosie's address.
 - **Inference through filters.** A query filters on real data, so a careful
   sequence of queries can answer yes-or-no questions about it.
+- **Decoding by comparison.** A value a query computes is faked consistently,
+  so an agent set on it can compute fakes of values it chose (`chr(65)`) beside
+  fakes of real ones (`substr(email, 1, 1)`) and match them. Like filters, this
+  takes a deliberate sequence of queries, not normal work.
 - **Shape.** Row counts, which values are null, and the rough size of values are
   visible.
+- **Who can reach the endpoint.** It has no password. On 127.0.0.1, only this
+  machine can; on another `--host`, anyone who reaches that address can query
+  the fakes and filter on the real values.
+- **The schema and the server.** Table and column names, the definitions of
+  views and functions, the names of the server's databases and roles, the server's version and most of
+  its settings are visible: drivers and agents need them, and they are not
+  values from your tables. A literal written into a view or function, such as
+  a hard-coded address, is visible with it. Settings that say
+  where the database is (its address, port, files, replication source) are
+  refused.
 
 The defaults narrow the rest: a read-only login and session, a statement
 timeout and a row cap protect the database; errors are scrubbed of anything Sosie
@@ -177,10 +191,14 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
 ## Risks
 
 - **Driver coverage.** The extended query protocol and binary formats vary
-  between drivers. v0.1 is tested with `psql` and `node-postgres`; Prisma and
-  Drizzle before release.
+  between drivers. v0.1 is tested with `psql`, `node-postgres`, `postgres.js`,
+  Drizzle and Prisma 7. Drivers that ask for binary results (asyncpg, pgx,
+  JDBC after its prepare threshold) get a clear error until binary formats
+  come.
 - **Computed values.** A value a query computes (`length(email)`) has no
   column, so it is faked by type, which can surprise. `count(...)` passes.
+- **Real order.** Sorting and ranges run upstream, on the real values, so
+  fakes come back in an order of their own.
 - **The store holds sealed real values** on the machine Sosie runs on. It is
   readable by that machine's user; the threat model says where to run Sosie when
   that matters.
