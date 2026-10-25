@@ -72,7 +72,8 @@ function integer(real: string, bytes: 2 | 4 | 8 | undefined, { random, attempt }
   const negative = real.startsWith('-')
   const digits = real.replace('-', '').replace(/^0+(?=\d)/, '').length + Math.floor(attempt / 16)
   const max = INTEGER_MAX[bytes ?? 8]
-  const lo = digits === 1 ? 0n : 10n ** BigInt(digits - 1)
+  // A zero stays possible only for a zero: ids start at 1.
+  const lo = digits === 1 ? (/^-?0+$/.test(real) ? 0n : 1n) : 10n ** BigInt(digits - 1)
   let hi = 10n ** BigInt(digits) - 1n
   if (hi > max) hi = max
   const n = lo > hi ? random.bigint(0n, max) : random.bigint(lo, hi)

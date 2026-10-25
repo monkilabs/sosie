@@ -88,7 +88,7 @@ describe('fakes by type', async () => {
 
   it('integers: the same sign and a similar size, never the real one', () => {
     for (const [real, fake] of pairs('id')) {
-      expect(fake).toMatch(/^\d+$/)
+      expect(fake).toMatch(/^[1-9]\d*$/)
       expect(fake).not.toBe(real)
     }
     expect(new Set(users.map((u) => u.id)).size).toBe(users.length)
