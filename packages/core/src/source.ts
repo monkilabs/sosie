@@ -45,8 +45,11 @@ export type FieldType =
 export interface Faker {
   /** The fake of a value read from a field. Null stays null; a field that passes returns the value unchanged. */
   value(value: Value, field: Field): Value
-  /** The fake of a value no field holds, such as length(email) or upper(name). */
-  computed(value: Value, type: FieldType): Value
+  /**
+   * The fake of a value no field holds, such as length(email) or upper(name).
+   * `sent` is what the client sent: a JSON key it wrote is structure, not a value.
+   */
+  computed(value: Value, type: FieldType, sent?: string): Value
   /** Whether a field's values pass unchanged. */
   passes(field: Field): boolean
   /**

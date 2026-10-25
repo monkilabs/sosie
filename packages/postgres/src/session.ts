@@ -328,7 +328,7 @@ export class Session {
     for (;;) {
       const message = await this.#expect(['dataRow', 'commandComplete', 'portalSuspended', 'emptyQuery'], portal.scope, portal.prepared)
       if (message.name === 'dataRow') {
-        if (count++ < allowed) this.#write(backend.dataRow(fakeRow(message.fields as (string | null)[], portal.plans ?? [], this.#ctx.faker)))
+        if (count++ < allowed) this.#write(backend.dataRow(fakeRow(message.fields as (string | null)[], portal.plans ?? [], this.#ctx.faker, portal.prepared.sent)))
         continue
       }
       portal.returned += Math.min(count, allowed)

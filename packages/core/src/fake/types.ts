@@ -82,7 +82,8 @@ function integer(real: string, bytes: 2 | 4 | 8 | undefined, { random, attempt }
 
 /** Digits replaced: the same sign, digits and scale. */
 function decimal(real: string, random: Random): string {
-  if (!/\d/.test(real)) return real // NaN, Infinity
+  if (/^[+-]?(NaN|Infinity)$/i.test(real)) return real
+  if (!/\d/.test(real)) return shape(real, random)
   const exponent = real.search(/[eE]/)
   return exponent < 0 ? shape(real, random) : shape(real.slice(0, exponent), random) + real.slice(exponent)
 }

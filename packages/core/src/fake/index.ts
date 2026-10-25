@@ -9,7 +9,23 @@ import { fakeScalar, type ScalarKind } from './types.js'
 
 const SCANNABLE = new Set<FieldType['kind']>(['string', 'integer', 'decimal', 'uuid', 'ip'])
 const TRUE = /^(t|true|y|yes|on|1)$/i
-const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
+/** A key of a json column that looks like structure: a lowercase or camelCase word, perhaps ending in a number. */
+const KEY_WORD = /^[a-z_]+(?:[A-Z][a-z]*)*\d{0,2}$/
+/** A word with a digit in it, as Postgres prints some values unquoted: 'date field value out of range: 1988-14-29'. */
+const DIGITS = /[\w.:+-]*\d[\w.:+-]*/g
+
+/** Whether text appears in what the client sent as a whole token, not inside a longer word. */
+function appears(sent: string, token: string): boolean {
+  const word = /\w/
+  for (let at = sent.indexOf(token); at >= 0; at = sent.indexOf(token, at + 1)) {
+    const before = sent[at - 1]
+    const after = sent[at + token.length]
+    const open = !before || !word.test(before) || !word.test(token[0]!)
+    const close = !after || !word.test(after) || !word.test(token.at(-1)!)
+    if (open && close) return true
+  }
+  return false
+}
 
 /** The core's Faker: every value a source returns goes through it, and every fake a client sends comes back through it. */
 export function createFaker({ schema, rules, store }: { schema: Schema; rules: Rules; store: Store }): Faker {
@@ -53,7 +69,12 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
     return store.fake(domain, real, { unique: plan.unique, scannable: SCANNABLE.has(type.kind) }, draw)
   }
 
-  const json = (real: string, domain: string): string => {
+  /**
+   * JSON keys: structure stays, values that are keys are faked and never named in a domain. In a json
+   * column, structure is a key that looks like a word. In JSON a query builds (json_object_agg,
+   * jsonb_build_object, row_to_json), structure is a name in the schema or a key the client wrote.
+   */
+  const json = (real: string, domain: string, structure: (key: string) => boolean): string => {
     let doc: unknown
     try {
       doc = JSON.parse(real)
@@ -66,8 +87,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
       if (typeof node === 'object') {
         return Object.fromEntries(
           Object.entries(node).map(([k, v]) => {
-            // A key like city or createdAt is structure; a key like an email is a value, faked, and never named in a domain.
-            if (IDENTIFIER.test(k)) return [k, walk(v, `${path}.${k}`, k)]
+            if (structure(k)) return [k, walk(v, `${path}.${k}`, k)]
             return [scalar(k, { kind: 'string' }, `${domain}.$${path}.*key`, { unique: true }), walk(v, `${path}.*`, '')]
           }),
         )
@@ -85,11 +105,17 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
     return JSON.stringify(walk(doc, '', ''))
   }
 
-  const fake = (value: Value, type: FieldType, domain: string, plan: Pick<FieldPlan, 'format' | 'unique'>): Value => {
+  const fake = (
+    value: Value,
+    type: FieldType,
+    domain: string,
+    plan: Pick<FieldPlan, 'format' | 'unique'>,
+    structure: (key: string) => boolean,
+  ): Value => {
     if (value === null) return null
     if (Array.isArray(value)) {
       const of = type.kind === 'array' ? type.of : type
-      return value.map((item) => fake(item, of, domain, plan))
+      return value.map((item) => fake(item, of, domain, plan, structure))
     }
     switch (type.kind) {
       case 'boolean':
@@ -100,7 +126,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
         return at >= 0 ? labels[at]! : new Random(store.seed(domain, value)).pick(labels)
       }
       case 'json':
-        return json(value, domain)
+        return json(value, domain, structure)
       case 'unknown':
         return null
       case 'array':
@@ -115,14 +141,14 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
     value(value, field) {
       const plan = planOf(field)
       if (plan.domain === null) return value
-      const out = fake(value, plan.type ?? field.type, plan.domain, plan)
+      const out = fake(value, plan.type ?? field.type, plan.domain, plan, (k) => KEY_WORD.test(k) || names.has(k))
       // A domain shared by fields of different lengths may hold a longer fake than this field takes.
       const max = field.type.kind === 'string' ? field.type.maxLength : undefined
       return max && typeof out === 'string' && out.length > max ? out.slice(0, max) : out
     },
 
-    computed(value, type) {
-      return fake(value, type, `computed:${type.kind}`, { unique: false })
+    computed(value, type, sent = '') {
+      return fake(value, type, `computed:${type.kind}`, { unique: false }, (k) => names.has(k) || appears(sent, k))
     },
 
     passes(field) {
@@ -170,10 +196,15 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
           for (const [real, fakeValue] of [...substituted].sort((a, b) => b[0].length - a[0].length)) {
             out = out.split(real).join(fakeValue)
           }
-          // Anything quoted that the client did not send, and that names no table or column, came from a row.
-          return out.replace(/"([^"]*)"/g, (whole, inner: string) =>
-            inner === '' || sent.includes(inner) || named(inner, sent) ? whole : '"…"',
-          )
+          const known = (text: string) => text === '' || appears(sent, text) || named(text, sent)
+          // Anything quoted, or any word with a digit, that the client did not send and that names no
+          // table or column came from a row.
+          return out
+            .replace(/"([^"]*)"/g, (whole, inner: string) => (known(inner) ? whole : '"…"'))
+            .replace(DIGITS, (token) => {
+              const core = token.replace(/[.:+-]+$/, '')
+              return (known(core) ? core : '…') + token.slice(core.length)
+            })
         },
       }
       substitutions.set(scope, substituted)

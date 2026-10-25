@@ -13,6 +13,8 @@ export const CANARIES = [
   'd3adb33f-0000-4000-8000-c0ffee000001',
   'canary-mail',
   'Zephyrine Orrowmoor',
+  'Zephyrine',
+  'sk_live_Zz8yYx7wWv6u',
   'zephyrine@orrowmoor.test',
   'Orrowmoor',
 ] as const

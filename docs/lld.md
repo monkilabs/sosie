@@ -270,13 +270,13 @@ Values a query computes fake in `computed:<type>`.
 | --- | --- |
 | `string` | The field's format when known. Otherwise shaped like the value: an email stays an email, a date a date, a number a number, a code like `AB-1234` keeps its letters, digits and punctuation, a word becomes a word of about the same length, and text becomes words of about the same length. Within `maxLength` |
 | `integer` | A number with the same sign and number of digits; never zero for a value that is not zero; within the column's size |
-| `decimal` | Digits replaced: the same sign, digits and scale |
+| `decimal` | Digits replaced: the same sign, digits and scale. `NaN` and `Infinity` stay; other text is shaped |
 | `uuid` | A random UUID |
 | `boolean` | Flipped or not, decided once per domain by its key |
 | `enum` | Another label of the same enum, by a fixed shuffle per domain |
 | `date`, `datetime`, `time` | Shifted by up to a year, the same shift for the same value, in the same format |
 | Any type, a value with no letter or digit (`''`, `-`, `NaN`, `infinity`) | Itself: there is nothing in it to fake |
-| `json` | Same structure. A key like `city` or `createdAt` stays; a key that is a value (an email, a name) is faked. Each leaf is faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`) |
+| `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked |
 | `array` | Each element faked in the field's domain |
 | `ip` | An address from a documentation range |
 | `bytes` | Random bytes of the same length; derived, not stored |
@@ -385,9 +385,10 @@ returns `--max-rows` rows and a notice.
 Tables, views, materialised views and foreign tables; columns, types, enum
 labels, single-column primary and unique keys, and foreign keys (each column
 of a composite one), read once from `pg_catalog` and mapped to the neutral
-schema. Field ids are `table.column`, or `schema.table.column` outside
+schema; and the names of user-defined functions, operators and types. Field ids are `table.column`, or `schema.table.column` outside
 `public`. A partition's columns are its parent's fields. A view column shares
-the values of the one column of the same name among those the view reads.
+the values of the one column of the same name and kind among those the view
+reads.
 
 | Postgres | Neutral |
 | --- | --- |
@@ -416,24 +417,33 @@ savepoints; cursors (`DECLARE`, `FETCH`, `CLOSE`); `PREPARE`, `EXECUTE`,
 `DEALLOCATE`, `DISCARD`. Refused: everything else, including `EXPLAIN`, whose
 plan would print the real values Sosie substituted.
 
-Refused relations, because they hold row values or other sessions' queries:
-`pg_stats`, `pg_stats_ext`, `pg_stats_ext_exprs`, `pg_statistic`,
-`pg_statistic_ext_data`, `pg_stat_activity`, `pg_stat_statements`,
-`pg_prepared_statements`, `pg_cursors`, `pg_backend_memory_contexts`,
-`pg_largeobject`, `pg_authid`, `pg_shadow`, `pg_user_mappings`. Refused functions: those that reveal where the
+Refused relations, because they hold row values, queries with their values,
+credentials, or where the database is: `pg_stats`, `pg_stats_ext`,
+`pg_stats_ext_exprs`, `pg_statistic`, `pg_statistic_ext_data`,
+`pg_largeobject`, every `pg_toast` table, `pg_stat_activity`,
+`pg_stat_statements`, `pg_prepared_statements`, `pg_cursors`,
+`pg_backend_memory_contexts`, `pg_authid`, `pg_shadow`, `pg_user_mappings`,
+`pg_stat_wal_receiver`, `pg_stat_replication`, `pg_hba_file_rules`,
+`pg_ident_file_mappings`, `pg_file_settings`. `SHOW` and `current_setting()`
+refuse the settings that say where the database is (`listen_addresses`,
+`port`, `data_directory`, `primary_conninfo` and the like, and `SHOW ALL`). Refused functions: those that reveal where the
 database is (`inet_server_addr`), read files or raw pages, run SQL given as
 text (`query_to_xml` and its family, `ts_stat`, `ts_rewrite`, `dblink`), read
-logical decoding or WAL, return other sessions' queries, or change protected
-settings (`set_config`). Refused too, because a superuser or replication login
+logical decoding or WAL, or return other sessions' queries; and `set_config`,
+which could copy a value from the rows into a setting: `SET` takes only what
+the client writes. Refused too, because a superuser or replication login
 could run them: functions that change the server (replication slots,
 `pg_switch_wal`, `pg_reload_conf`, statistics resets and imports, large
 objects, `pg_notify`) or hold locks other sessions wait on (advisory locks).
 The session is read-only too, so a statement the guard misses still cannot
 write.
 
-**Catalog-only reads** touch no user table and call no user-defined function
-(which could read one): `\d` in psql, ORMs reading the schema, `SELECT
-version()`. Their results pass unchanged and nothing in them is rewritten.
+**Catalog-only reads** touch no user table and run no user-defined code (a
+function, operator or type, which could read one), and read no setting that
+code may have written (custom settings, `application_name`): `\d` in psql, ORMs
+reading the schema, `SELECT version()`. Their results pass unchanged and
+nothing in them is rewritten, except that a column Postgres says came from a
+table other than a system catalog is still faked.
 
 ### Rewriting
 
@@ -459,7 +469,8 @@ views.
 | A column only cast to another type (`role::text`, as Prisma selects enums) | `Faker.value` with its field |
 | A column of a system catalog | Unchanged |
 | A column of a table Sosie knows, in a statement the guard took for catalog-only | `Faker.value` with its field: Postgres's word wins |
-| Postgres's own `count(…)`, a bigint | Unchanged: it holds no value from a row |
+| A column of a table Sosie does not know | `Faker.computed` with its type |
+| Postgres's own `count(…)`, a bigint, over rows that come from tables | Unchanged: it holds no value from a row. A count over rows a value made (`generate_series`, `unnest`, a recursive CTE, user code) is faked |
 | A column of `UNION`, `INTERSECT` or `EXCEPT` | `Faker.computed` with its type: Postgres reports no source for it, and the arms differ |
 | Anything else a query computes | `Faker.computed` with the type of its OID |
 | From a catalog-only read | Unchanged |
@@ -471,10 +482,13 @@ Sosie substituted is turned back into its fake, and quoted text the client did
 not send is masked as `"…"` unless it names a table or column, since Postgres
 quotes the value that failed (`invalid input syntax for type integer: "…"`).
 Detail and context are dropped, because they quote rows; the hint is kept,
-scrubbed the same way. Postgres quotes the values its own messages include;
-a function's message need not (`RAISE EXCEPTION 'user % is not allowed',
-email`), so an error or notice raised in function code, one with a context or
-a `P0` code, keeps its code and loses its text.
+scrubbed the same way. Postgres also prints some values unquoted (`date field
+value out of range: 1988-14-29`, `index 7739182046 out of valid range`), so any
+word with a digit in it that the client did not write is masked too. Quoted
+text counts as the client's only when it appears in the query as a whole
+token. A function's message can hold anything (`RAISE EXCEPTION 'user % is not
+allowed', email`), so an error or notice raised in function code, one with a
+context or a `P0` code, keeps its code and loses its text.
 
 A statement Sosie refuses aborts the transaction it is in, as an error does in
 Postgres: what follows fails until `ROLLBACK`, and `COMMIT` rolls back. The position is kept only when the statement went
@@ -499,6 +513,15 @@ upstream as the client wrote it.
   value it happens to be.
 - Composite values (`SELECT u FROM users u`) and types Sosie does not know come
   back as `NULL`.
+- Rows fetched from a cursor carry no source column, so they are faked by type,
+  not by field: consistent, but not in the field's domain or format.
+- A json column keyed by lowercase words that are data (usernames) keeps those
+  keys, since they look like structure.
+- A value a function in the database copies into a setting, readable through
+  `pg_settings`: Sosie refuses `set_config` from clients, but not what the
+  database's own code does.
+- `count(…)` with a filter answers yes-or-no questions about real values
+  (`WHERE id <= (SELECT score …)`), as the threat model says of filters.
 
 ## Adding a source after v0.1
 

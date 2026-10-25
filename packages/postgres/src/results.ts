@@ -22,8 +22,9 @@ export function planColumns(columns: ColumnDescription[], analysis: Analysis, ca
     // A column Postgres says came from a table Sosie knows is faked, whatever the guard decided.
     const field = column.tableID ? catalog.columns.get(`${column.tableID}:${column.columnID}`) : undefined
     if (field) return { field }
+    // A system catalog's column passes. Any other table Postgres names is one Sosie does not know: faked by type.
+    if (column.tableID) return column.tableID < FIRST_NORMAL_OID ? { pass: true } : { type: typeByOid(column.dataTypeID, catalog.enums) }
     if (analysis.catalogOnly) return { pass: true }
-    if (column.tableID && column.tableID < FIRST_NORMAL_OID) return { pass: true }
     const target = targets?.[i]
     // count(…) holds no value from a row: a bigint, from Postgres's own count.
     if (target === 'count' && column.dataTypeID === INT8) return { pass: true }
@@ -45,18 +46,18 @@ function expand(targets: Target[] | undefined, count: number): Target[] | undefi
 }
 
 /** One row of text values, faked column by column. */
-export function fakeRow(values: (string | null)[], plans: ColumnPlan[], faker: Faker): (string | null)[] {
+export function fakeRow(values: (string | null)[], plans: ColumnPlan[], faker: Faker, sent = ''): (string | null)[] {
   return values.map((value, i) => {
     const plan = plans[i]
     if (value === null || !plan || 'pass' in plan) return value
     const type = 'field' in plan ? plan.field.type : plan.type
-    const fake = (v: Value) => ('field' in plan ? faker.value(v, plan.field) : faker.computed(v, plan.type))
+    const fake = (v: Value) => ('field' in plan ? faker.value(v, plan.field) : faker.computed(v, plan.type, sent))
     if (type.kind === 'array') {
       try {
         const { bounds, items } = parseArray(value)
         return serializeArray(fake(items) as Value[], bounds)
       } catch {
-        return faker.computed(value, { kind: 'string' }) as string
+        return faker.computed(value, { kind: 'string' }, sent) as string
       }
     }
     return fake(value) as string | null

@@ -10,8 +10,10 @@ export interface Catalog {
   relations: Map<string, { entity: Entity; byName: Map<string, Field> }>
   /** Labels of each enum type, by type OID: for computed values of an enum type. */
   enums: Map<number, string[]>
-  /** Names of functions outside the system schemas: they may read rows the guard cannot see. */
+  /** Names of functions, operators and types outside the system schemas: their code may read rows the guard cannot see. */
   functions: Set<string>
+  operators: Set<string>
+  types: Set<string>
   /** Tables and views, for the terminal. */
   tables: number
   views: number
@@ -98,6 +100,10 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     WHERE d.refobjsubid > 0 AND r.ev_class <> d.refobjid`)
   const functions = await client.query<{ proname: string }>(`
     SELECT DISTINCT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE ${SYSTEM}`)
+  const operators = await client.query<{ oprname: string }>(`
+    SELECT DISTINCT o.oprname FROM pg_operator o JOIN pg_namespace n ON n.oid = o.oprnamespace WHERE ${SYSTEM}`)
+  const types = await client.query<{ typname: string }>(`
+    SELECT DISTINCT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE ${SYSTEM}`)
   const role = await client.query<{ admin: boolean }>(
     `SELECT rolsuper OR rolreplication AS admin FROM pg_roles WHERE rolname = current_user`,
   )
@@ -113,6 +119,8 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     enums: new Map(enums.rows.map((e) => [e.oid, e.labels])),
     views: views.rows,
     functions: functions.rows.map((f) => f.proname),
+    operators: operators.rows.map((o) => o.oprname),
+    types: types.rows.map((t) => t.typname),
     writable: writable.rows[0]?.count ?? 0,
     admin: role.rows[0]?.admin ?? false,
   })
@@ -125,6 +133,8 @@ export interface CatalogRows {
   enums: Map<number, string[]>
   views: ViewSourceRow[]
   functions: string[]
+  operators: string[]
+  types: string[]
   writable: number
   admin: boolean
 }
@@ -142,6 +152,8 @@ export function buildCatalog(rows: CatalogRows): Catalog {
     relations: new Map(),
     enums: rows.enums,
     functions: new Set(rows.functions),
+    operators: new Set(rows.operators),
+    types: new Set(rows.types),
     tables: 0,
     views: 0,
     writable: rows.writable,
@@ -190,7 +202,7 @@ export function buildCatalog(rows: CatalogRows): Catalog {
     }
   }
 
-  // A view column shares the values of the one source column of the same name.
+  // A view column shares the values of the one source column of the same name and kind: a computed column named like one does not.
   const sources = new Map<number, Field[]>()
   for (const v of rows.views) {
     const field = fieldAt(v.relation, v.attnum)
@@ -198,7 +210,7 @@ export function buildCatalog(rows: CatalogRows): Catalog {
   }
   for (const [view, used] of sources) {
     for (const field of fieldsByOid.get(view)?.values() ?? []) {
-      const same = used.filter((f) => f.name === field.name)
+      const same = used.filter((f) => f.name === field.name && f.type.kind === field.type.kind)
       if (same.length === 1 && !field.references) field.references = same[0]!.id
     }
   }

@@ -65,28 +65,63 @@ export interface Limits {
 
 const WRITE: Refusal = { code: '25006', message: 'This statement changes data. Sosie is read-only.' }
 
-/** Catalogs that hold values from rows, or other sessions' queries with their values. */
-const REFUSED_RELATIONS = new Set([
-  'pg_stats',
-  'pg_stats_ext',
-  'pg_stats_ext_exprs',
-  'pg_statistic',
-  'pg_statistic_ext_data',
-  'pg_stat_activity',
-  'pg_stat_statements',
-  'pg_stat_statements_info',
-  'pg_prepared_statements',
-  'pg_cursors',
-  'pg_largeobject',
-  'pg_authid',
-  'pg_shadow',
-  'pg_user_mapping',
-  'pg_user_mappings',
-  'pg_backend_memory_contexts',
-])
-
 const WHERE = 'would reveal where your database is'
 const READS = 'reads data out of Sosie’s sight'
+const ROWS = 'holds real values from your tables'
+const QUERIES = 'holds queries with the real values in them'
+
+/** Catalogs that hold values from rows or queries, or say where the database is. */
+const REFUSED_RELATIONS: Record<string, string> = {
+  pg_stats: ROWS,
+  pg_stats_ext: ROWS,
+  pg_stats_ext_exprs: ROWS,
+  pg_statistic: ROWS,
+  pg_statistic_ext_data: ROWS,
+  pg_largeobject: ROWS,
+  pg_stat_activity: QUERIES,
+  pg_stat_statements: QUERIES,
+  pg_stat_statements_info: QUERIES,
+  pg_prepared_statements: QUERIES,
+  pg_cursors: QUERIES,
+  pg_backend_memory_contexts: QUERIES,
+  pg_authid: 'holds password hashes',
+  pg_shadow: 'holds password hashes',
+  pg_user_mapping: 'holds credentials',
+  pg_user_mappings: 'holds credentials',
+  pg_stat_wal_receiver: WHERE,
+  pg_stat_replication: WHERE,
+  pg_hba_file_rules: WHERE,
+  pg_ident_file_mappings: WHERE,
+  pg_file_settings: WHERE,
+}
+
+/** Settings that say where the database is: refused in SHOW and current_setting, as inet_server_addr() is. */
+const LOCATION = new Set([
+  'all',
+  'listen_addresses',
+  'port',
+  'data_directory',
+  'config_file',
+  'hba_file',
+  'ident_file',
+  'external_pid_file',
+  'unix_socket_directories',
+  'cluster_name',
+  'primary_conninfo',
+  'primary_slot_name',
+  'krb_server_keyfile',
+  'ssl_cert_file',
+  'ssl_key_file',
+  'ssl_ca_file',
+  'ssl_crl_file',
+])
+
+/** Settings a query's own code may have written a row value into: their values are faked. */
+const WRITABLE_SETTING = (name: string) => name.includes('.') || name === 'application_name'
+
+/** Functions that return rows made from a value: a count of their rows would be that value. */
+const ROWS_FROM_VALUES =
+  /^(generate_\w+|unnest|regexp_(matches|split_to_table)|string_to_table|jsonb?_(array_elements\w*|each\w*|object_keys|populate_recordset|to_recordset)|jsonb_path_query\w*)$/
 const REFUSED_FUNCTIONS: Record<string, string> = {
   inet_server_addr: WHERE,
   inet_server_port: WHERE,
@@ -161,6 +196,8 @@ interface Scope {
 class Analyzer {
   #refusal: Refusal | undefined
   #data = false
+  /** Rows come from a function, a recursive query or user code: a count of them may be a value. */
+  #rowsFromValues = false
   readonly #consts: ConstRef[] = []
   readonly #params = new Map<number, ParamRef>()
 
@@ -179,6 +216,8 @@ class Analyzer {
         this.#select(body, undefined, (t) => (targets = t))
         break
       case 'VariableShowStmt':
+        this.#setting(String(body.name ?? '').toLowerCase())
+        break
       case 'ClosePortalStmt':
       case 'DeallocateStmt':
       case 'DiscardStmt':
@@ -220,6 +259,8 @@ class Analyzer {
       default:
         this.#refuse(WRITE)
     }
+    // A count of rows a value made is that value.
+    if (targets && this.#rowsFromValues) targets = targets.map((t): Target => (t === 'count' ? 'other' : t))
     return {
       ...(this.#refusal && { refusal: this.#refusal }),
       catalogOnly: !this.#data,
@@ -255,6 +296,17 @@ class Analyzer {
           message: `Sosie allows statement_timeout up to ${this.limits.statementTimeout} ms, the limit it was started with.`,
         })
       }
+    }
+  }
+
+  /** Reading a setting: where the database is, refused; a setting code may have written, faked. */
+  #setting(name: string | undefined): void {
+    if (name === undefined) {
+      this.#data = true
+    } else if (LOCATION.has(name)) {
+      this.#refuse({ code: '42501', message: `Sosie does not show ${name}: it ${WHERE}.` })
+    } else if (WRITABLE_SETTING(name)) {
+      this.#data = true
     }
   }
 
@@ -299,9 +351,19 @@ class Analyzer {
       case 'FuncCall':
         this.#call(body)
         return this.#walk(body, scope)
-      case 'A_Expr':
+      case 'A_Expr': {
+        // A user-defined operator runs user code, which may read rows.
+        const op = body.name?.at(-1)?.String?.sval
+        if (op && this.catalog.operators.has(op)) this.#data = this.#rowsFromValues = true
         this.#comparison(body, scope)
         return this.#walk(body, scope)
+      }
+      case 'TypeCast': {
+        // A cast to a user-defined type may run user code.
+        const type = body.typeName?.names?.at(-1)?.String?.sval
+        if (type && this.catalog.types.has(type)) this.#data = true
+        return this.#walk(body, scope)
+      }
       default:
         return this.#walk(body, scope)
     }
@@ -343,6 +405,7 @@ class Analyzer {
 
   /** The scope of a WITH clause: its CTEs are checked, and their names hide tables of the same name. */
   #with(body: Node, outer: Scope | undefined): Scope {
+    if (body.withClause?.recursive) this.#rowsFromValues = true
     const ctes = new Set<string>()
     const scope: Scope = { relations: [], ctes, ...(outer && { parent: outer }) }
     for (const cte of body.withClause?.ctes ?? []) {
@@ -362,17 +425,24 @@ class Analyzer {
       this.#walk(item.RangeSubselect.subquery, scope)
       scope.relations.push({ name: item.RangeSubselect.alias?.aliasname ?? '', catalog: false })
     } else if (item.RangeFunction) {
+      this.#rowsFromValues = true
       this.#walk(item.RangeFunction.functions, scope)
       scope.relations.push({ name: item.RangeFunction.alias?.aliasname ?? '', catalog: false })
-    } else this.#walk(item, scope)
+    } else {
+      // XMLTABLE, JSON_TABLE and anything else that makes rows.
+      this.#rowsFromValues = true
+      this.#walk(item, scope)
+    }
   }
 
   #relation(rv: Node, scope: Scope | undefined): Relation {
     const name: string = rv.relname
     const schema: string | undefined = rv.schemaname
     const alias: string | undefined = rv.alias?.aliasname
-    if ((!schema || schema === 'pg_catalog') && REFUSED_RELATIONS.has(name)) {
-      this.#refuse({ code: '42501', message: `${name} holds real values from your tables, so Sosie does not read it.` })
+    const reason = !schema || schema === 'pg_catalog' ? REFUSED_RELATIONS[name] : undefined
+    if (reason) this.#refuse({ code: '42501', message: `${name} ${reason}, so Sosie does not read it.` })
+    if (schema === 'pg_toast' || name.startsWith('pg_toast')) {
+      this.#refuse({ code: '42501', message: `${name} holds your tables' values in raw form, so Sosie does not read it.` })
     }
     if (!schema) for (let s = scope; s; s = s.parent) if (s.ctes.has(name)) return { name, catalog: false, ...(alias && { alias }) }
     const known = this.catalog.relations.get(`${schema ?? 'public'}.${name}`) ?? (schema ? undefined : this.#unique(name))
@@ -394,12 +464,14 @@ class Analyzer {
     if (reason) this.#refuse({ code: '42501', message: `Sosie does not run ${name}(): it ${reason}.` })
     if (ADMIN.test(name)) this.#refuse({ code: '25006', message: `Sosie does not run ${name}(): it changes the server. Sosie is read-only.` })
     if (name === 'set_config') {
-      const setting = String(body.args?.[0]?.A_Const?.sval?.sval ?? '').toLowerCase()
-      if (!setting || PROTECTED.has(setting) || setting in PINNED || setting === 'statement_timeout') {
-        this.#refuse({ code: '42501', message: 'Sosie does not run set_config() on this setting: use SET.' })
-      }
+      this.#refuse({ code: '42501', message: 'Sosie does not run set_config(): it can copy a value from your rows into a setting. Use SET.' })
     }
-    if (this.catalog.functions.has(name) && schema !== 'pg_catalog') this.#data = true
+    if (name === 'current_setting') {
+      const setting = body.args?.[0]?.A_Const?.sval?.sval
+      this.#setting(typeof setting === 'string' ? setting.toLowerCase() : undefined)
+    }
+    if (ROWS_FROM_VALUES.test(name)) this.#rowsFromValues = true
+    if (this.catalog.functions.has(name) && schema !== 'pg_catalog') this.#data = this.#rowsFromValues = true
   }
 
   /** Equality comparisons: the constant or parameter on one side, the column it is compared with on the other. */
@@ -437,7 +509,7 @@ class Analyzer {
   }
 
   #target(value: Node | undefined, scope: Scope): Target {
-    if (value?.ColumnRef?.fields?.at(-1)?.A_Star) return 'star'
+    if (value?.ColumnRef?.fields?.at(-1)?.A_Star || value?.A_Indirection?.indirection?.at(-1)?.A_Star) return 'star'
     // Only Postgres's own count(…): a function of the same name elsewhere could return anything.
     const name = value?.FuncCall?.funcname?.map((n: Node) => n.String?.sval)
     if (name?.at(-1) === 'count' && (name.length === 1 || name[0] === 'pg_catalog') && !this.catalog.functions.has('count')) {

@@ -38,6 +38,8 @@ export const catalog = buildCatalog({
     { view: 103, relation: 100, attnum: 2 },
   ],
   functions: ['user_email'],
+  operators: ['###'],
+  types: ['mood', 'short_code'],
   writable: 0,
   admin: false,
 })

@@ -126,6 +126,23 @@ describe('reading through Sosie', () => {
     expect(Object.keys(doc)).toContain('id')
   })
 
+  it('fakes keys a query builds from rows, and keys a json column holds data in', async () => {
+    await query('SELECT json_object_agg(city, id) AS by_city, json_object_agg(api_key, id) AS by_key FROM users WHERE api_key <> \'\'')
+    await query('SELECT profile FROM users WHERE id IN (1, 2, 3)')
+  })
+
+  it('fakes what user-defined operators return', async () => {
+    const [{ e }] = await query('SELECT 1 ### 2 AS e')
+    expect(e).not.toBe('quill.vantablack@canary-mail.test')
+  })
+
+  it('does not count rows a value made', async () => {
+    const [{ count }] = await query(
+      "SELECT count(*) FROM generate_series(1, (SELECT (score * 100)::int FROM users WHERE external_id = 'd3adb33f-0000-4000-8000-c0ffee000001'))",
+    )
+    expect(count).not.toBe('123456')
+  })
+
   it('runs several statements in one query, and transactions', async () => {
     const results = (await client.query('SELECT 1 AS one; SELECT count(*) FROM orders')) as unknown as pg.QueryResult[]
     expect(results.map((r) => r.rows[0])).toEqual([{ one: 1 }, { count: '5' }])
@@ -183,6 +200,8 @@ describe('the guard', () => {
     ['BEGIN READ WRITE', '25006'],
     ['SET ROLE postgres', '42501'],
     ["SELECT set_config('default_transaction_read_only', 'off', false)", '42501'],
+    ["SELECT set_config('app.v', email, false) FROM users WHERE id = 1", '42501'],
+    ['SHOW port', '42501'],
     ["SET statement_timeout = '1h'", '42501'],
     ['EXPLAIN SELECT * FROM users', '0A000'],
     ['SELECT * FROM pg_stats', '42501'],
@@ -320,6 +339,15 @@ describe('errors and limits', () => {
     client.off('notice', listen)
     seen.push(notices)
     expect(notices).toEqual(['A function in the database sent a notice; Sosie hides its text, which may quote rows.'])
+  })
+
+  it('masks values Postgres prints unquoted in its errors', async () => {
+    // The planted row, by its real uuid: an id like 1 may already be a fake that names another row.
+    const planted = "external_id = 'd3adb33f-0000-4000-8000-c0ffee000001'"
+    const date = await failure(`SELECT make_date(extract(year FROM born_on)::int, extract(month FROM born_on)::int + 12, 1) FROM users WHERE ${planted}`)
+    expect(date.message).toBe('date field value out of range: …')
+    const bit = await failure(`SELECT set_bit('\\x00'::bytea, account::bigint, 1) FROM users WHERE ${planted}`)
+    expect(bit.message).toBe('index … out of valid range, …')
   })
 
   it('reports syntax errors with their position', async () => {

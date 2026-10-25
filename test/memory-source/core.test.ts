@@ -152,6 +152,31 @@ describe('fakes by type', async () => {
     expect(Object.keys(built[keys[1]!])).toEqual(['city'])
   })
 
+  it('json keys in a column: words stay, names and value-like keys are faked', async () => {
+    const { faker } = await serve()
+    const profile = data.schema.entities[0]!.fields.find((f) => f.name === 'profile')!
+    const out = JSON.parse(
+      faker.value(JSON.stringify({ Quillon: 1, sk_live_9Qv7Xc2Lm8Rt: 2, createdAt: 3, address_line1: 4 }), profile) as string,
+    )
+    const keys = Object.keys(out)
+    expect(keys.slice(2)).toEqual(['createdAt', 'address_line1'])
+    expect(JSON.stringify(keys).toLowerCase()).not.toMatch(/quillon|sk_live/)
+  })
+
+  it('json keys a query builds: names in the schema and keys the client wrote stay', async () => {
+    const { faker } = await serve()
+    const sent = "SELECT jsonb_build_object('label', city, 'email', email) FROM users"
+    const out = JSON.parse(faker.computed(JSON.stringify({ label: 1, email: 2, vantaville: 3 }), { kind: 'json' }, sent) as string)
+    expect(Object.keys(out).slice(0, 2)).toEqual(['label', 'email'])
+    expect(Object.keys(out)[2]).not.toBe('vantaville')
+  })
+
+  it('text in a number column is faked unless it is NaN or Infinity', async () => {
+    const { faker } = await serve()
+    expect(faker.computed('abc', { kind: 'decimal' })).not.toBe('abc')
+    expect(faker.computed('-Infinity', { kind: 'decimal' })).toBe('-Infinity')
+  })
+
   it('values with nothing to fake stay as they are; digits of any script are faked', async () => {
     const { faker } = await serve()
     expect(faker.computed('', { kind: 'string' })).toBe('')
@@ -229,5 +254,12 @@ describe('requests', async () => {
     )
     // alias.column is kept only for an alias the client wrote: a row value of that shape is masked.
     expect(request.scrub('value "j.email" is odd')).toBe('value "…" is odd')
+    // Postgres prints some values unquoted: words with digits the client did not write are masked.
+    expect(request.scrub('date field value out of range: 1988-14-29')).toBe('date field value out of range: …')
+    expect(request.scrub('index 7739182046 out of valid range, 0..7.')).toBe('index … out of valid range, ….')
+    // Quoted text the client wrote counts only as a whole token, not as letters inside its words.
+    const hex = faker.request("SELECT decode(tag, 'hex') FROM things LIMIT 42")
+    expect(hex.scrub('invalid hexadecimal digit: "g"')).toBe('invalid hexadecimal digit: "…"')
+    expect(hex.scrub('limit 42 is fine')).toBe('limit 42 is fine')
   })
 })

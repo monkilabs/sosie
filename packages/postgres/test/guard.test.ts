@@ -66,6 +66,14 @@ describe('the guard', () => {
     ["SELECT set_config('client_encoding', 'SJIS', false)", '42501'],
     ["SELECT pg_create_logical_replication_slot('s', 'pgoutput')", '25006'],
     ['SELECT pg_try_advisory_lock(1)', '25006'],
+    ["SELECT set_config('app.user', email, false) FROM users", '42501'],
+    ["SELECT set_config('search_path', 'public', false)", '42501'],
+    ['SHOW port', '42501'],
+    ['SHOW ALL', '42501'],
+    ["SELECT current_setting('data_directory')", '42501'],
+    ['SELECT * FROM pg_toast.pg_toast_16384', '42501'],
+    ['SELECT chunk_data FROM pg_toast_16384', '42501'],
+    ['SELECT * FROM pg_hba_file_rules', '42501'],
     ['WITH gone AS (DELETE FROM users RETURNING id) SELECT 1 UNION SELECT 2', '25006'],
     ['PREPARE TRANSACTION \'x\'', '0A000'],
     ['EXPLAIN ANALYZE SELECT 1', '0A000'],
@@ -81,6 +89,14 @@ describe('the guard', () => {
     expect(check('SELECT user_email(1)').catalogOnly).toBe(false)
     expect(check('SELECT (SELECT email FROM users LIMIT 1)').catalogOnly).toBe(false)
     expect(check('FETCH 1 FROM c').catalogOnly).toBe(false)
+    // Settings code may have written a row value into are faked; server settings pass.
+    expect(check('SHOW app.owner').catalogOnly).toBe(false)
+    expect(check("SELECT current_setting('application_name')").catalogOnly).toBe(false)
+    expect(check("SELECT current_setting('server_version_num')").catalogOnly).toBe(true)
+    expect(check('SHOW search_path').catalogOnly).toBe(true)
+    // User-defined operators and types run user code.
+    expect(check('SELECT 1 ### 2').catalogOnly).toBe(false)
+    expect(check("SELECT 'sad'::mood").catalogOnly).toBe(false)
   })
 
   it('reads the select list, to tell count(…) from values', () => {
@@ -89,6 +105,14 @@ describe('the guard', () => {
     expect(check('SELECT count(*) FROM users UNION SELECT 1').targets).toBeUndefined()
     // Only Postgres's own count passes.
     expect(check('SELECT public.count(email) FROM users').targets).toEqual(['other'])
+    // A count of rows made from a value is that value.
+    expect(check('SELECT count(*) FROM generate_series(1, (SELECT id FROM users LIMIT 1))').targets).toEqual(['other'])
+    expect(check('SELECT count(*) FROM users, unnest(tags)').targets).toEqual(['other'])
+    expect(
+      check('WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 9) SELECT count(*) FROM r').targets,
+    ).toEqual(['other'])
+    expect(check('SELECT count(*) FROM users u JOIN orders o ON o.user_id = u.id').targets).toEqual(['count'])
+    expect(check('SELECT count(*), (u).* FROM users u').targets).toEqual(['count', 'star'])
   })
 
   it('names the field of a column that is only cast, as ORMs do with enums', () => {

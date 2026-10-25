@@ -119,7 +119,8 @@ describe('sosie', () => {
     writeFileSync(join(dir, 'leak.md'), 'The agent wrote:\nZephyrine Orrowmoor ordered twice.\n')
     const leak = run(['scan', dir], { SOSIE_HOME: home })
     expect(leak.status).toBe(1)
-    expect(leak.stdout).toContain(`✗ ${join(dir, 'leak.md')}:2  a real value from format:full_name`)
+    // Zephyrine is also a key in a profile, so the first real value found on the line may be either.
+    expect(leak.stdout).toMatch(new RegExp(`✗ ${join(dir, 'leak.md')}:2  a real value from (format:full_name|users\\.profile\\.\\$\\.\\*key)\n`))
     expect(leak.stdout).toContain('1 real value found in 2 files.')
     expect(leak.stdout).not.toContain('Zephyrine')
   })
