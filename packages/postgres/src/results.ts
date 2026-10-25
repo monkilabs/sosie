@@ -9,6 +9,7 @@ export type ColumnPlan = { pass: true } | { field: Field } | { type: FieldType }
 
 /** Objects initdb creates have OIDs below this: the catalogs and information_schema. */
 const FIRST_NORMAL_OID = 16384
+const INT8 = 20
 
 /**
  * Which field each result column came from. Postgres reports each column's
@@ -25,8 +26,8 @@ export function planColumns(columns: ColumnDescription[], analysis: Analysis, ca
       if (column.tableID < FIRST_NORMAL_OID) return { pass: true }
     }
     const target = targets?.[i]
-    // count(…) holds no value from a row.
-    if (target === 'count') return { pass: true }
+    // count(…) holds no value from a row: a bigint, from Postgres's own count.
+    if (target === 'count' && column.dataTypeID === INT8) return { pass: true }
     if (typeof target === 'object') return { field: target }
     return { type: typeByOid(column.dataTypeID, catalog.enums) }
   })

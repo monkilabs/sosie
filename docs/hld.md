@@ -156,6 +156,9 @@ substituted, and transcripts kept afterwards.
   sequence of queries can answer yes-or-no questions about it.
 - **Shape.** Row counts, which values are null, and the rough size of values are
   visible.
+- **The schema and the server.** Table and column names, the login's role
+  name, the server's version and its settings are visible: drivers and agents
+  need them, and they are not values from your tables.
 
 The defaults narrow the rest: a read-only login and session, a statement
 timeout and a row cap protect the database; errors are scrubbed of anything Sosie

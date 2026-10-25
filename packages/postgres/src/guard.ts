@@ -82,6 +82,7 @@ const REFUSED_RELATIONS = new Set([
   'pg_shadow',
   'pg_user_mapping',
   'pg_user_mappings',
+  'pg_backend_memory_contexts',
 ])
 
 const WHERE = 'would reveal where your database is'
@@ -109,6 +110,7 @@ const REFUSED_FUNCTIONS: Record<string, string> = {
   pg_stat_get_backend_activity: 'returns other sessions’ queries with their values',
   pg_prepared_statement: 'returns statements with the real values Sosie put in them',
   pg_cursor: 'returns statements with the real values Sosie put in them',
+  pg_get_backend_memory_contexts: 'returns statements with the real values Sosie put in them',
   ts_stat: READS,
   ts_rewrite: READS,
   get_raw_page: READS,
@@ -287,21 +289,18 @@ class Analyzer {
 
   /** A select, in its own scope. `top` receives the select list of the statement's own result. */
   #select(body: Node, outer: Scope | undefined, top?: (targets: Target[]) => void): void {
+    const withScope = this.#with(body, outer)
     if (body.op && body.op !== 'SETOP_NONE') {
-      this.#select(body.larg, outer, top)
-      this.#select(body.rarg, outer)
-      this.#walk([body.sortClause, body.limitCount, body.limitOffset], outer)
+      // UNION, INTERSECT, EXCEPT: Postgres reports no source for these columns, and the arms differ,
+      // so no select list speaks for them: `top` gets nothing, and every column is faked by type.
+      this.#select(body.larg, withScope)
+      this.#select(body.rarg, withScope)
+      this.#walk([body.sortClause, body.limitCount, body.limitOffset], withScope)
       return
     }
     if (body.intoClause) this.#refuse({ code: '25006', message: 'SELECT INTO creates a table. Sosie is read-only.' })
     if (body.lockingClause) this.#refuse({ code: '25006', message: 'Sosie does not lock rows: it is read-only.' })
 
-    const ctes = new Set<string>()
-    const withScope: Scope = { relations: [], ctes, ...(outer && { parent: outer }) }
-    for (const cte of body.withClause?.ctes ?? []) {
-      ctes.add(cte.CommonTableExpr.ctename)
-      this.#walk(cte.CommonTableExpr.ctequery, withScope)
-    }
     const scope: Scope = { relations: [], ctes: new Set(), parent: withScope }
     for (const item of body.fromClause ?? []) this.#from(item, scope)
     top?.((body.targetList ?? []).map((t: Node) => this.#target(t.ResTarget?.val, scope)))
@@ -320,6 +319,17 @@ class Analyzer {
       ],
       scope,
     )
+  }
+
+  /** The scope of a WITH clause: its CTEs are checked, and their names hide tables of the same name. */
+  #with(body: Node, outer: Scope | undefined): Scope {
+    const ctes = new Set<string>()
+    const scope: Scope = { relations: [], ctes, ...(outer && { parent: outer }) }
+    for (const cte of body.withClause?.ctes ?? []) {
+      ctes.add(cte.CommonTableExpr.ctename)
+      this.#walk(cte.CommonTableExpr.ctequery, scope)
+    }
+    return scope
   }
 
   #from(item: Node, scope: Scope): void {
@@ -407,7 +417,11 @@ class Analyzer {
 
   #target(value: Node | undefined, scope: Scope): Target {
     if (value?.ColumnRef?.fields?.at(-1)?.A_Star) return 'star'
-    if (value?.FuncCall?.funcname?.at(-1)?.String?.sval === 'count') return 'count'
+    // Only Postgres's own count(…): a function of the same name elsewhere could return anything.
+    const name = value?.FuncCall?.funcname?.map((n: Node) => n.String?.sval)
+    if (name?.at(-1) === 'count' && (name.length === 1 || name[0] === 'pg_catalog') && !this.catalog.functions.has('count')) {
+      return 'count'
+    }
     // users.role::text: Postgres reports a computed column; its values are still the field's.
     const fields = value?.TypeCast ? column(value) : undefined
     const near = fields ? this.#resolve(fields, scope) : undefined

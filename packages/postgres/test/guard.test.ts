@@ -57,6 +57,8 @@ describe('the guard', () => {
     ["SELECT * FROM ts_stat('SELECT body FROM posts')", '42501'],
     ["SELECT * FROM pg_logical_slot_peek_changes('s', NULL, NULL)", '42501'],
     ['SELECT * FROM pg_prepared_statement()', '42501'],
+    ['SELECT ident FROM pg_backend_memory_contexts', '42501'],
+    ['WITH gone AS (DELETE FROM users RETURNING id) SELECT 1 UNION SELECT 2', '25006'],
     ['PREPARE TRANSACTION \'x\'', '0A000'],
     ['EXPLAIN ANALYZE SELECT 1', '0A000'],
   ])('refuses %s', (sql, code) => {
@@ -75,7 +77,10 @@ describe('the guard', () => {
 
   it('reads the select list, to tell count(…) from values', () => {
     expect(check('SELECT count(*), u.*, id + 1 FROM users u').targets).toEqual(['count', 'star', 'other'])
-    expect(check('SELECT count(*) FROM users UNION SELECT 1').targets).toEqual(['count'])
+    // A set operation's columns have no source Postgres reports, and its arms differ: no select list speaks for them.
+    expect(check('SELECT count(*) FROM users UNION SELECT 1').targets).toBeUndefined()
+    // Only Postgres's own count passes.
+    expect(check('SELECT public.count(email) FROM users').targets).toEqual(['other'])
   })
 
   it('names the field of a column that is only cast, as ORMs do with enums', () => {

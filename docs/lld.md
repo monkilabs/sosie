@@ -408,8 +408,8 @@ plan would print the real values Sosie substituted.
 Refused relations, because they hold row values or other sessions' queries:
 `pg_stats`, `pg_stats_ext`, `pg_stats_ext_exprs`, `pg_statistic`,
 `pg_statistic_ext_data`, `pg_stat_activity`, `pg_stat_statements`,
-`pg_prepared_statements`, `pg_cursors`, `pg_largeobject`, `pg_authid`,
-`pg_shadow`, `pg_user_mappings`. Refused functions: those that reveal where the
+`pg_prepared_statements`, `pg_cursors`, `pg_backend_memory_contexts`,
+`pg_largeobject`, `pg_authid`, `pg_shadow`, `pg_user_mappings`. Refused functions: those that reveal where the
 database is (`inet_server_addr`), read files or raw pages, run SQL given as
 text (`query_to_xml` and its family, `ts_stat`, `ts_rewrite`, `dblink`), read
 logical decoding or WAL, return other sessions' queries, or change protected
@@ -442,7 +442,8 @@ views.
 | A table column | `Faker.value` with its field |
 | A column only cast to another type (`role::text`, as Prisma selects enums) | `Faker.value` with its field |
 | A column of a system catalog | Unchanged |
-| The result of `count(…)` | Unchanged: it holds no value from a row |
+| Postgres's own `count(…)`, a bigint | Unchanged: it holds no value from a row |
+| A column of `UNION`, `INTERSECT` or `EXCEPT` | `Faker.computed` with its type: Postgres reports no source for it, and the arms differ |
 | Anything else a query computes | `Faker.computed` with the type of its OID |
 | From a catalog-only read | Unchanged |
 

@@ -30,6 +30,8 @@ describe('result columns', () => {
     expect(planColumns([column(0, 0, 20), column(100, 1)], analysis({ targets: ['count', 'star'] }), catalog)[0]).toEqual({ pass: true })
     expect(planColumns([column(100, 1), column(0, 0, 20)], analysis({ targets: ['star', 'count'] }), catalog)[1]).toEqual({ pass: true })
     expect(planColumns([column(100, 2)], analysis({ catalogOnly: true }), catalog)).toEqual([{ pass: true }])
+    // A count that is not a bigint is not Postgres's count.
+    expect(planColumns([column(0, 0, 25)], analysis({ targets: ['count'] }), catalog)).toEqual([{ type: { kind: 'string' } }])
   })
 
   it('fakes a cast column as its field', () => {

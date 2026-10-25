@@ -97,6 +97,12 @@ describe('reading through Sosie', () => {
     expect(version).toMatch(/^PostgreSQL/)
   })
 
+  it('fakes every column of a UNION, whatever its first arm selects', async () => {
+    const rows = await query('SELECT count(*) FROM orders UNION ALL SELECT id FROM users')
+    const realRows = (await truth.query('SELECT count(*) FROM orders UNION ALL SELECT id FROM users')).rows
+    expect(rows.map((r) => r.count)).not.toEqual(realRows.map((r) => r.count))
+  })
+
   it('fakes what a query computes', async () => {
     const rows = await query('SELECT upper(full_name) AS name, length(email) AS n, user_email(id) AS e FROM users')
     expect(rows.length).toBeGreaterThan(2)
@@ -275,7 +281,10 @@ describe('a team that lets some values pass', () => {
     expect(statuses).toEqual(['new', 'paid', 'shipped', 'cancelled'])
     const users = (await c.query(`SELECT country FROM users WHERE country = 'CZ'`)).rows
     expect(users).toEqual([{ country: 'CZ' }])
-    seen.push(countries, statuses, users)
+    // A passing field in the first arm of a UNION lets nothing pass from the others.
+    const mixed = (await c.query('SELECT name::text FROM countries UNION ALL SELECT full_name FROM users')).rows
+    expect(mixed.length).toBeGreaterThan(40)
+    seen.push(countries, statuses, users, mixed)
     await lenient.close()
   })
 
