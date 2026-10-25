@@ -18,8 +18,12 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
   const names = new Set(
     schema.entities.flatMap((e) => [e.id, e.name, ...e.fields.flatMap((f) => [f.id, f.name, `${e.name}.${f.name}`])]),
   )
-  /** A name in the schema, or alias.column as Postgres hints it. */
-  const named = (text: string) => names.has(text) || (/^[A-Za-z_]\w*\.[A-Za-z_]\w*$/.test(text) && names.has(text.split('.')[1]!))
+  /** A name in the schema, or alias.column as Postgres hints it, when the client wrote that alias. */
+  const named = (text: string, sent: string) => {
+    if (names.has(text)) return true
+    const [alias, column] = text.split('.')
+    return /^[A-Za-z_]\w*\.[A-Za-z_]\w*$/.test(text) && names.has(column!) && new RegExp(`\\b${alias}\\b`).test(sent)
+  }
   const substitutions = new WeakMap<RequestScope, Map<string, string>>()
   const fakerJs = new FakerJs({ locale: [en, base] })
 
@@ -168,7 +172,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
           }
           // Anything quoted that the client did not send, and that names no table or column, came from a row.
           return out.replace(/"([^"]*)"/g, (whole, inner: string) =>
-            inner === '' || sent.includes(inner) || named(inner) ? whole : '"…"',
+            inner === '' || sent.includes(inner) || named(inner, sent) ? whole : '"…"',
           )
         },
       }

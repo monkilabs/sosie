@@ -152,6 +152,16 @@ describe('fakes by type', async () => {
     expect(Object.keys(built[keys[1]!])).toEqual(['city'])
   })
 
+  it('values with nothing to fake stay as they are; digits of any script are faked', async () => {
+    const { faker } = await serve()
+    expect(faker.computed('', { kind: 'string' })).toBe('')
+    expect(faker.computed('...', { kind: 'string' })).toBe('...')
+    expect(faker.computed('NaN', { kind: 'decimal' })).toBe('NaN')
+    expect(faker.computed('infinity', { kind: 'datetime' })).toBe('infinity')
+    expect(faker.computed('{"note": ""}', { kind: 'json' })).toBe('{"note":""}')
+    expect(faker.computed('٣٤٥-٦٧٨', { kind: 'string' })).toMatch(/^\d{3}-\d{3}$/)
+  })
+
   it('arrays: each element faked, nulls kept', () => {
     for (const [real, fake] of pairs('tags')) {
       expect((fake as Value[]).length).toBe((real as Value[]).length)
@@ -217,5 +227,7 @@ describe('requests', async () => {
     expect(request.scrub('Perhaps you meant to reference the column "users.email".')).toBe(
       'Perhaps you meant to reference the column "users.email".',
     )
+    // alias.column is kept only for an alias the client wrote: a row value of that shape is masked.
+    expect(request.scrub('value "j.email" is odd')).toBe('value "…" is odd')
   })
 })

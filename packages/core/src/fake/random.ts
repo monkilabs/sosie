@@ -60,7 +60,7 @@ export class Random {
 const LOWER = 'abcdefghijklmnopqrstuvwxyz'
 const UPPER = LOWER.toUpperCase()
 
-/** Letters and digits replaced, everything else kept: 'AB-1234' becomes 'QX-8071'. A leading digit stays non-zero. */
+/** Letters and digits of any script replaced, everything else kept: 'AB-1234' becomes 'QX-8071'. A leading digit stays non-zero. */
 export function shape(real: string, random: Random): string {
   let out = ''
   for (let i = 0; i < real.length; i++) {
@@ -71,6 +71,7 @@ export function shape(real: string, random: Random): string {
     } else if (ch >= 'a' && ch <= 'z') out += random.pick([...LOWER])
     else if (ch >= 'A' && ch <= 'Z') out += random.pick([...UPPER])
     else if (/\p{L}/u.test(ch)) out += ch === ch.toUpperCase() ? random.pick([...UPPER]) : random.pick([...LOWER])
+    else if (/\p{N}/u.test(ch)) out += String(random.int(0, 9))
     else out += ch
   }
   return out

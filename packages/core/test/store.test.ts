@@ -31,6 +31,13 @@ describe('the mapping store', () => {
     expect(store.fake('d', 'same', unique, (_, attempt) => (attempt === 0 ? 'same' : 'other'))).toBe('other')
   })
 
+  it('keeps a value with nothing to fake as it is, without drawing forever', () => {
+    const store = Store.open(fresh())
+    for (const nothing of ['', '-', '...', 'NaN', 'infinity']) {
+      expect(store.fake('d', nothing, unique, () => nothing)).toBe(nothing)
+    }
+  })
+
   it('keeps fakes unique within a domain when asked, and only then', () => {
     const store = Store.open(fresh())
     const draw = (_: Uint8Array, attempt: number) => (attempt < 3 ? 'taken' : `free${attempt}`)

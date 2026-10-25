@@ -34,6 +34,7 @@ export interface Allocation {
 export type Draw = (seed: Uint8Array, attempt: number) => string
 
 const ATTEMPTS_UNIQUE = 64
+const ATTEMPTS = 96
 const CACHE_SIZE = 50_000
 
 /**
@@ -113,10 +114,13 @@ export class Store {
     const mac = this.#mac(real)
     let fake = (this.#get.get(domain, mac) as { fake: string } | undefined)?.fake
     if (fake === undefined) {
-      let candidate = ''
-      for (let attempt = 0; ; attempt++) {
-        candidate = draw(this.seed(domain, real, attempt), attempt)
-        if (candidate === real) continue
+      // A value with no letter or digit in it (empty, '-', NaN, infinity) has nothing to fake:
+      // every draw returns it, so after the last attempt it stays as it is.
+      let candidate = real
+      for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+        const drawn = draw(this.seed(domain, real, attempt), attempt)
+        if (drawn === real) continue
+        candidate = drawn
         if (!allocation.unique || attempt >= ATTEMPTS_UNIQUE || !this.#taken.get(domain, candidate)) break
       }
       const scannable = allocation.scannable && distinctive(real) ? 1 : 0
