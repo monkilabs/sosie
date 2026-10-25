@@ -422,7 +422,8 @@ what it is (`default_transaction_read_only`, `transaction_read_only`, `role`,
 (`standard_conforming_strings` and `client_encoding` may only be set to the
 values Sosie pinned), and `statement_timeout` above the limit Sosie started
 with; `BEGIN`, `COMMIT`, `ROLLBACK` and
-savepoints; cursors (`DECLARE`, `FETCH`, `CLOSE`); `PREPARE`, `EXECUTE`,
+savepoints; cursors (`DECLARE`, `FETCH`, `CLOSE`), but not `WITH HOLD`, whose
+query runs at `COMMIT`; `PREPARE`, `EXECUTE`,
 `DEALLOCATE`, `DISCARD`. Refused: everything else, including `EXPLAIN`, whose
 plan would print the real values Sosie substituted.
 
@@ -434,8 +435,10 @@ credentials, or where the database is: `pg_stats`, `pg_stats_ext`,
 `pg_backend_memory_contexts`, `pg_authid`, `pg_shadow`, `pg_user_mappings`,
 `pg_stat_wal_receiver`, `pg_stat_replication`, `pg_hba_file_rules`,
 `pg_ident_file_mappings`, `pg_file_settings`, `pg_settings`, `pg_sequences`,
-`pg_subscription`, `pg_foreign_server`, and in `information_schema`
-`foreign_server_options` and `user_mapping_options`. `SHOW` and
+`pg_subscription`, `pg_foreign_server`, `pg_db_role_setting` (per-database
+settings may hold secrets), and in `information_schema`
+`foreign_server_options`, `user_mapping_options` and the `_pg_` views behind
+them; and the functions behind the refused views. `SHOW` and
 `current_setting()` refuse the settings that say where the database is
 (`listen_addresses`, `port`, `data_directory`, `primary_conninfo` and the
 like, and `SHOW ALL`); `pg_settings` and `pg_show_all_settings()`, which list
@@ -504,8 +507,9 @@ some with no digit at all (`operator does not exist: Vantaville`).
   substituted is turned back into its fake, and quoted text or a word with a
   digit that the client did not write, and that names no table or column, is
   masked. The hint is kept, scrubbed the same way.
-- **While a statement that reads rows runs**, only the code comes back, with
-  what it means: `invalid text representation (22P02): Sosie hides the rest of
+- **While a statement that reads rows runs**, and at `COMMIT` and the end of
+  a request, where work deferred to the end of a transaction runs, only the
+  code comes back, with what it means: `invalid text representation (22P02): Sosie hides the rest of
   this message, which may quote a value from your rows.` Codes whose messages
   never quote a value keep their text: a cancel or timeout, read-only, division
   by zero, running out of resources, serialisation failures.

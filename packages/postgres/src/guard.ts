@@ -92,6 +92,9 @@ const REFUSED_RELATIONS: Record<string, string> = {
   pg_subscription: 'holds credentials',
   pg_sequences: 'holds real key values',
   pg_settings: WHERE,
+  pg_db_role_setting: 'holds settings, which may hold secrets',
+  _pg_foreign_servers: WHERE,
+  _pg_user_mappings: 'holds credentials',
   pg_foreign_server: WHERE,
   foreign_server_options: WHERE,
   pg_stat_wal_receiver: WHERE,
@@ -153,6 +156,9 @@ const REFUSED_FUNCTIONS: Record<string, string> = {
   pg_cursor: 'returns statements with the real values Sosie put in them',
   pg_get_backend_memory_contexts: 'returns statements with the real values Sosie put in them',
   pg_show_all_settings: WHERE,
+  pg_show_all_file_settings: WHERE,
+  pg_hba_file_rules: WHERE,
+  pg_ident_file_mappings: WHERE,
   pg_stat_get_wal_receiver: WHERE,
   pg_sequence_last_value: 'returns real key values',
   ts_stat: READS,
@@ -169,6 +175,9 @@ const READERS = /^((query|table|cursor|schema|database)_to_xml|dblink|pg_logical
 /** Functions that change the server or hold locks other sessions wait on: refused even when the login could run them. */
 const ADMIN =
   /^(pg_(create|drop|copy)_\w+|pg_replication_\w+|pg_switch_wal|pg_reload_conf|pg_rotate_logfile|pg_stat_reset\w*|pg_stat_statements_reset|pg_notify|pg_(try_)?advisory_\w+|pg_backup_(start|stop)|pg_(start|stop)_backup|pg_promote|pg_wal_replay_\w+|pg_log_\w+|pg_logical_\w+|pg_sync_replication_slots|pg_file_\w+|pg_(restore|clear|set)_\w+_stats|pg_import_system_collations|lo_\w+|lowrite)$/
+
+/** DECLARE … WITH HOLD, in a cursor's options. */
+const CURSOR_OPT_HOLD = 0x20
 
 /** Timeouts that protect the database: a client may lower them, never lift them. */
 const TIMEOUTS = (limits: Limits): Record<string, number> => ({
@@ -242,9 +251,17 @@ class Analyzer {
         break
       case 'TransactionStmt':
         this.#transaction(body)
+        // COMMIT runs what was deferred to it: its errors are treated as those of a read.
+        this.#data = true
         break
       case 'DeclareCursorStmt':
       case 'PrepareStmt':
+        if (type === 'DeclareCursorStmt' && body.options & CURSOR_OPT_HOLD) {
+          this.#refuse({
+            code: '0A000',
+            message: 'Sosie does not keep cursors past their transaction (WITH HOLD): their query runs at COMMIT, out of its sight.',
+          })
+        }
         this.#walk(body.query, undefined)
         this.#data = true
         break

@@ -278,6 +278,18 @@ describe('the guard', () => {
     await writer.close()
   })
 
+  it('keeps no cursor past its transaction, whose query would run at COMMIT', async () => {
+    const c = await sosie.client()
+    const held = "DECLARE c CURSOR WITH HOLD FOR SELECT city::regoper FROM users WHERE external_id = 'd3adb33f-0000-4000-8000-c0ffee000001'"
+    await c.query('BEGIN')
+    const refused = await c.query(held).catch((e: { code: string; message: string }) => e)
+    expect(refused).toMatchObject({ code: '0A000' })
+    expect((await c.query('COMMIT')).command).toBe('ROLLBACK')
+    const outside = await c.query(held).catch((e: { code: string; message: string }) => e)
+    expect(outside).toMatchObject({ code: '0A000' })
+    seen.push(refused, outside)
+  })
+
   it('aborts the transaction it refuses a statement in, as Postgres does', async () => {
     const c = await sosie.client()
     await c.query('BEGIN')

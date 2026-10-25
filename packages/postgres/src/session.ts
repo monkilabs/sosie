@@ -296,7 +296,8 @@ export class Session {
     }
     this.#refused = this.#failed = false
     this.#up!.sync()
-    const ready = await this.#expect('readyForQuery', this.#ctx.faker.request(), undefined)
+    // Work deferred to the end of a transaction may read rows: its errors are treated as those of a read.
+    const ready = await this.#expect('readyForQuery', this.#ctx.faker.request(), undefined, true)
     this.#write(backend.readyForQuery(ready.status as string))
   }
 
@@ -433,7 +434,7 @@ export class Session {
 }
 
 /** Errors whose messages never quote a value: their text comes back while rows are read. */
-const VALUELESS = new Set(['57014', '57P01', '57P02', '57P03', '25001', '25006', '25P02', '22012', '53100', '53200', '53300', '54001', '40001', '40P01'])
+const VALUELESS = new Set(['57014', '57P01', '57P02', '57P03', '25001', '25006', '25P01', '25P02', '22012', '53100', '53200', '53300', '54001', '40001', '40P01'])
 
 /** What an SQLSTATE means, from Postgres's table of error codes. */
 const CONDITIONS: Record<string, string> = {
