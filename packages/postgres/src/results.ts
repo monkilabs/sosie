@@ -17,14 +17,13 @@ const INT8 = 20
  * views; a column it cannot place was computed, and is faked by its type.
  */
 export function planColumns(columns: ColumnDescription[], analysis: Analysis, catalog: Catalog): ColumnPlan[] {
-  if (analysis.catalogOnly) return columns.map(() => ({ pass: true }))
   const targets = expand(analysis.targets, columns.length)
   return columns.map((column, i): ColumnPlan => {
-    if (column.tableID) {
-      const field = catalog.columns.get(`${column.tableID}:${column.columnID}`)
-      if (field) return { field }
-      if (column.tableID < FIRST_NORMAL_OID) return { pass: true }
-    }
+    // A column Postgres says came from a table Sosie knows is faked, whatever the guard decided.
+    const field = column.tableID ? catalog.columns.get(`${column.tableID}:${column.columnID}`) : undefined
+    if (field) return { field }
+    if (analysis.catalogOnly) return { pass: true }
+    if (column.tableID && column.tableID < FIRST_NORMAL_OID) return { pass: true }
     const target = targets?.[i]
     // count(…) holds no value from a row: a bigint, from Postgres's own count.
     if (target === 'count' && column.dataTypeID === INT8) return { pass: true }

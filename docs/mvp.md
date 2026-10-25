@@ -40,7 +40,7 @@ a developer has to learn before the first query.
 | REST and GraphQL APIs | Next, as source packages, faked consistently with the database (see the HLD) |
 | Filtering the agent's shell output | `sosie scan` proves the result; a hook per assistant comes later |
 | Mappings shared across a team | Each developer's fakes are their own; nothing leaves the machine |
-| TLS and passwords on the local endpoint | It listens on 127.0.0.1 only |
+| TLS and passwords on the local endpoint | It listens on 127.0.0.1 by default; another `--host` gets a warning |
 | Automatic detection deciding what is safe | Detection only ever suggests; the schema and `sosie.yml` decide |
 
 ## Done means

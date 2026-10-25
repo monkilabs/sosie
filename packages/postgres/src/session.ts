@@ -61,6 +61,9 @@ export class Session {
   readonly #statements = new Map<string, Prepared>()
   readonly #portals = new Map<string, Portal>()
   #skipping = false
+  /** Since the last Sync: Sosie refused something, or upstream reported an error. */
+  #refused = false
+  #failed = false
 
   constructor(socket: Socket, ctx: SessionContext) {
     this.#socket = socket
@@ -284,6 +287,14 @@ export class Session {
 
   async #sync(): Promise<void> {
     this.#skipping = false
+    if (this.#refused && !this.#failed) {
+      // Postgres aborts a transaction at an error; Sosie's refusal must too, or a COMMIT would keep what came before it.
+      // A named statement that fails at Parse does it, and leaves nothing behind: not even the client's unnamed one is touched.
+      this.#up!.parse('sosie_refused', 'SELECT pg_catalog.sosie_refused_a_statement()', [])
+      this.#up!.flush()
+      while ((await this.#up!.next()).name !== 'error');
+    }
+    this.#refused = this.#failed = false
     this.#up!.sync()
     const ready = await this.#expect('readyForQuery', this.#ctx.faker.request(), undefined)
     this.#write(backend.readyForQuery(ready.status as string))
@@ -360,6 +371,7 @@ export class Session {
         case 'notification':
           continue
         case 'error':
+          this.#failed = true
           this.#write(backend.error(this.#scrubbed(message, scope, prepared)))
           if (message.severity === 'FATAL' || message.severity === 'PANIC') throw new Error(String(message.message))
           throw new Stop()
@@ -394,6 +406,7 @@ export class Session {
 
   /** Sosie's own error: relayed, and the request stops until Sync. */
   #refuse(report: Pick<Report, 'code' | 'message'>): never {
+    this.#refused = true
     this.#write(backend.error({ severity: 'ERROR', ...report }))
     throw new Stop()
   }

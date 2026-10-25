@@ -74,7 +74,8 @@ describe('Drizzle', () => {
 const PSQL = process.env.PSQL ?? 'psql'
 const hasPsql = spawnSync(PSQL, ['--version']).status === 0
 
-describe.skipIf(!hasPsql)('psql', () => {
+// Skipped where psql is missing, except in CI, where a skip would hide a regression.
+describe.skipIf(!hasPsql && !process.env.CI)('psql', () => {
   // Sosie runs in this process, so psql must not block it.
   const psql = (command: string) =>
     new Promise<{ status: number; stdout: string; stderr: string }>((resolve) => {

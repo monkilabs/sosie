@@ -156,6 +156,9 @@ substituted, and transcripts kept afterwards.
   sequence of queries can answer yes-or-no questions about it.
 - **Shape.** Row counts, which values are null, and the rough size of values are
   visible.
+- **Who can reach the endpoint.** It has no password. On 127.0.0.1, only this
+  machine can; on another `--host`, anyone who reaches that address can query
+  the fakes and filter on the real values.
 - **The schema and the server.** Table and column names, the login's role
   name, the server's version and its settings are visible: drivers and agents
   need them, and they are not values from your tables.

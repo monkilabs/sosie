@@ -56,6 +56,9 @@ function config(upstream: URL, { statementTimeout }: UpstreamOptions): pg.Client
     '-c DateStyle=ISO,MDY',
     '-c IntervalStyle=postgres',
     '-c bytea_output=hex',
+    // How Postgres reads a statement's text: Sosie's parser reads it the same way.
+    '-c standard_conforming_strings=on',
+    '-c client_encoding=UTF8',
   ]
   return {
     connectionString: url.href,

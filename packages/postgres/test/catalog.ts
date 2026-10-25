@@ -39,6 +39,7 @@ export const catalog = buildCatalog({
   ],
   functions: ['user_email'],
   writable: 0,
+  admin: false,
 })
 
 function col(attrelid: number, attnum: number, attname: string, typname: string, atttypmod = -1, more: object = {}) {

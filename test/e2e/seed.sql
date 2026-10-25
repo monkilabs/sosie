@@ -42,6 +42,9 @@ CREATE TABLE billing.invoices (id int PRIMARY KEY, order_id bigint REFERENCES or
 
 CREATE FUNCTION user_email(uid int) RETURNS text LANGUAGE sql STABLE AS $$ SELECT email FROM users WHERE id = uid $$;
 
+-- A function that writes: the read-only session must stop it.
+CREATE FUNCTION touch_user(uid int) RETURNS void LANGUAGE sql VOLATILE AS $$ UPDATE users SET city = city WHERE id = uid $$;
+
 -- Functions that put row values in their messages, unquoted, as application code does.
 CREATE FUNCTION check_user(uid int) RETURNS int LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -69,6 +72,9 @@ INSERT INTO users (email, full_name, phone, city, api_key, active, role, created
 SELECT 'person' || g || '@example.org', 'Person ' || g, '+1 555 0100 ' || g, 'Springfield', 'key_' || g, g % 2 = 0,
        (ARRAY['admin', 'editor', 'viewer'])[1 + g % 3]::role, '2025-01-01'::timestamptz + g * interval '1 day', '1990-01-01'::date + g, 'AT'
 FROM generate_series(3, 40) g;
+
+-- Values with nothing in them to fake, as real tables have.
+UPDATE users SET city = '-', api_key = '', score = 'NaN', born_on = 'infinity', profile = '{"note": "", "tags": ["..."]}' WHERE id = 40;
 
 INSERT INTO orders (user_id, status, total, note, placed_at) VALUES
   (1, 'paid', 120.50, 'leave the parcel with Quillon', '2025-04-01 10:00:00'),

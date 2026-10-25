@@ -61,7 +61,18 @@ export class Reader {
     this.#deliver(null)
   }
 
+  /** A message that does not parse ends this connection, never the process. */
   #push(chunk: Buffer): void {
+    if (this.#ended) return
+    try {
+      this.#read(chunk)
+    } catch {
+      this.#buffer = Buffer.alloc(0)
+      this.#end()
+    }
+  }
+
+  #read(chunk: Buffer): void {
     this.#buffer = this.#buffer.length ? Buffer.concat([this.#buffer, chunk]) : chunk
     for (;;) {
       const headerLength = this.#startup ? 0 : 1
@@ -95,6 +106,7 @@ class Cursor {
   constructor(readonly body: Buffer) {}
   cstring(): string {
     const end = this.body.indexOf(0, this.offset)
+    if (end < 0) throw new RangeError('A string without its end')
     const value = this.body.toString('utf8', this.offset, end)
     this.offset = end + 1
     return value

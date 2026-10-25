@@ -17,6 +17,8 @@ export interface Catalog {
   views: number
   /** Tables the login could write to. */
   writable: number
+  /** Whether the login is a superuser or may replicate. */
+  admin: boolean
 }
 
 export interface RelationRow {
@@ -96,6 +98,9 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     WHERE d.refobjsubid > 0 AND r.ev_class <> d.refobjid`)
   const functions = await client.query<{ proname: string }>(`
     SELECT DISTINCT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE ${SYSTEM}`)
+  const role = await client.query<{ admin: boolean }>(
+    `SELECT rolsuper OR rolreplication AS admin FROM pg_roles WHERE rolname = current_user`,
+  )
   const writable = await client.query<{ count: number }>(`
     SELECT count(*)::int AS count FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relkind IN ('r', 'p') AND ${SYSTEM}
@@ -109,6 +114,7 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     views: views.rows,
     functions: functions.rows.map((f) => f.proname),
     writable: writable.rows[0]?.count ?? 0,
+    admin: role.rows[0]?.admin ?? false,
   })
 }
 
@@ -120,6 +126,7 @@ export interface CatalogRows {
   views: ViewSourceRow[]
   functions: string[]
   writable: number
+  admin: boolean
 }
 
 /** The neutral schema from catalog rows: field ids are table.column, or schema.table.column outside public. */
@@ -138,6 +145,7 @@ export function buildCatalog(rows: CatalogRows): Catalog {
     tables: 0,
     views: 0,
     writable: rows.writable,
+    admin: rows.admin,
   }
 
   const fieldsByOid = new Map<number, Map<number, Field>>()

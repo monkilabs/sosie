@@ -186,7 +186,9 @@ change between minor versions.
 | `sosie scan <path>…` | Search files and folders for real values; exit 1 if one is found |
 
 Flags for `sosie`: `--port` (7674), `--host` (127.0.0.1), `--rules` (`./sosie.yml`
-when present), `--max-rows` (1000). Exit codes: 0, 1 for a failure (cannot
+when present), `--max-rows` (1000, at least 1). A `--host` other than this
+machine is allowed, for running Sosie on a host of its own, with a warning:
+the endpoint has no password, so anyone who can reach it can query the fakes. Exit codes: 0, 1 for a failure (cannot
 connect, a problem in `sosie.yml`, a real value found), 2 for a usage error.
 
 The connection string is never an argument: arguments show in shell history and
@@ -196,6 +198,7 @@ it in, `sosie` says to set `SOSIE_UPSTREAM`.
 ```
   ✓ db.internal:5432/app, read-only: 42 tables, 3 views
   ✓ Every value is faked; 3 fields pass (sosie.yml)
+  ! The login is a superuser or can replicate. Sosie refuses the admin functions it knows, but a read-only login is safer.
   ! The login can write to 12 tables. Sosie's session is read-only, but a read-only login is safer.
 
   Your agent, app and psql:  postgres://localhost:7674/app
@@ -272,6 +275,7 @@ Values a query computes fake in `computed:<type>`.
 | `boolean` | Flipped or not, decided once per domain by its key |
 | `enum` | Another label of the same enum, by a fixed shuffle per domain |
 | `date`, `datetime`, `time` | Shifted by up to a year, the same shift for the same value, in the same format |
+| Any type, a value with no letter or digit (`''`, `-`, `NaN`, `infinity`) | Itself: there is nothing in it to fake |
 | `json` | Same structure. A key like `city` or `createdAt` stays; a key that is a value (an email, a name) is faked. Each leaf is faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`) |
 | `array` | Each element faked in the field's domain |
 | `ip` | An address from a documentation range |
@@ -305,7 +309,8 @@ CREATE INDEX value_scan ON value (mac_ci) WHERE scannable = 1;
   with mode 0600 in a folder of mode 0700. The HMAC, sealing and seeding keys
   are derived from it with HKDF.
 - **Allocation.** The fake is drawn from a seed taken from the value's keyed
-  hash. A fake is never the value itself. For keys and text, a fake is unique
+  hash. A fake is never the value itself, unless the value has no letter or
+  digit to fake: draws stop after a fixed number of attempts. For keys and text, a fake is unique
   within its domain: if it is taken, the seed advances, and a numeric key whose
   digit range fills up gets one more digit. Other numbers only need to be
   consistent, so two real values may share a fake.
@@ -341,7 +346,7 @@ running endpoint, so the MCP process never holds credentials or real values.
 | Tool | From | Input | Returns |
 | --- | --- | --- | --- |
 | `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
-| `query` | Postgres | `sql` | Up to 200 rows as JSON, the row count, and any notice; every value a consistent fake |
+| `query` | Postgres | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice; every value a consistent fake |
 
 When Sosie is not running, both say so, and how to start it.
 
@@ -355,7 +360,8 @@ answered no), any user and database name, no password; protocol 3.0 (a client
 asking for 3.2 is told 3.0); the simple query protocol; the extended protocol
 (Parse, Bind, Describe, Execute, Close, Sync, Flush) with results in text
 format; cancel requests, forwarded upstream. Refused with a clear error:
-binary result formats, COPY, function calls.
+binary result formats, COPY, function calls. A message that does not parse
+closes its own connection, never the process.
 
 ### Upstream
 
@@ -364,8 +370,11 @@ it; Sosie then takes over the connection's messages and relays each frontend
 message with a Flush, so its own errors fall in the right place among
 upstream's replies. The session is read-only from its start-up options:
 `default_transaction_read_only=on`, `statement_timeout=30s`, ISO dates, hex
-bytea. Settings in the connection string's own `options` are kept, before
-Sosie's, so Sosie's win.
+bytea. Two more settings are pinned because they change how Postgres reads a
+statement's text, which Sosie's parser must read the same way:
+`standard_conforming_strings=on` (off, `'a\''` ends elsewhere) and
+`client_encoding=UTF8`. Settings in the connection string's own `options`, and
+a role's or database's defaults, are overridden: Sosie's come last.
 
 A simple query is run upstream with the extended protocol, statement by
 statement, executing at most `--max-rows` + 1 rows: a result cut at the cap
@@ -395,12 +404,14 @@ the values of the one column of the same name among those the view reads.
 
 ### Guard
 
-Each statement is parsed. Allowed: `SELECT` and `WITH` without `INTO`, data-
-changing CTEs, `FOR UPDATE` or `FOR SHARE`; `SHOW`; `SET` and `RESET`, except
-the settings that keep the session read-only and its login what it is
-(`default_transaction_read_only`, `transaction_read_only`, `role`,
-`session_authorization`, `READ WRITE` transactions), and `statement_timeout`
-above the limit Sosie started with; `BEGIN`, `COMMIT`, `ROLLBACK` and
+Each statement is parsed. Allowed: `SELECT` and `WITH`, unless they have
+`INTO`, a data-changing CTE, `FOR UPDATE` or `FOR SHARE`; `SHOW`; `SET` and
+`RESET`, except the settings that keep the session read-only and its login
+what it is (`default_transaction_read_only`, `transaction_read_only`, `role`,
+`session_authorization`, `READ WRITE` transactions), the pinned settings
+(`standard_conforming_strings` and `client_encoding` may only be set to the
+values Sosie pinned), and `statement_timeout` above the limit Sosie started
+with; `BEGIN`, `COMMIT`, `ROLLBACK` and
 savepoints; cursors (`DECLARE`, `FETCH`, `CLOSE`); `PREPARE`, `EXECUTE`,
 `DEALLOCATE`, `DISCARD`. Refused: everything else, including `EXPLAIN`, whose
 plan would print the real values Sosie substituted.
@@ -413,8 +424,12 @@ Refused relations, because they hold row values or other sessions' queries:
 database is (`inet_server_addr`), read files or raw pages, run SQL given as
 text (`query_to_xml` and its family, `ts_stat`, `ts_rewrite`, `dblink`), read
 logical decoding or WAL, return other sessions' queries, or change protected
-settings (`set_config`). The session is read-only too, so a statement the guard
-misses still cannot write.
+settings (`set_config`). Refused too, because a superuser or replication login
+could run them: functions that change the server (replication slots,
+`pg_switch_wal`, `pg_reload_conf`, statistics resets and imports, large
+objects, `pg_notify`) or hold locks other sessions wait on (advisory locks).
+The session is read-only too, so a statement the guard misses still cannot
+write.
 
 **Catalog-only reads** touch no user table and call no user-defined function
 (which could read one): `\d` in psql, ORMs reading the schema, `SELECT
@@ -429,7 +444,8 @@ of a catalog is left alone. `LIMIT`, `OFFSET` and other constants are never
 looked up. A real value found replaces the fake, and the statement is printed
 back to SQL; a statement with nothing to replace goes upstream exactly as the
 client wrote it. Booleans and enum labels are turned back by their domain's
-flip and shuffle.
+flip and shuffle. Parameters a client sends in binary format are used as
+written.
 
 ### Results
 
@@ -442,6 +458,7 @@ views.
 | A table column | `Faker.value` with its field |
 | A column only cast to another type (`role::text`, as Prisma selects enums) | `Faker.value` with its field |
 | A column of a system catalog | Unchanged |
+| A column of a table Sosie knows, in a statement the guard took for catalog-only | `Faker.value` with its field: Postgres's word wins |
 | Postgres's own `count(…)`, a bigint | Unchanged: it holds no value from a row |
 | A column of `UNION`, `INTERSECT` or `EXCEPT` | `Faker.computed` with its type: Postgres reports no source for it, and the arms differ |
 | Anything else a query computes | `Faker.computed` with the type of its OID |
@@ -457,7 +474,10 @@ Detail and context are dropped, because they quote rows; the hint is kept,
 scrubbed the same way. Postgres quotes the values its own messages include;
 a function's message need not (`RAISE EXCEPTION 'user % is not allowed',
 email`), so an error or notice raised in function code, one with a context or
-a `P0` code, keeps its code and loses its text. The position is kept only when the statement went
+a `P0` code, keeps its code and loses its text.
+
+A statement Sosie refuses aborts the transaction it is in, as an error does in
+Postgres: what follows fails until `ROLLBACK`, and `COMMIT` rolls back. The position is kept only when the statement went
 upstream as the client wrote it.
 
 | Situation | Message |
@@ -506,14 +526,16 @@ domains make a person's email the same fake from the database and from the API.
   particular source.
 - **Postgres, end to end.** An embedded PostgreSQL 18, or the server in
   `SOSIE_TEST_DATABASE_URL`, seeded with canary values: unique emails, names,
-  phone numbers, keys and numbers. A read-only role reads it, as a developer
+  phone numbers, keys and numbers; values with nothing to fake (`''`, `-`,
+  `NaN`, `infinity`); and functions that write, or raise row values. A read-only role reads it, as a developer
   would set up. Every output and error is searched for each canary; any match
   fails the run.
 - **Consistency.** Joins through faked keys match; views and their tables
   agree; lookups by a fake in literals, parameters, `IN` lists and arrays find
   their rows; the same fakes come back in the next session.
 - **Drivers.** `psql` (with `\d`), `node-postgres`, `postgres.js`, Drizzle over
-  both, and Prisma 7 through its node-postgres adapter.
+  both, and Prisma 7 through its node-postgres adapter. The psql tests skip
+  where psql is missing, except in CI.
 - **The CLI.** The built CLI is run: start, MCP over stdio, `scan`, Ctrl+C, and
   the errors a developer meets first.
 - **The dependency rule.** A test reads the imports and manifests.

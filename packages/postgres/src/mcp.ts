@@ -8,10 +8,10 @@ const AS_TEXT = new Set([1082, 1083, 1114, 1184, 1266, 20, 1700])
 export const queryTool: McpTool = {
   name: 'query',
   description:
-    'Run one read-only SQL statement on the database through Sosie. Up to 200 rows come back as JSON. ' +
+    'Run read-only SQL on the database through Sosie. Up to 200 rows of each statement come back as JSON. ' +
     'Every value is a consistent fake: the same real value is always the same fake, so joins work, ' +
     'and a value you saw finds its row again in a WHERE clause.',
-  input: { sql: { description: 'One SQL statement, such as SELECT * FROM users LIMIT 10.' } },
+  input: { sql: { description: 'SQL, such as SELECT * FROM users LIMIT 10. Several statements return several results.' } },
   async run(input, running) {
     const client = new pg.Client({
       connectionString: running.address,
@@ -24,14 +24,16 @@ export const queryTool: McpTool = {
     await client.connect()
     try {
       const results = await client.query(input.sql ?? '')
-      const result = Array.isArray(results) ? results.at(-1)! : results
-      const rows = result.rows ?? []
-      return {
-        rows: rows.slice(0, MAX_ROWS),
-        rowCount: result.rowCount ?? rows.length,
-        ...(rows.length > MAX_ROWS && { note: `Only the first ${MAX_ROWS} of ${rows.length} rows are shown. Narrow the query.` }),
-        ...(notices.length && { notices }),
-      }
+      const shaped = (Array.isArray(results) ? results : [results]).map((result: pg.QueryResult) => {
+        const rows = result.rows ?? []
+        return {
+          rows: rows.slice(0, MAX_ROWS),
+          rowCount: result.rowCount ?? rows.length,
+          ...(rows.length > MAX_ROWS && { note: `Only the first ${MAX_ROWS} of ${rows.length} rows are shown. Narrow the query.` }),
+        }
+      })
+      const notes = notices.length ? { notices } : {}
+      return shaped.length === 1 ? { ...shaped[0], ...notes } : { results: shaped, ...notes }
     } finally {
       await client.end().catch(() => {})
     }

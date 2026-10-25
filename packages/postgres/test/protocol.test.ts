@@ -63,6 +63,29 @@ describe('reading frontend messages', () => {
   })
 })
 
+describe('malformed messages', () => {
+  it.each([
+    ['a start-up packet with no code', Buffer.from([0, 0, 0, 4])],
+    ['a short cancel request', Buffer.from([0, 0, 0, 8, 4, 210, 22, 46])],
+  ])('end the connection on %s, never the process', async (_, bytes) => {
+    const socket = new EventEmitter()
+    const reader = new Reader(socket as unknown as Socket)
+    socket.emit('data', bytes)
+    expect(await reader.next()).toBeNull()
+  })
+
+  it('end the connection on a truncated Bind or an unterminated Parse', async () => {
+    for (const message of [typed('B', Buffer.from('p\0s\0\0\x02')), typed('P', Buffer.from('name-without-end'))]) {
+      const socket = new EventEmitter()
+      const reader = new Reader(socket as unknown as Socket)
+      socket.emit('data', startup({ user: 'kim' }))
+      await reader.next()
+      socket.emit('data', message)
+      expect(await reader.next()).toBeNull()
+    }
+  })
+})
+
 describe('writing backend messages', () => {
   it('frames each message with its code and length', () => {
     expect(backend.readyForQuery('I')).toEqual(Buffer.from([90, 0, 0, 0, 5, 73]))

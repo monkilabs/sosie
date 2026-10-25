@@ -29,7 +29,9 @@ describe('result columns', () => {
   it('passes count(…) and catalog-only results', () => {
     expect(planColumns([column(0, 0, 20), column(100, 1)], analysis({ targets: ['count', 'star'] }), catalog)[0]).toEqual({ pass: true })
     expect(planColumns([column(100, 1), column(0, 0, 20)], analysis({ targets: ['star', 'count'] }), catalog)[1]).toEqual({ pass: true })
-    expect(planColumns([column(100, 2)], analysis({ catalogOnly: true }), catalog)).toEqual([{ pass: true }])
+    expect(planColumns([column(1259, 2)], analysis({ catalogOnly: true }), catalog)).toEqual([{ pass: true }])
+    // A column from a user table is faked even when the guard took the statement for catalog-only.
+    expect(planColumns([column(100, 2)], analysis({ catalogOnly: true }), catalog)).toEqual([{ field: catalog.columns.get('100:2') }])
     // A count that is not a bigint is not Postgres's count.
     expect(planColumns([column(0, 0, 25)], analysis({ targets: ['count'] }), catalog)).toEqual([{ type: { kind: 'string' } }])
   })

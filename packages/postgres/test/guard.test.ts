@@ -34,6 +34,9 @@ describe('the guard', () => {
     'CLOSE c',
     'DISCARD ALL',
     'DEALLOCATE ALL',
+    "SET client_encoding = 'UTF8'",
+    'SET standard_conforming_strings = on',
+    'SET client_encoding TO DEFAULT',
   ])('allows %s', (sql) => {
     expect(check(sql).refusal).toBeUndefined()
   })
@@ -58,6 +61,11 @@ describe('the guard', () => {
     ["SELECT * FROM pg_logical_slot_peek_changes('s', NULL, NULL)", '42501'],
     ['SELECT * FROM pg_prepared_statement()', '42501'],
     ['SELECT ident FROM pg_backend_memory_contexts', '42501'],
+    ['SET standard_conforming_strings = off', '42501'],
+    ["SET client_encoding = 'SJIS'", '42501'],
+    ["SELECT set_config('client_encoding', 'SJIS', false)", '42501'],
+    ["SELECT pg_create_logical_replication_slot('s', 'pgoutput')", '25006'],
+    ['SELECT pg_try_advisory_lock(1)', '25006'],
     ['WITH gone AS (DELETE FROM users RETURNING id) SELECT 1 UNION SELECT 2', '25006'],
     ['PREPARE TRANSACTION \'x\'', '0A000'],
     ['EXPLAIN ANALYZE SELECT 1', '0A000'],

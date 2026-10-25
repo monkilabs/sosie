@@ -19,6 +19,7 @@ import {
   writeRunning,
   type Rules,
 } from '@sosie/core'
+import { loopback } from './listen.js'
 import { hiddenPrompt } from './prompt.js'
 import { sources } from './sources.js'
 
@@ -84,14 +85,14 @@ async function main(argv: string[]): Promise<void> {
     port: number(values.port, 7674, '--port'),
     host: values.host ?? '127.0.0.1',
     rules: values.rules,
-    maxRows: number(values['max-rows'], 1000, '--max-rows'),
+    maxRows: number(values['max-rows'], 1000, '--max-rows', 1),
   })
 }
 
-function number(value: string | undefined, fallback: number, name: string): number {
+function number(value: string | undefined, fallback: number, name: string, min = 0): number {
   if (value === undefined) return fallback
   const n = Number(value)
-  if (!Number.isInteger(n) || n < 0) throw new Exit(2, fail(`${name} takes a whole number, not ${value}.`))
+  if (!Number.isInteger(n) || n < min) throw new Exit(2, fail(`${name} takes a whole number from ${min}, not ${value}.`))
   return n
 }
 
@@ -146,6 +147,9 @@ async function start(options: { port: number; host: string; rules: string | unde
     ok(`${connection.label}, read-only: ${connection.summary}`),
     ok(passing ? `Every value is faked; ${passing} ${passing === 1 ? 'field passes' : 'fields pass'} (${rulesFile})` : 'Every value is faked'),
     ...connection.warnings.map(warn),
+    ...(loopback(options.host)
+      ? []
+      : [warn(`Listening on ${options.host}, with no password: anyone who can reach it can query the fakes and filter on the real values.`)]),
     '',
     `  Your agent, app and psql:  ${endpoint.address}`,
     `  Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp`,

@@ -65,6 +65,15 @@ describe('reading through Sosie', () => {
     expect(first.country).toHaveLength(2)
   })
 
+  it('returns values with nothing to fake as they are, and goes on', async () => {
+    const rows = await query(`SELECT city, api_key, score, born_on::text AS born, profile, coalesce(NULL, '') AS blank FROM users WHERE api_key = ''`)
+    // city is a format by its name, so even '-' becomes a city; the rest hold nothing to fake.
+    expect(rows).toEqual([
+      { city: expect.any(String), api_key: '', score: 'NaN', born: 'infinity', profile: { note: '', tags: ['...'] }, blank: '' },
+    ])
+    expect((await query('SELECT 1 AS ok'))[0].ok).toBe(1)
+  })
+
   it('keeps joins: a foreign key matches the key it points to', async () => {
     const rows = await query('SELECT u.id AS uid, o.user_id, u.email FROM orders o JOIN users u ON u.id = o.user_id ORDER BY o.id')
     for (const row of rows) expect(row.user_id).toBe(row.uid)
@@ -212,13 +221,81 @@ describe('the guard', () => {
   it('keeps the session read-only for what the guard lets through, even with a login that can write', async () => {
     const writer = await startSosie({ upstream: new URL(inject('admin')) })
     expect(writer.warnings).toEqual([
+      'The login is a superuser or can replicate. Sosie refuses the admin functions it knows, but a read-only login is safer.',
       "The login can write to 5 tables. Sosie's session is read-only, but a read-only login is safer.",
     ])
     const c = await writer.client()
-    const error = await c.query("SELECT nextval('users_id_seq')").catch((e: { code: string; message: string }) => e)
-    expect(error).toMatchObject({ code: '25006', message: 'cannot execute nextval() in a read-only transaction' })
+    const fail = (sql: string) => c.query(sql).catch((e: { code: string; message: string }) => e)
+    expect(await fail("SELECT nextval('users_id_seq')")).toMatchObject({ code: '25006', message: 'cannot execute nextval() in a read-only transaction' })
+    // Inside a function, so its text is hidden; the code says what stopped it.
+    expect(await fail('SELECT touch_user(1)')).toMatchObject({ code: '25006' })
+    for (const sql of [
+      "SELECT pg_create_physical_replication_slot('sosie_test', true)",
+      'SELECT pg_switch_wal()',
+      'SELECT pg_reload_conf()',
+      'SELECT pg_stat_reset()',
+      "SELECT pg_notify('news', 'x')",
+      'SELECT pg_advisory_lock(42)',
+      "SELECT lo_from_bytea(0, 'x')",
+    ]) {
+      expect(await fail(sql)).toMatchObject({ code: '25006', message: expect.stringMatching(/it changes the server\. Sosie is read-only\.$/) })
+    }
     expect(sosie.warnings).toEqual([])
     await writer.close()
+  })
+
+  it('aborts the transaction it refuses a statement in, as Postgres does', async () => {
+    const c = await sosie.client()
+    await c.query('BEGIN')
+    expect((await c.query('SELECT count(*) FROM users')).rows[0].count).toBe('40')
+    await expect(c.query('DELETE FROM users')).rejects.toMatchObject({ code: '25006' })
+    await expect(c.query('SELECT 1')).rejects.toMatchObject({ code: '25P02' })
+    expect((await c.query('COMMIT')).command).toBe('ROLLBACK')
+    expect((await c.query('SELECT 1 AS ok')).rows).toEqual([{ ok: 1 }])
+  })
+
+  it('keeps the settings that decide how a statement is read', async () => {
+    for (const sql of ['SET standard_conforming_strings = off', "SET client_encoding = 'SJIS'", "SET NAMES 'LATIN1'"]) {
+      expect((await failure(sql)).code).toBe('42501')
+    }
+    expect((await failure("SELECT set_config('standard_conforming_strings', 'off', false)")).code).toBe('42501')
+    await client.query("SET client_encoding = 'UTF8'")
+    // Read with standard_conforming_strings off, this would hide a subquery inside what looks like strings.
+    await query("SELECT 'a\\'', (SELECT email FROM users ORDER BY id LIMIT 1) AS e, '--'")
+  })
+
+  it('reads statements the same way when the login defaults to standard_conforming_strings off', async () => {
+    const admin = await real()
+    const role = `sosie_scs_${process.pid}`
+    await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD 'scs'; GRANT USAGE ON SCHEMA public TO ${role}; GRANT SELECT ON users TO ${role};
+      ALTER ROLE ${role} SET standard_conforming_strings = off`)
+    try {
+      const upstream = new URL(inject('admin'))
+      upstream.username = role
+      upstream.password = 'scs'
+      const odd = await startSosie({ upstream })
+      const c = await odd.client()
+      expect((await c.query('SHOW standard_conforming_strings')).rows).toEqual([{ standard_conforming_strings: 'on' }])
+      const rows = (await c.query("SELECT 'a\\'', (SELECT email FROM users ORDER BY id LIMIT 1) AS e, '--'")).rows
+      seen.push(rows)
+      await odd.close()
+    } finally {
+      await admin.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`)
+      await admin.end()
+    }
+  })
+
+  it('closes a connection that sends a malformed message, and serves the others', async () => {
+    const port = Number(new URL(sosie.address).port)
+    for (const bytes of [[0, 0, 0, 4], [0, 0, 0, 8, 4, 210, 22, 46], [0, 0, 0, 9, 0, 3, 0, 0, 117]]) {
+      await new Promise<void>((resolve) => {
+        const socket = connect(port, '127.0.0.1', () => socket.write(Buffer.from(bytes)))
+        socket.on('close', () => resolve())
+        socket.on('error', () => resolve())
+        setTimeout(() => socket.destroy(), 500)
+      })
+    }
+    expect((await query('SELECT 1 AS ok'))[0].ok).toBe(1)
   })
 })
 

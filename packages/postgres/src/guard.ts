@@ -122,8 +122,22 @@ const REFUSED_FUNCTIONS: Record<string, string> = {
 /** Functions that run SQL given as text, or read raw data: the guard cannot see what they read. */
 const READERS = /^((query|table|cursor|schema|database)_to_xml|dblink|pg_logical_slot_|pg_get_wal_)/
 
+/** Functions that change the server or hold locks other sessions wait on: refused even when the login could run them. */
+const ADMIN =
+  /^(pg_(create|drop|copy)_\w+|pg_replication_\w+|pg_switch_wal|pg_reload_conf|pg_rotate_logfile|pg_stat_reset\w*|pg_stat_statements_reset|pg_notify|pg_(try_)?advisory_\w+|pg_backup_(start|stop)|pg_(start|stop)_backup|pg_promote|pg_wal_replay_\w+|pg_log_\w+|pg_logical_\w+|pg_sync_replication_slots|pg_file_\w+|pg_(restore|clear|set)_\w+_stats|pg_import_system_collations|lo_\w+|lowrite)$/
+
 /** Settings a client may not change through Sosie: they keep the session read-only and its login what it is. */
 const PROTECTED = new Set(['default_transaction_read_only', 'transaction_read_only', 'session_authorization', 'role'])
+
+/**
+ * Settings Sosie pins at start-up because they change how Postgres reads a
+ * statement's text, which Sosie must read the same way: with
+ * standard_conforming_strings off, 'a\'' ends somewhere else.
+ */
+const PINNED: Record<string, { value: string; allowed: RegExp }> = {
+  standard_conforming_strings: { value: 'on', allowed: /^(on|true|yes|1)$/i },
+  client_encoding: { value: 'UTF8', allowed: /^(utf-?8|unicode)$/i },
+}
 
 /** What a statement does, whether Sosie runs it, and what in it may be a fake to look up. */
 export function analyze(stmt: Node, catalog: Catalog, limits: Limits): Analysis {
@@ -223,8 +237,14 @@ class Analyzer {
   #set(body: Node): void {
     const name = String(body.name ?? '').toLowerCase()
     if (body.kind === 'VAR_RESET' || body.kind === 'VAR_RESET_ALL') return
+    const pinned = PINNED[name]
     if (PROTECTED.has(name)) {
       this.#refuse({ code: '42501', message: `Sosie keeps ${name} as it is: the session stays read-only.` })
+    } else if (pinned) {
+      const value = constValue(body.args?.[0]?.A_Const)
+      if (body.kind !== 'VAR_SET_DEFAULT' && !(body.kind === 'VAR_SET_VALUE' && pinned.allowed.test(String(value)))) {
+        this.#refuse({ code: '42501', message: `Sosie keeps ${name} at ${pinned.value}: it must read each statement as Postgres does.` })
+      }
     } else if (name === 'transaction' || name === 'session characteristics') {
       this.#transaction({ options: body.args })
     } else if (name === 'statement_timeout' && body.kind === 'VAR_SET_VALUE') {
@@ -372,9 +392,10 @@ class Analyzer {
     const schema = names.length > 1 ? names[0] : undefined
     const reason = REFUSED_FUNCTIONS[name] ?? (READERS.test(name) ? READS : undefined)
     if (reason) this.#refuse({ code: '42501', message: `Sosie does not run ${name}(): it ${reason}.` })
+    if (ADMIN.test(name)) this.#refuse({ code: '25006', message: `Sosie does not run ${name}(): it changes the server. Sosie is read-only.` })
     if (name === 'set_config') {
-      const setting = body.args?.[0]?.A_Const?.sval?.sval
-      if (typeof setting !== 'string' || PROTECTED.has(setting.toLowerCase()) || setting.toLowerCase() === 'statement_timeout') {
+      const setting = String(body.args?.[0]?.A_Const?.sval?.sval ?? '').toLowerCase()
+      if (!setting || PROTECTED.has(setting) || setting in PINNED || setting === 'statement_timeout') {
         this.#refuse({ code: '42501', message: 'Sosie does not run set_config() on this setting: use SET.' })
       }
     }

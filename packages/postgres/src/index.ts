@@ -27,9 +27,14 @@ export const postgres: Source = {
       schema: catalog.schema,
       label,
       summary: counts.join(', '),
-      warnings: catalog.writable
-        ? [`The login can write to ${catalog.writable} ${catalog.writable === 1 ? 'table' : 'tables'}. Sosie's session is read-only, but a read-only login is safer.`]
-        : [],
+      warnings: [
+        ...(catalog.admin
+          ? ['The login is a superuser or can replicate. Sosie refuses the admin functions it knows, but a read-only login is safer.']
+          : []),
+        ...(catalog.writable
+          ? [`The login can write to ${catalog.writable} ${catalog.writable === 1 ? 'table' : 'tables'}. Sosie's session is read-only, but a read-only login is safer.`]
+          : []),
+      ],
       serve: (listen, faker) =>
         startEndpoint(listen, database, {
           upstream,
