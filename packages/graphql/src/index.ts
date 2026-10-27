@@ -18,7 +18,8 @@ export const graphql: Source = {
       headers.authorization ??= `Basic ${Buffer.from(`${decodeURIComponent(upstream.username)}:${decodeURIComponent(upstream.password)}`).toString('base64')}`
     }
     const url = new URL(upstream.href)
-    url.username = url.password = url.search = url.hash = ''
+    // A query on the URL (?api_key=) is a credential too: sent with every request, never shown.
+    url.username = url.password = url.hash = ''
     const api = new GraphqlUpstream(url, headers, options.statementTimeout)
     const label = `${url.host}${url.pathname}`
 
@@ -58,7 +59,7 @@ export const graphql: Source = {
       summary: `${neutral.entities.length} types, ${queries} ${queries === 1 ? 'query' : 'queries'}`,
       warnings: [],
       client: 'curl',
-      serve: (listen, faker) => startEndpoint(listen, { upstream: api, schema, fields, faker, log: (line) => process.stderr.write(`  ! ${line}\n`) }),
+      serve: (listen, faker) => startEndpoint(listen, { upstream: api, schema, fields, faker, maxItems: options.maxRows, log: (line) => process.stderr.write(`  ! ${line}\n`) }),
       async close() {},
     }
   },

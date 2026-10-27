@@ -1,6 +1,7 @@
 import { referenceOf, type Field, type RequestScope } from '@sosie/core'
 import {
   getNamedType,
+  isAbstractType,
   isInterfaceType,
   isObjectType,
   Kind,
@@ -8,10 +9,12 @@ import {
   visit,
   visitWithTypeInfo,
   type DocumentNode,
+  type FieldNode,
   type GraphQLNamedType,
   type GraphQLSchema,
   type ValueNode,
 } from 'graphql'
+import { TYPENAME } from './fake.js'
 
 /** What a request looks like once its fakes are real values again. */
 export interface Rewritten {
@@ -27,11 +30,16 @@ export interface Names {
   entityFor: (word: string) => string | undefined
 }
 
+/** `sosieTypename_: __typename`, asked of every object of an interface or a union, so Sosie knows how to fake it. */
+const ASK_TYPENAME: FieldNode = { kind: Kind.FIELD, alias: { kind: Kind.NAME, value: TYPENAME }, name: { kind: Kind.NAME, value: '__typename' } }
+
 /**
  * Turn the fakes in a request's arguments and variables back into real
  * values. An argument is looked up in the field it names on the type its
  * field returns: user(id:) in User.id, users(email:) in User.email,
- * orders(userId:) in User.id; text it names no field for, anywhere.
+ * orders(userId:) in User.id, node(id:) in the id of each type it may be;
+ * text it names no field for, anywhere. Each object of an interface or a
+ * union is asked its type.
  */
 export function rewrite(
   schema: GraphQLSchema,
@@ -43,16 +51,25 @@ export function rewrite(
   let changed = false
   const usages = new Map<string, { type: GraphQLNamedType | undefined; name: string }>()
 
-  const near = (name: string, type: GraphQLNamedType | undefined): Field | undefined => {
-    if (!type || !(isObjectType(type) || isInterfaceType(type))) return undefined
-    const own = names.fields.get(`${type.name}.${name}`)
-    if (own) return own
-    const target = referenceOf(name, names.entityFor)
-    return target ? names.fields.get(`${target}.id`) : undefined
+  /** The fields an argument may name: on the type its field returns, or on each type an interface or a union may be. */
+  const near = (name: string, type: GraphQLNamedType | undefined): Field[] => {
+    if (!type) return []
+    const types = isAbstractType(type) ? schema.getPossibleTypes(type) : isObjectType(type) || isInterfaceType(type) ? [type] : []
+    const fields = types.map((t) => {
+      const own = names.fields.get(`${t.name}.${name}`)
+      if (own) return own
+      const target = referenceOf(name, names.entityFor)
+      return target ? names.fields.get(`${target}.id`) : undefined
+    })
+    return [...new Map(fields.filter((f) => f !== undefined).map((f) => [f.id, f])).values()]
   }
 
-  const lookup = (text: string, field: Field | undefined): string | undefined =>
-    (field && scope.lookup(text, field)) ?? (/^\d+$/.test(text) ? undefined : scope.lookup(text))
+  /** The real value behind a fake: in the fields it may name, when they agree; text, but no bare number, anywhere when none does. */
+  const lookup = (text: string, fields: Field[], anywhere = true): string | undefined => {
+    const reals = new Set(fields.map((f) => scope.lookup(text, f)).filter((r) => r !== undefined))
+    if (reals.size) return reals.size === 1 ? [...reals][0] : undefined
+    return anywhere && !/^\d+$/.test(text) ? scope.lookup(text) : undefined
+  }
 
   const value = (node: ValueNode, name: string, type: GraphQLNamedType | undefined): ValueNode => {
     switch (node.kind) {
@@ -65,6 +82,19 @@ export function rewrite(
         return node.kind === Kind.STRING || !/^-?\d+(\.\d+)?$/.test(real)
           ? { kind: Kind.STRING, value: real }
           : { kind: /\./.test(real) ? Kind.FLOAT : Kind.INT, value: real }
+      }
+      // A boolean or a label the client saw is the fake of its field's: only that field turns it back.
+      case Kind.BOOLEAN: {
+        const real = lookup(String(node.value), near(name, type), false)
+        if (real === undefined || real === String(node.value)) return node
+        changed = true
+        return { kind: Kind.BOOLEAN, value: real === 'true' }
+      }
+      case Kind.ENUM: {
+        const real = lookup(node.value, near(name, type), false)
+        if (real === undefined || real === node.value) return node
+        changed = true
+        return { kind: Kind.ENUM, value: real }
       }
       case Kind.LIST:
         return { ...node, values: node.values.map((v) => value(v, name, type)) }
@@ -84,9 +114,19 @@ export function rewrite(
     visitWithTypeInfo(info, {
       Argument: {
         enter(node) {
+          // A directive's argument (@include(if:)) names no field.
+          if (info.getDirective()) return undefined
           const def = info.getFieldDef()
           const type = def ? getNamedType(def.type) : undefined
           return { ...node, value: value(node.value, node.name.value, type) }
+        },
+      },
+      SelectionSet: {
+        enter(node) {
+          const parent = info.getParentType()
+          if (!parent || !isAbstractType(parent) || node.selections.some((s) => s.kind === Kind.FIELD && s.alias?.value === TYPENAME)) return undefined
+          changed = true
+          return { ...node, selections: [...node.selections, ASK_TYPENAME] }
         },
       },
     }),
@@ -95,6 +135,12 @@ export function rewrite(
   const variable = (v: unknown, name: string, type: GraphQLNamedType | undefined): unknown => {
     if (Array.isArray(v)) return v.map((item) => variable(item, name, type))
     if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, item]) => [k, variable(item, k, type)]))
+    if (typeof v === 'boolean') {
+      const real = lookup(String(v), near(name, type), false)
+      if (real === undefined || real === String(v)) return v
+      changed = true
+      return real === 'true'
+    }
     if (typeof v !== 'string' && typeof v !== 'number') return v
     const real = lookup(String(v), near(name, type))
     if (real === undefined || real === String(v)) return v

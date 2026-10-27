@@ -109,7 +109,8 @@ one reads the record it names.
 
 A GraphQL API works the same way: point `SOSIE_UPSTREAM` at its endpoint
 (`https://api.internal/graphql`). Sosie reads the schema by introspection, or
-from `SOSIE_GRAPHQL_SCHEMA`, and sends only queries on, never mutations.
+from `SOSIE_GRAPHQL_SCHEMA`, answers the client's introspection from it, and
+sends only queries on, never mutations.
 
 Postgres, REST and GraphQL are the first sources. More databases come next, each
 a package behind the same interface.

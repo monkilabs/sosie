@@ -1,7 +1,21 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { singular, type Endpoint, type Faker, type Field } from '@sosie/core'
-import { getOperationAST, Kind, parse, print, validate, type DocumentNode, type FragmentDefinitionNode, type GraphQLSchema } from 'graphql'
-import { fakeData } from './fake.js'
+import { localRequest, pacer, singular, type Endpoint, type Faker, type Field } from '@sosie/core'
+import {
+  execute,
+  getOperationAST,
+  getVariableValues,
+  Kind,
+  parse,
+  print,
+  validate,
+  visit,
+  type DocumentNode,
+  type FieldNode,
+  type FragmentDefinitionNode,
+  type GraphQLSchema,
+  type SelectionNode,
+} from 'graphql'
+import { fakeData, TYPENAME } from './fake.js'
 import { rewrite } from './rewrite.js'
 import type { GraphqlUpstream } from './upstream.js'
 
@@ -11,105 +25,153 @@ export interface GraphqlContext {
   /** Fields of the neutral schema, by id. */
   fields: Map<string, Field>
   faker: Faker
+  /** Items of a list at most, as --max-rows. */
+  maxItems: number
   log: (line: string) => void
 }
 
 interface Request {
-  query?: string
-  variables?: Record<string, unknown>
-  operationName?: string
+  query?: unknown
+  variables?: unknown
+  operationName?: unknown
   extensions?: { persistedQuery?: unknown }
 }
 
 const MAX_REQUEST = 1024 * 1024
-const HIDDEN = 'A resolver failed; Sosie hides its message, which may quote a value from your data.'
+const RESOLVER_FAILED = 'A resolver failed; Sosie hides its message, which may quote a value from your data.'
+const REFUSED = 'The API refused the query; Sosie hides its message, which may quote a value from your data.'
+/** An error code as APIs write them (FORBIDDEN, BAD_USER_INPUT): anything else in its place is dropped. */
+const CODE = /^[A-Z][A-Z0-9_]{0,63}$/
 
 /**
  * The local GraphQL address, at the API's own path. Each operation is parsed
- * and checked against the schema; only queries reach the API, with their
- * fakes turned back into real values, and every value of `data` comes back
- * faked.
+ * and checked against the schema, its variables too; only queries reach the
+ * API, with their fakes turned back into real values, and every value of
+ * `data` comes back faked. Introspection is answered from the schema.
  */
 export async function startEndpoint(listen: { host: string; port: number }, ctx: GraphqlContext): Promise<Endpoint> {
   const path = ctx.upstream.url.pathname
   const byWord = new Map([...new Set([...ctx.fields.keys()].map((id) => id.slice(0, id.indexOf('.'))))].map((name) => [singular(name.toLowerCase()), name]))
   const names = { fields: ctx.fields, entityFor: (word: string) => byWord.get(singular(word.toLowerCase())) }
 
-  const one = async (request: Request): Promise<{ status: number; body: unknown }> => {
-    if (typeof request.query !== 'string') {
-      const message = request.extensions?.persistedQuery
+  const one = async (request: unknown): Promise<{ status: number; body: unknown }> => {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) return failed(400, 'A request is a JSON object with a query.')
+    const { query, variables = {}, operationName, extensions } = request as Request
+    if (typeof query !== 'string') {
+      const message = extensions?.persistedQuery
         ? 'Sosie needs the query text: it does not support persisted queries.'
         : 'The request has no query.'
       return failed(400, message)
     }
+    if (variables !== null && (typeof variables !== 'object' || Array.isArray(variables))) return failed(400, 'The variables are a JSON object.')
+    if (operationName !== undefined && operationName !== null && typeof operationName !== 'string') return failed(400, 'The operationName is a string.')
     let document: DocumentNode
     try {
-      document = parse(request.query)
+      document = parse(query)
     } catch (error) {
       return failed(400, (error as Error).message)
     }
     // Errors of the request against the schema hold only what the client wrote, and the schema.
     const invalid = validate(ctx.schema, document)
-    if (invalid.length) return { status: 400, body: { errors: invalid.map((e) => ({ message: e.message, ...(e.locations && { locations: e.locations }) })) } }
-    const operation = getOperationAST(document, request.operationName)
+    if (invalid.length) return { status: 400, body: { errors: invalid.map(clientError) } }
+    const operation = getOperationAST(document, operationName ?? undefined)
     if (!operation) return failed(400, 'Name the operation to run: the document has several.')
     if (operation.operation !== 'query') {
       return failed(400, 'Sosie is read-only: only queries reach the API, not mutations or subscriptions.', 'SOSIE_READ_ONLY')
     }
+    if (usesName(document, TYPENAME)) return failed(400, `Sosie uses the name ${TYPENAME} itself: choose another alias.`)
+    // Variables are checked here as well, so an API never answers about one with the real value Sosie put in it.
+    const given = (variables ?? {}) as Record<string, unknown>
+    const checked = getVariableValues(ctx.schema, operation.variableDefinitions ?? [], given)
+    if (checked.errors) return { status: 400, body: { errors: checked.errors.map(clientError) } }
 
-    const scope = ctx.faker.request(`${request.query}\n${JSON.stringify(request.variables ?? {})}`)
-    const real = rewrite(ctx.schema, document, request.variables ?? {}, scope, names)
+    const fragments: Record<string, FragmentDefinitionNode> = Object.fromEntries(
+      document.definitions.filter((d) => d.kind === Kind.FRAGMENT_DEFINITION).map((d) => [d.name.value, d]),
+    )
+    // Introspection is answered from the schema Sosie holds, with what the client sent: the API never sees it.
+    const roots = rootFields(operation.selectionSet.selections, fragments)
+    if (roots.every((f) => f.name.value.startsWith('__'))) {
+      return { status: 200, body: await execute({ schema: ctx.schema, document, operationName: operationName ?? undefined, variableValues: given }) }
+    }
+    if (roots.some((f) => f.name.value === '__schema' || f.name.value === '__type')) {
+      return failed(400, 'Ask for __schema and __type in a query of their own: Sosie answers them from the schema, without the API.')
+    }
+
+    const scope = ctx.faker.request(`${query}\n${JSON.stringify(given)}`)
+    const real = rewrite(ctx.schema, document, given, scope, names)
     const answer = await ctx.upstream.post({
-      query: real.changed ? print(real.document) : request.query,
+      query: real.changed ? print(real.document) : query,
       variables: real.variables,
-      ...(request.operationName && { operationName: request.operationName }),
+      ...(operationName && { operationName }),
     })
     if (!/json/i.test(answer.type)) return failed(502, `The API answered with ${answer.type.split(';')[0] || 'no content type'}; Sosie fakes JSON only.`)
-    let body: { data?: unknown; errors?: { message?: string; path?: unknown; locations?: unknown; extensions?: { code?: unknown } }[] }
+    let body: { data?: unknown; errors?: unknown }
     try {
       body = JSON.parse(answer.body)
     } catch {
       return failed(502, 'The API answered with JSON that does not parse.')
     }
-    const introspection = operation.selectionSet.selections.every((s) => s.kind === Kind.FIELD && s.name.value.startsWith('__'))
-    if (introspection) return { status: answer.status, body }
+    if (!body || typeof body !== 'object') return failed(502, 'The API answered with JSON that is not a GraphQL response.')
 
-    const fragments: Record<string, FragmentDefinitionNode> = Object.fromEntries(
-      document.definitions.filter((d) => d.kind === Kind.FRAGMENT_DEFINITION).map((d) => [d.name.value, d]),
-    )
+    const keys = responseKeys(document)
     const executed = 'data' in body
+    const faked = await fakeData(body.data, operation.selectionSet.selections, ctx.schema.getQueryType()!, {
+      schema: ctx.schema,
+      faker: ctx.faker,
+      fields: ctx.fields,
+      fragments,
+      maxItems: ctx.maxItems,
+      pace: pacer(),
+    })
+    const errors = Array.isArray(body.errors) ? (body.errors as { path?: unknown; extensions?: { code?: unknown } }[]) : []
     return {
       status: answer.status,
       body: {
-        ...(executed && { data: fakeData(body.data, operation.selectionSet, ctx.schema.getQueryType()!, { schema: ctx.schema, faker: ctx.faker, fields: ctx.fields, fragments }) }),
-        ...(body.errors && {
-          // A resolver's message may quote data; one from before execution quotes only the query.
-          errors: body.errors.map((e) => ({
-            message: executed ? HIDDEN : scope.scrub(String(e.message ?? '')),
-            ...(e.path !== undefined && { path: e.path }),
-            ...(!executed && e.locations !== undefined && { locations: e.locations }),
-            ...(typeof e.extensions?.code === 'string' && { extensions: { code: e.extensions.code } }),
+        ...(executed && { data: faked.data }),
+        ...(errors.length && {
+          // Sosie checked the query and its variables itself: what the API says beyond that may quote data, so
+          // only where it happened and its code come back.
+          errors: errors.map((e) => ({
+            message: executed ? RESOLVER_FAILED : REFUSED,
+            ...(validPath(e?.path, keys) && { path: e.path }),
+            ...(typeof e?.extensions?.code === 'string' && CODE.test(e.extensions.code) && { extensions: { code: e.extensions.code } }),
           })),
+        }),
+        ...(faked.cut && {
+          extensions: {
+            sosie: `Sosie returned the first ${ctx.maxItems} items of a list; the rest were cut. Narrow the query, or start Sosie with a higher --max-rows.`,
+          },
         }),
       },
     }
   }
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
+    if (!localRequest(req.headers.host, listen.host)) return send(res, 403, { errors: [{ message: 'Sosie answers requests for localhost only.' }] })
     const url = new URL(req.url ?? '/', 'http://sosie.local')
     if (url.pathname.replace(/\/$/, '') !== path.replace(/\/$/, '')) return send(res, 404, { errors: [{ message: `Sosie serves the GraphQL API at ${path}.` }] })
-    let request: Request | Request[]
+    let request: unknown
     if (req.method === 'GET') {
-      const variables = url.searchParams.get('variables')
+      let variables: unknown
+      try {
+        variables = url.searchParams.has('variables') ? JSON.parse(url.searchParams.get('variables')!) : undefined
+      } catch {
+        return send(res, 400, { errors: [{ message: 'The variables are not JSON.' }] })
+      }
       request = {
         ...(url.searchParams.has('query') && { query: url.searchParams.get('query')! }),
-        ...(variables && { variables: JSON.parse(variables) }),
+        ...(variables !== undefined && { variables }),
         ...(url.searchParams.has('operationName') && { operationName: url.searchParams.get('operationName')! }),
       }
     } else if (req.method === 'POST') {
+      // JSON or GraphQL only: a form or text/plain, which any web page may send, is refused.
+      const type = (req.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase()
+      if (type !== 'application/json' && type !== 'application/graphql') {
+        return send(res, 415, { errors: [{ message: 'Sosie takes a POST as application/json, or application/graphql.' }] })
+      }
       const text = await read(req)
       try {
-        request = /application\/graphql\b/.test(req.headers['content-type'] ?? '') ? { query: text } : JSON.parse(text)
+        request = type === 'application/graphql' ? { query: text } : JSON.parse(text)
       } catch {
         return send(res, 400, { errors: [{ message: 'The request body is not JSON.' }] })
       }
@@ -156,6 +218,41 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
 
 function failed(status: number, message: string, code?: string) {
   return { status, body: { errors: [{ message, ...(code && { extensions: { code } }) }] } }
+}
+
+/** An error about what the client sent, which holds only that and the schema. */
+function clientError(error: { message: string; locations?: readonly unknown[] | undefined }) {
+  return { message: error.message, ...(error.locations && { locations: error.locations }) }
+}
+
+/** The fields asked of the root, its fragments' included. */
+function rootFields(selections: readonly SelectionNode[], fragments: Record<string, FragmentDefinitionNode>, seen = new Set<string>()): FieldNode[] {
+  return selections.flatMap((s) => {
+    if (s.kind === Kind.FIELD) return [s]
+    if (s.kind === Kind.INLINE_FRAGMENT) return rootFields(s.selectionSet.selections, fragments, seen)
+    if (seen.has(s.name.value) || !fragments[s.name.value]) return []
+    seen.add(s.name.value)
+    return rootFields(fragments[s.name.value]!.selectionSet.selections, fragments, seen)
+  })
+}
+
+/** Every response key a document asks for: its fields' names and aliases. */
+function responseKeys(document: DocumentNode): Set<string> {
+  const keys = new Set<string>()
+  visit(document, { Field: (node) => void keys.add(node.alias?.value ?? node.name.value) })
+  return keys
+}
+
+/** An error's path, when it is made of the query's own keys and list positions. */
+function validPath(path: unknown, keys: Set<string>): path is (string | number)[] {
+  return Array.isArray(path) && path.every((p) => (typeof p === 'number' && Number.isInteger(p)) || (typeof p === 'string' && keys.has(p)))
+}
+
+/** Whether a document uses a name as a field or an alias. */
+function usesName(document: DocumentNode, name: string): boolean {
+  let found = false
+  visit(document, { Field: (node) => void (found ||= node.name.value === name || node.alias?.value === name) })
+  return found
 }
 
 function read(req: IncomingMessage): Promise<string> {

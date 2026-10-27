@@ -190,7 +190,7 @@ export type FieldType =
 ```
 
 **Choosing a source:** the CLI asks each source it knows whether it `matches`
-the upstream URL, in order: Postgres, then REST for any other http(s) URL. Sources from other packages, listed
+the upstream URL, in order: Postgres, then GraphQL for an http(s) URL whose path ends in `graphql`, then REST for any other. Sources from other packages, listed
 in `sosie.yml`, come after v0.1, when the interface is settled; until 1.0 it may
 change between minor versions.
 
@@ -375,7 +375,7 @@ lists it, for when several Sosies of a kind run; without it, the newest.
 | `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice; every value a consistent fake |
 | `request` | REST | `path` | The status and the JSON body of a GET through Sosie, up to 200 items of each list; a path that names another host is refused |
-| `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie |
+| `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list |
 
 When Sosie is not running, both say so, and how to start it.
 
@@ -702,8 +702,9 @@ as written.
 
 For the team's own GraphQL API. `SOSIE_UPSTREAM` is its endpoint, whose path
 ends in `graphql` (`https://api.internal/graphql`); any other http(s) URL is
-the REST source's. Credentials as for REST: `SOSIE_UPSTREAM_HEADERS`, or a user
-and password in the URL; the client's are never passed on.
+the REST source's. Credentials as for REST: `SOSIE_UPSTREAM_HEADERS`, a user
+and password in the URL, or a query on it, never shown; the client's are never
+passed on.
 
 ### Schema
 
@@ -718,32 +719,61 @@ name (`DateTime`, `Date`, `UUID`, `JSON`, `BigInt`); `Email` and
 
 ### Endpoint and guard
 
-The API's own path on a local address, by `GET` and `POST` (JSON, or
-`application/graphql`), batches included. Each operation is parsed and checked
-against the schema; only queries reach the API, so a mutation or a subscription
-is answered with an error and never sent. A persisted query without its text is
+The API's own path on a local address, by `GET` and `POST`, batches included.
+A `POST` is JSON or `application/graphql`; any other type, as a web page's form
+or `text/plain` would send, gets `415`. On 127.0.0.1, a `Host` other than
+localhost gets `403`, as for REST. Each operation is parsed and checked against
+the schema, and its variables against their types, so the API is never asked
+about a value Sosie turned back: what fails there gets `400`, quoting only what
+the client sent. Only queries reach the API, so a mutation or a subscription is
+answered with an error and never sent. A persisted query without its text is
 refused. POSTs are not redirected: the body and the credentials stay with the
 API.
+
+Introspection is answered from the schema Sosie holds, with what the client
+sent, and never reaches the API; so clients introspect an API that has
+introspection off. `__schema` and `__type` beside data fields are refused: ask
+for them in a query of their own.
 
 ### Faking
 
 Every leaf of `data` is faked by the schema field it is, through aliases,
 fragments and nested objects, so `order.user.id`, `order.userId` and `user.id`
 are one fake, and a person's email is the database's fake through the shared
-store. `__typename` and introspection pass as they are.
+store. A field asked for twice, by two fragments or twice by name, is one
+field with its selections merged. An object of an interface or a union is
+faked by its own type: Sosie asks each one its `__typename`, under an alias of
+its own (`sosieTypename_`) the client never sees, and an object that does not
+say, or names a type it cannot be, comes back `null`. So a `User` under
+`node(id:)` fakes its id as `User.id`, and a union member never passes by
+another type's rule. `__typename` comes back as the schema names it. A list
+keeps its first `--max-rows` items, and the response's `extensions.sosie` says
+the rest were cut; a large answer is faked a slice at a time.
 
-Errors by phase, as with Postgres: an error from checking the query, before
-the API ran it, holds only the query and the schema and comes back scrubbed;
-once the API ran it, a resolver's message may quote data, so only its path and
-its code come back. Extensions are dropped.
+Errors: since Sosie checked the query and its variables itself, anything the API
+says beyond that may quote data, whether it ran the query (`data` is there) or
+not. Every message is replaced by Sosie's; an error's `path` comes back when it
+is made of the query's own keys and list positions, its `extensions.code` when
+it looks like a code (`FORBIDDEN`); nothing else does.
 
 ### Query by what you saw
 
 Each argument, and each variable where it is used, is looked up in the field it
 names on the type its field returns: `user(id:)` in `User.id`,
-`users(email:)` in `User.email`, `orders(userId:)` in `User.id`; inside input
-objects and lists too. Text it names no field for is looked up anywhere; a
-number that names no field (`first: 10`) stays as written.
+`users(email:)` in `User.email`, `orders(userId:)` in `User.id`,
+`users(role: viewer)` and `users(active: false)` as the label and the boolean
+they show; inside input objects and lists too. On an interface or a union, in
+that field of each type it may be, when they agree: `node(id:)` in `User.id`,
+`Order.id` and the rest. Text it names no field for is looked up anywhere; a
+number that names no field (`first: 10`) stays as written; a directive's
+argument (`@include(if:)`) is left alone.
+
+### Limits
+
+- A JSON scalar's keys that look like words (`{ "jdoe": … }`) stay, as a json
+  column's do.
+- The schema, its descriptions included, is visible: it is the API, not its
+  data.
 
 ## Adding a source after v0.1
 
@@ -789,9 +819,12 @@ domains make a person's email the same fake from the database and from the API.
   nothing. A person's email is the same fake from the database and from the
   API.
 - **GraphQL, end to end.** A fake GraphQL API built with graphql-js serves the
-  same people: relations both ways, aliases, fragments, variables, batches, a
-  mutation that must never run, a resolver whose error quotes a canary, and
-  introspection on and off.
+  same people: relations both ways, an interface and a union, aliases,
+  fragments that ask a field twice, variables, batches, a mutation that must
+  never run, a resolver whose error quotes a canary, a server that refuses
+  without `data` and quotes canaries, a redirect to a recording server, and
+  introspection on and off. Fakes the client saw are sent back in variables of
+  the wrong type and through introspection: no canary may come back.
 - **The CLI.** The built CLI is run: start against a database and an API, MCP
   over stdio, `scan`, Ctrl+C, and the errors a developer meets first.
 - **The dependency rule.** A test reads the imports and manifests.

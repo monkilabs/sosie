@@ -1,3 +1,5 @@
+import { readCapped } from '@sosie/core'
+
 /** The GraphQL API upstream: Sosie's credentials, no redirects, a timeout and a size cap. */
 export interface UpstreamAnswer {
   status: number
@@ -28,9 +30,11 @@ export class GraphqlUpstream {
       redirect: 'manual',
       signal: AbortSignal.timeout(this.timeout),
     })
-    if (response.status >= 300 && response.status < 400) throw new Error(`The API redirected (${response.status}); Sosie does not follow a GraphQL request elsewhere.`)
-    const body = await response.text()
-    if (body.length > MAX_BODY) throw new Error(`The API answered with more than ${MAX_BODY} bytes; Sosie fakes up to that.`)
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel()
+      throw new Error(`The API redirected (${response.status}); Sosie does not follow a GraphQL request elsewhere.`)
+    }
+    const body = await readCapped(response, MAX_BODY)
     return { status: response.status, type: response.headers.get('content-type') ?? '', body }
   }
 }
