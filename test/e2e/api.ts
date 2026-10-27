@@ -163,8 +163,16 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
         relative: '/v1/users/quillon?page=2',
         note: `${origin}/v1/notes leave the parcel with Quillon`,
         broken: `${origin}/v1/users/%zzVantablack`,
+        paging: `${origin}/v1/users?start=7739182046&count=7739182046&offset=7739182046&page=2`,
+        nested: `${origin}/v1/quillon/repos`,
         outside: `${origin}/static/Vantablack.png`,
       })
+    }
+    if (path === '/handles') return json(200, Object.keys(handles).filter((h) => h === h.toLowerCase()).map((handle) => ({ handle })))
+    // An API that answers with what it was asked, as a key: the real value Sosie sent it.
+    if (path === '/echo') {
+      const handle = url.searchParams.get('handle') ?? ''
+      return json(200, { byHandle: { [handle]: { ok: true } }, link: `${origin}/v1/search?${handle}=1` })
     }
     if (path === '/members') return json(200, { quillon: { role: 'owner' }, zephyrine: { role: 'guest' } })
     if (path === '/big') {

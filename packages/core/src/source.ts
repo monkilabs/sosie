@@ -45,13 +45,16 @@ export type FieldType =
   | { kind: 'unknown' }
 
 export interface Faker {
-  /** The fake of a value read from a field. Null stays null; a field that passes returns the value unchanged. */
-  value(value: Value, field: Field): Value
+  /**
+   * The fake of a value read from a field. Null stays null; a field that passes returns the value unchanged.
+   * With the request's scope, a JSON key that is a value the request turned back is faked, however it looks.
+   */
+  value(value: Value, field: Field, scope?: RequestScope): Value
   /**
    * The fake of a value no field holds, such as length(email) or upper(name).
    * `sent` is what the client sent: a JSON key it wrote is structure, not a value.
    */
-  computed(value: Value, type: FieldType, sent?: string): Value
+  computed(value: Value, type: FieldType, sent?: string, scope?: RequestScope): Value
   /** Whether a field's values pass unchanged. */
   passes(field: Field): boolean
   /**
@@ -70,6 +73,8 @@ export interface RequestScope {
    * leaves the value as written.
    */
   lookup(fake: string, near?: Field): string | undefined
+  /** Whether this request turned a fake into this real value, ignoring case: an answer that holds it is echoing it. */
+  turnedBack(real: string): boolean
   /** Text with every real value this request substituted turned back into its fake, and anything quoted the client did not send masked. */
   scrub(text: string): string
 }

@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { localRequest, pacer, type Endpoint, type Faker, type Field } from '@sosie/core'
+import { localRequest, pacer, type Endpoint, type Faker, type Field, type RequestScope } from '@sosie/core'
 import { fakeBody, queryField, type FakeContext } from './fake.js'
 import type { Api } from './openapi.js'
 import { PAGING, PATH_WORD, QUERY_NAME, route, singular, valueByHabit, wordName } from './paths.js'
@@ -29,6 +29,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
   const byWord = new Map((ctx.api?.schema.entities ?? []).map((e) => [singular(e.name.toLowerCase()), e.name]))
   // A word that is no name (an email in a path) names no entity, so it never becomes part of a domain.
   const entityFor = (word: string) => byWord.get(singular(word.toLowerCase())) ?? (/^[A-Za-z][\w-]*$/.test(word) ? singular(word.toLowerCase()) : '*')
+  const documented = (word: string) => byWord.has(singular(word.toLowerCase()))
   const operations = ctx.api?.operations ?? []
   /**
    * Words of paths and query names that are the API's own, shown as they are:
@@ -39,8 +40,11 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
   const under = (path: string) => path === basePath || path.startsWith(`${basePath}/`)
   let local = ''
 
-  /** A URL into the API, as Sosie's own, with every value in it faked; undefined for any other text. */
-  const link = (text: string): string | undefined => {
+  /**
+   * A URL into the API, as Sosie's own, with every value in it faked; undefined for any other text.
+   * A word the request turned back is an echo of a value, never a name, however it looks.
+   */
+  const link = (text: string, scope: RequestScope): string | undefined => {
     // A link is one token: text that starts with a URL and goes on is text.
     const absolute = /^https?:\/\/\S+$/i.test(text)
     if (!absolute && !/^\/(?!\/)\S*$/.test(text)) return undefined
@@ -53,18 +57,23 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     if (url.origin !== base.origin || !under(url.pathname)) return undefined
     const real = segmentsOf(url.pathname.slice(basePath.length))
     if (!real) return undefined
-    const rt = route(real, operations, entityFor, (segment, _, afterName) => valueByHabit(segment, afterName, known))
+    const shown = (word: string) => known.has(word) && !scope.turnedBack(word)
+    // A word the client has not seen, and the document does not name, names no entity: it never becomes part of a domain.
+    const rt = route(real, operations, (word) => (shown(word) || documented(word) ? entityFor(word) : '*'), (segment, _, afterName) =>
+      valueByHabit(segment, afterName, known),
+    )
     const path = real.map((segment, i) => {
-      const field = rt.values.get(i) ?? (known.has(segment) ? undefined : PATH_WORD)
+      const field = rt.values.get(i) ?? (shown(segment) ? undefined : PATH_WORD)
       return encodeURIComponent(field ? String(ctx.faker.value(segment, field)) : segment)
     })
     const query = new URLSearchParams()
     for (const [name, value] of url.searchParams) {
       // Sosie's own credentials in the query (SOSIE_UPSTREAM's ?api_key=) are never shown.
       if (ctx.upstream.params.has(name)) continue
-      const shown = wordName(name) || known.has(name) ? name : String(ctx.faker.value(name, QUERY_NAME))
-      const keep = PAGING.has(name) && /^\d+$/.test(value)
-      query.append(shown, keep ? value : String(ctx.faker.value(value, queryField(name, value, rt, { fields, entityFor }))))
+      const named = (wordName(name) || known.has(name)) && !scope.turnedBack(name) ? name : String(ctx.faker.value(name, QUERY_NAME))
+      // A page's number stays; a long number under such a name may be an id, and is faked.
+      const keep = PAGING.has(name) && /^\d{1,5}$/.test(value)
+      query.append(named, keep ? value : String(ctx.faker.value(value, queryField(name, value, rt, { fields, entityFor }))))
     }
     const search = query.toString()
     // The fragment is the client's own business, and may hold anything: it is left out.
@@ -87,8 +96,10 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     // A word Sosie made up for a link turns back into the API's word; a known word stays.
     const words = sent.map((segment) => (known.has(segment) ? segment : scope.lookup(segment, PATH_WORD)))
     const routed = sent.map((segment, i) => words[i] ?? segment)
+    // A word the client has not seen names no entity, as in the link it came from.
+    const unseen = new Set(routed.filter((word, i) => words[i] !== undefined && word !== sent[i]))
     // Any other segment that is a fake Sosie gave is a value, whatever its shape.
-    const rt = route(routed, operations, entityFor, (segment, i, afterName) =>
+    const rt = route(routed, operations, (word) => (unseen.has(word) && !documented(word) ? '*' : entityFor(word)), (segment, i, afterName) =>
       words[i] === undefined && (valueByHabit(segment, afterName, known) || scope.lookup(segment) !== undefined),
     )
     const real = routed.map((segment, i) => {
@@ -139,7 +150,16 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     } catch {
       return send(res, 502, { error: 'The API answered with JSON that does not parse.' })
     }
-    const fake: FakeContext = { faker: ctx.faker, api: ctx.api, fields, entityFor, url: link, maxItems: ctx.maxItems, pace: pacer() }
+    const fake: FakeContext = {
+      faker: ctx.faker,
+      scope,
+      api: ctx.api,
+      fields,
+      entityFor,
+      url: (text) => link(text, scope),
+      maxItems: ctx.maxItems,
+      pace: pacer(),
+    }
     const faked = await fakeBody(body, rt, fake)
     const notice = `Sosie returned the first ${ctx.maxItems} items of a list; the rest were cut. Narrow the request, or start Sosie with a higher --max-rows.`
     return send(res, answer.status, faked.body, faked.cut ? { 'sosie-notice': notice } : {})

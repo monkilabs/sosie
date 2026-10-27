@@ -63,10 +63,12 @@ const UPPER = LOWER.toUpperCase()
 /** Letters and digits of any script replaced, everything else kept: 'AB-1234' becomes 'QX-8071'. A leading digit stays non-zero. */
 export function shape(real: string, random: Random): string {
   let out = ''
-  for (let i = 0; i < real.length; i++) {
-    const ch = real[i]!
+  // By code point, so a letter outside the basic plane (𠮷) is one letter, not two halves that match nothing.
+  const chars = Array.from(real)
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]!
     if (ch >= '0' && ch <= '9') {
-      const leading = (i === 0 || !/[0-9]/.test(real[i - 1]!)) && /[0-9]/.test(real[i + 1] ?? '')
+      const leading = (i === 0 || !/[0-9]/.test(chars[i - 1]!)) && /[0-9]/.test(chars[i + 1] ?? '')
       out += String(random.int(leading ? 1 : 0, 9))
     } else if (ch >= 'a' && ch <= 'z') out += random.pick([...LOWER])
     else if (ch >= 'A' && ch <= 'Z') out += random.pick([...UPPER])

@@ -1,6 +1,7 @@
 import { mkdtempSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { createFaker, loadRules, Store, storeDir, type Running } from '@sosie/core'
 import { rest } from '@sosie/rest'
@@ -40,6 +41,11 @@ async function startRest(
     address: endpoint.address,
     connection,
     rules: loaded,
+    /** The store's domain names, which `sosie scan` prints: no real value may be among them. */
+    domains: () =>
+      (new DatabaseSync(join(storeDir(home), 'store.db'), { readOnly: true }).prepare('SELECT DISTINCT domain FROM value').all() as { domain: string }[]).map(
+        (r) => r.domain,
+      ),
     get,
     async close() {
       await endpoint.close()
@@ -130,6 +136,23 @@ describe('an API without an OpenAPI document', () => {
     expect(api.requests.at(-1)!.path).toBe('/v1/search?q%5BQuillon%5D=1&Vantablack=1')
     await sosie.get(body.next)
     expect(api.requests.at(-1)!.path).toBe('/v1/users?after=7739182046&phone=7739182046')
+    // A long number under a paging name may be an id: it is faked; a page's number stays.
+    expect(body.paging).toMatch(/[?&]page=2$/)
+    await sosie.get(body.paging)
+    expect(api.requests.at(-1)!.path).toBe('/v1/users?start=7739182046&count=7739182046&offset=7739182046&page=2')
+    // A word of a path the client has not seen names no entity, so no domain holds it.
+    await sosie.get(body.nested)
+    expect(api.requests.at(-1)!.path).toBe('/v1/quillon/repos')
+    expect(canariesIn(JSON.stringify(sosie.domains()))).toEqual([])
+  })
+
+  it('fakes a key that echoes a value it turned back, however it looks', async () => {
+    const [{ handle }] = (await sosie.get('/handles')).body
+    const { body } = await sosie.get(`/echo?handle=${handle}`)
+    expect(api.requests.at(-1)!.path).toBe('/v1/echo?handle=quillon')
+    expect(Object.keys(body.byHandle)).toHaveLength(1)
+    expect(Object.keys(body.byHandle)[0]).not.toBe('quillon')
+    expect(body.link).not.toContain('quillon')
   })
 
   it('fakes again in a link the real value it turned a fake into', async () => {

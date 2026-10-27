@@ -1,4 +1,4 @@
-import { structuralKey, type Faker, type Field } from '@sosie/core'
+import { structuralKey, type Faker, type Field, type RequestScope } from '@sosie/core'
 import { merged, refName, referenceOf, type Api, type Node } from './openapi.js'
 import { idField, wordName, type Route } from './paths.js'
 
@@ -10,6 +10,8 @@ const MAP_KEY: Field = { id: '$key', name: 'key', type: { kind: 'string' } }
 
 export interface FakeContext {
   faker: Faker
+  /** The request's scope: a key that is a value it turned back is an echo, never structure. */
+  scope?: RequestScope
   api: Api | undefined
   /** Fields of the OpenAPI schema, by id. */
   fields: Map<string, Field>
@@ -52,9 +54,9 @@ async function walk(value: unknown, node: Node | undefined, entity: string, pref
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       const documented = properties?.[k]
-      const structural = documented !== undefined || (!map && structuralKey(k))
+      const structural = documented !== undefined || (!map && structuralKey(k) && !ctx.scope?.turnedBack(k))
       // A key that is a value (a map keyed by email) is faked, and never named in a field.
-      const name = structural ? k : (ctx.faker.value(k, MAP_KEY) as string)
+      const name = structural ? k : (ctx.faker.value(k, MAP_KEY, ctx.scope) as string)
       const envelope = !schema && !prefix && ENVELOPES.has(k) && v !== null && typeof v === 'object'
       out[name] = await walk(v, documented ?? map, entity, envelope ? '' : `${prefix}${structural ? k : '*'}.`, structural ? k : '', ctx, state)
     }
@@ -66,7 +68,7 @@ async function walk(value: unknown, node: Node | undefined, entity: string, pref
   }
   const field = fieldAt(entity, prefix, key, value, ctx)
   const text = typeof value === 'string' ? value : String(value)
-  const fake = ctx.faker.value(text, field) as string | null
+  const fake = ctx.faker.value(text, field, ctx.scope) as string | null
   if (fake === null) return null
   if (typeof value === 'number') return Number.isFinite(Number(fake)) ? Number(fake) : fake
   if (typeof value === 'boolean') return /^(t|true)$/i.test(fake)

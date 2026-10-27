@@ -184,6 +184,24 @@ describe('fakes by type', async () => {
     expect(faker.computed('6.02e23', { kind: 'decimal' })).toMatch(/^\d\.\d\de23$/)
   })
 
+  it('a letter outside the basic plane is faked like any other', async () => {
+    const { faker } = await serve()
+    for (const name of ['𠮷野', '𠮷-12']) expect(faker.computed(name, { kind: 'string' }) as string).not.toMatch(/𠮷/u)
+  })
+
+  it('a JSON key that echoes a value the request turned back is faked, even when it looks like a word', async () => {
+    const { faker } = await serve()
+    const settings = { id: 'users.settings', name: 'settings', type: { kind: 'json' } } as const
+    const city = faker.value('vantaville', { id: 'users.city', name: 'city', type: { kind: 'string' } }) as string
+    const scope = faker.request(`SELECT settings FROM users WHERE city = '${city}'`)
+    expect(scope.lookup(city)).toBe('vantaville')
+    expect(scope.turnedBack('Vantaville')).toBe(true)
+    expect(Object.keys(JSON.parse(faker.value('{"vantaville":1,"theme":2}', settings) as string))).toEqual(['vantaville', 'theme'])
+    const echoed = Object.keys(JSON.parse(faker.value('{"vantaville":1,"theme":2}', settings, scope) as string))
+    expect(echoed[0]).not.toBe('vantaville')
+    expect(echoed[1]).toBe('theme')
+  })
+
   it('a value of another form than its type, as an API may send, is faked whole', async () => {
     const { faker } = await serve()
     // An "e" in text is no exponent, and a "/" no prefix length: nothing of either value stays.
