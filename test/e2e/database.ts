@@ -24,10 +24,14 @@ export default async function setup(project: TestProject) {
   let embedded: EmbeddedPostgres | undefined
   if (!server) {
     // embedded-postgres hooks the process's exit when imported, and its beforeExit hook exits with 0,
-    // which would turn a failed run green: import it only when it is needed, and take that hook off.
-    const hooked = process.listeners('beforeExit')
+    // which would turn a failed run green: import it only when it is needed, and take its exit hooks
+    // off. The teardown below stops the server; its hooks on signals stay, for Ctrl+C.
+    const events = ['beforeExit', 'exit'] as const
+    const hooked = events.map((event) => process.listeners(event))
     const { default: Embedded } = await import('embedded-postgres')
-    for (const listener of process.listeners('beforeExit')) if (!hooked.includes(listener)) process.off('beforeExit', listener)
+    events.forEach((event, i) => {
+      for (const listener of process.listeners(event)) if (!hooked[i]!.includes(listener)) process.off(event, listener)
+    })
     const port = await freePort()
     embedded = new Embedded({
       databaseDir: mkdtempSync(join(tmpdir(), 'sosie-pg-')),
