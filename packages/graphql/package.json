@@ -1,0 +1,39 @@
+{
+  "name": "@sosie/graphql",
+  "version": "0.1.0",
+  "description": "The GraphQL source of Sosie: a local GraphQL endpoint in front of your API that fakes every value.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monkilabs/sosie.git",
+    "directory": "packages/graphql"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@sosie/core": "^0.1.0",
+    "graphql": "^17.0.2"
+  },
+  "keywords": [
+    "graphql",
+    "ai",
+    "llm",
+    "privacy",
+    "fake-data",
+    "anonymization"
+  ]
+}

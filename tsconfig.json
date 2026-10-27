@@ -5,7 +5,8 @@
     "paths": {
       "@sosie/core": ["./packages/core/src/index.ts"],
       "@sosie/postgres": ["./packages/postgres/src/index.ts"],
-      "@sosie/rest": ["./packages/rest/src/index.ts"]
+      "@sosie/rest": ["./packages/rest/src/index.ts"],
+      "@sosie/graphql": ["./packages/graphql/src/index.ts"]
     }
   },
   "include": ["packages/*/src", "packages/*/test", "test", "vitest.config.ts"],

@@ -28,7 +28,7 @@ been wrapped around the same code.
 
 ## Packages
 
-One repository, npm workspaces, four packages:
+One repository, npm workspaces, five packages:
 
 | Package | Published as | Holds |
 | --- | --- | --- |
@@ -36,9 +36,9 @@ One repository, npm workspaces, four packages:
 | `packages/core` | `@sosie/core` | Everything that does not depend on a source: the source interface, the neutral schema, rules, faking, the store, `scan`, the MCP server |
 | `packages/postgres` | `@sosie/postgres` | The Postgres source: endpoint, guard, rewriting, schema reading |
 | `packages/rest` | `@sosie/rest` | The REST source: an HTTP endpoint for the team's own API, OpenAPI reading, JSON faking |
+| `packages/graphql` | `@sosie/graphql` | The GraphQL source: a GraphQL endpoint for the team's own API, schema by introspection, query checking and faking |
 
-Later sources are packages of their own in the same scope: `@sosie/graphql`,
-`@sosie/mysql`. The `@sosie` scope is an npm organisation,
+Later sources are packages of their own in the same scope: `@sosie/mysql`. The `@sosie` scope is an npm organisation,
 registered on 25 October 2026, so nobody else can take a name in it. Its team
 `developers` publishes.
 
@@ -86,13 +86,21 @@ packages/
     paths.ts         what a path names: an entity, and the field of each value in it
     fake.ts          a JSON body, every value faked by its field
     mcp.ts           the request tool
+  graphql/src/
+    index.ts         the Source: matches a path ending in graphql, reads the schema
+    endpoint.ts      the HTTP server: parse, validate, queries only, errors by phase
+    upstream.ts      the API: Sosie's credentials, no redirects, a timeout
+    schema.ts        a GraphQL schema to the neutral schema
+    rewrite.ts       fakes in arguments and variables, back to real values
+    fake.ts          the data, every leaf faked by its schema field
+    mcp.ts           the graphql tool
   cli/src/
     cli.ts           sosie, sosie mcp, sosie scan
     sources.ts       the sources this CLI knows
     prompt.ts        the hidden prompt
 test/
   memory-source/     a source that serves rows from memory, for core tests
-  e2e/               Postgres seeded with canary values, and a fake API serving the same people
+  e2e/               Postgres seeded with canary values, and fake REST and GraphQL APIs serving the same people
 ```
 
 ## The source interface
@@ -364,6 +372,7 @@ holds credentials or real values.
 | `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice; every value a consistent fake |
 | `request` | REST | `path` | The status and the JSON body of a GET through Sosie; up to 200 items of a list |
+| `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie |
 
 When Sosie is not running, both say so, and how to start it.
 
@@ -650,6 +659,53 @@ no field (`limit=10`, `page=2`) stays as written.
 - Ids are consistent within the API and across its links; an API's ids and a
   database's are different fields, faked in their own domains.
 
+## GraphQL source
+
+For the team's own GraphQL API. `SOSIE_UPSTREAM` is its endpoint, whose path
+ends in `graphql` (`https://api.internal/graphql`); any other http(s) URL is
+the REST source's. Credentials as for REST: `SOSIE_UPSTREAM_HEADERS`, or a user
+and password in the URL; the client's are never passed on.
+
+### Schema
+
+By introspection, with Sosie's credentials, at start-up. An API with
+introspection off is read from `SOSIE_GRAPHQL_SCHEMA`: its SDL, or an
+introspection result as JSON. Each object and interface type is an entity, each
+field that holds a scalar or an enum is a field; one that holds another object
+is that object's row. Built-in scalars map to neutral types, and custom ones by
+name (`DateTime`, `Date`, `UUID`, `JSON`, `BigInt`); `Email` and
+`EmailAddress` pick the email format, `URL` and `URI` the URL format. A field
+`id` is the type's key; one named `userId` shares the values of `User.id`.
+
+### Endpoint and guard
+
+The API's own path on a local address, by `GET` and `POST` (JSON, or
+`application/graphql`), batches included. Each operation is parsed and checked
+against the schema; only queries reach the API, so a mutation or a subscription
+is answered with an error and never sent. A persisted query without its text is
+refused. POSTs are not redirected: the body and the credentials stay with the
+API.
+
+### Faking
+
+Every leaf of `data` is faked by the schema field it is, through aliases,
+fragments and nested objects, so `order.user.id`, `order.userId` and `user.id`
+are one fake, and a person's email is the database's fake through the shared
+store. `__typename` and introspection pass as they are.
+
+Errors by phase, as with Postgres: an error from checking the query, before
+the API ran it, holds only the query and the schema and comes back scrubbed;
+once the API ran it, a resolver's message may quote data, so only its path and
+its code come back. Extensions are dropped.
+
+### Query by what you saw
+
+Each argument, and each variable where it is used, is looked up in the field it
+names on the type its field returns: `user(id:)` in `User.id`,
+`users(email:)` in `User.email`, `orders(userId:)` in `User.id`; inside input
+objects and lists too. Text it names no field for is looked up anywhere; a
+number that names no field (`first: 10`) stays as written.
+
 ## Adding a source after v0.1
 
 A new source is a package that exports a `Source`. It decides how clients talk
@@ -659,7 +715,7 @@ returns and every value a client sends. What each planned source maps:
 | Source | Endpoint for clients | Read-only guard | Field of a value |
 | --- | --- | --- | --- |
 | REST (built, above) | A local HTTP address; paths as upstream | `GET` and `HEAD` only | The OpenAPI document when there is one; otherwise where the value sits |
-| GraphQL | A local HTTP address | Queries only, no mutations | The schema, by introspection or a file |
+| GraphQL (built, above) | A local HTTP address, at the API's path | Queries only, no mutations | The schema, by introspection or a file |
 | MySQL | MySQL's wire protocol | Reads only, read-only session | Its result metadata, as with Postgres |
 
 Rules, domains, fakes, the store, `scan` and `describe` stay as they are. Format
@@ -691,6 +747,10 @@ domains make a person's email the same fake from the database and from the API.
   links, an image, a redirect away, an error that quotes a canary; with and
   without an OpenAPI document. A person's email is the same fake from the
   database and from the API.
+- **GraphQL, end to end.** A fake GraphQL API built with graphql-js serves the
+  same people: relations both ways, aliases, fragments, variables, batches, a
+  mutation that must never run, a resolver whose error quotes a canary, and
+  introspection on and off.
 - **The CLI.** The built CLI is run: start against a database and an API, MCP
   over stdio, `scan`, Ctrl+C, and the errors a developer meets first.
 - **The dependency rule.** A test reads the imports and manifests.

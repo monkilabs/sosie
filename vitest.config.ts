@@ -9,6 +9,7 @@ export default defineConfig({
       '@sosie/core': src('core'),
       '@sosie/postgres': src('postgres'),
       '@sosie/rest': src('rest'),
+      '@sosie/graphql': src('graphql'),
     },
   },
   test: {

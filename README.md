@@ -13,7 +13,7 @@ credentials and hostnames stay on your side.
 
 ## Status
 
-Sosie works end to end in front of PostgreSQL 15 to 18 and in front of REST
+Sosie works end to end in front of PostgreSQL 15 to 18, REST APIs and GraphQL
 APIs, on Node 26 and 24. It is not published yet. The [MVP](docs/mvp.md), the [high-level design](docs/hld.md)
 and the [low-level design](docs/lld.md) say what it does and how.
 
@@ -105,8 +105,12 @@ Only `GET` and `HEAD` reach the API, with Sosie's credentials, never the
 agent's. Sosie reads the API's OpenAPI document when it serves one, or the one
 in `SOSIE_OPENAPI`; without one, it names each value by where it sits.
 
-Postgres and REST are the first sources. GraphQL and more databases come next,
-each a package behind the same interface.
+A GraphQL API works the same way: point `SOSIE_UPSTREAM` at its endpoint
+(`https://api.internal/graphql`). Sosie reads the schema by introspection, or
+from `SOSIE_GRAPHQL_SCHEMA`, and sends only queries on, never mutations.
+
+Postgres, REST and GraphQL are the first sources. More databases come next, each
+a package behind the same interface.
 
 ## Good to know
 

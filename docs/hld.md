@@ -101,8 +101,7 @@ same for every source.
 | Order | Source | Why then |
 | --- | --- | --- |
 | v0.1 | Postgres | Most personal data lives in databases, and teams least dare give an agent access to them |
-| v0.2 | REST, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
-| Next | GraphQL | The same data again, through one endpoint and its schema |
+| v0.2 | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
 | Later | MySQL and other databases; third-party APIs | On demand; many third-party APIs already offer a test mode |
 
 The core is tested through an in-memory test source, without Postgres, so
