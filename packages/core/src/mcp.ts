@@ -82,6 +82,20 @@ async function respond(work: () => Promise<unknown>) {
   }
 }
 
+/** JSON with each of its lists cut to the first `max` items, for an agent's context; `cut` says whether one was. */
+export function capLists(value: unknown, max: number): { value: unknown; cut: boolean } {
+  let cut = false
+  const walk = (node: unknown): unknown => {
+    if (Array.isArray(node)) {
+      if (node.length > max) cut = true
+      return node.slice(0, max).map(walk)
+    }
+    if (node && typeof node === 'object') return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, walk(v)]))
+    return node
+  }
+  return { value: walk(value), cut }
+}
+
 /** The neutral schema as an agent reads it. */
 export function describe(schema: Schema, passing: string[], only?: string, strict = true) {
   const pass = new Set(passing)

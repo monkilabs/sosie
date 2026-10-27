@@ -21,9 +21,11 @@ export const rest: Source = {
       headers.authorization ??= `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
     }
     const base = new URL(upstream.href)
+    // A query on the base URL (?api_key=) is a credential too: sent upstream, never shown.
+    const params = new URLSearchParams(base.search)
     base.username = base.password = base.search = base.hash = ''
     base.pathname = base.pathname.replace(/\/?$/, '/')
-    const api = new RestUpstream(base, headers, options.statementTimeout)
+    const api = new RestUpstream(base, headers, options.statementTimeout, params)
     const label = `${base.host}${base.pathname.replace(/\/$/, '')}`
 
     const warnings: string[] = []
@@ -63,7 +65,7 @@ export const rest: Source = {
       warnings,
       learns: !doc,
       client: 'curl',
-      serve: (listen, faker) => startEndpoint(listen, { upstream: api, api: doc, faker, log: (line) => process.stderr.write(`  ! ${line}\n`) }),
+      serve: (listen, faker) => startEndpoint(listen, { upstream: api, api: doc, faker, maxItems: options.maxRows, log: (line) => process.stderr.write(`  ! ${line}\n`) }),
       async close() {},
     }
   },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Operation } from '../src/openapi.js'
-import { route, singular } from '../src/paths.js'
+import { route, singular, valueByHabit, wordName } from '../src/paths.js'
 import { parseHeaders } from '../src/upstream.js'
 
 const entityFor = (word: string) => singular(word.toLowerCase())
@@ -39,6 +39,24 @@ describe('paths', () => {
     const nested = route(['users', 'usr_ab12', 'orders'], operations, byWord, numbers)
     expect(nested.entity).toBe('Order')
     expect(nested.values.get(1)).toMatchObject({ id: 'User.id', type: { kind: 'string' } })
+  })
+})
+
+describe('paths in links', () => {
+  it('read whatever follows a collection as its member, unless it is a word the API has shown to be a name', () => {
+    const known = new Set(['users', 'repos'])
+    const habit = (segment: string, _: number, afterName: boolean) => valueByHabit(segment, afterName, known)
+    const login = route(['users', 'quillon', 'repos'], [], entityFor, habit)
+    expect(login.entity).toBe('repo')
+    expect([...login.values].map(([i, f]) => [i, f.id, f.type.kind])).toEqual([[1, 'user.id', 'string']])
+    // A word after a value names a collection; a value with nothing before it is the root's.
+    expect([...route(['7739182046'], [], entityFor, habit).values].map(([i, f]) => [i, f.id])).toEqual([[0, 'root.id']])
+    expect(route(['users', 'repos'], [], entityFor, habit).values.size).toBe(0)
+  })
+
+  it('tell query names that are words from names that are values', () => {
+    for (const name of ['page', 'sort-by', 'filter[email]', 'pageSize', 'page[size]', 'q', 'per_page', 'ids[]', 'ids[0]']) expect(wordName(name)).toBe(true)
+    for (const name of ['q[Quillon]', 'Vantablack', 'quill.vantablack@canary-mail.test', '7739182046', '']) expect(wordName(name)).toBe(false)
   })
 })
 

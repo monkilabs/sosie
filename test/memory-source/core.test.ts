@@ -181,6 +181,19 @@ describe('fakes by type', async () => {
     const { faker } = await serve()
     expect(faker.computed('abc', { kind: 'decimal' })).not.toBe('abc')
     expect(faker.computed('-Infinity', { kind: 'decimal' })).toBe('-Infinity')
+    expect(faker.computed('6.02e23', { kind: 'decimal' })).toMatch(/^\d\.\d\de23$/)
+  })
+
+  it('a value of another form than its type, as an API may send, is faked whole', async () => {
+    const { faker } = await serve()
+    // An "e" in text is no exponent, and a "/" no prefix length: nothing of either value stays.
+    const number = faker.computed('Zephyrine Orrowmoor, flat 2', { kind: 'decimal' }) as string
+    expect(number).toMatch(/^[A-Z][a-z]{8} [A-Z][a-z]{8}, [a-z]{4} \d$/)
+    expect(number).not.toMatch(/phyrine|Orrowmoor/)
+    const address = faker.computed('x/Vantaville', { kind: 'ip' }) as string
+    expect(address).not.toMatch(/Vantaville/)
+    expect(faker.computed('10.1.2.3/24', { kind: 'ip' })).toMatch(/^(192\.0\.2|198\.51\.100|203\.0\.113)\.\d+\/24$/)
+    expect(faker.computed('Quillon', { kind: 'integer' })).not.toBe('Quillon')
   })
 
   it('values with nothing to fake stay as they are; digits of any script are faked', async () => {

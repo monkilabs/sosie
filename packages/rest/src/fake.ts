@@ -1,9 +1,12 @@
 import { structuralKey, type Faker, type Field } from '@sosie/core'
 import { merged, refName, referenceOf, type Api, type Node } from './openapi.js'
-import { idField, VALUE_SEGMENT, type Route } from './paths.js'
+import { idField, wordName, type Route } from './paths.js'
 
 /** Keys of a response's root that wrap its rows: { data: [...] }. A field below one is named as if it were not there. */
 const ENVELOPES = new Set(['data', 'items', 'results', 'records', 'rows', 'content', 'values', 'entries', 'hits', 'nodes', 'list'])
+
+/** Keys that are values fake in a domain of their own, each to one fake. */
+const MAP_KEY: Field = { id: '$key', name: 'key', type: { kind: 'string' } }
 
 export interface FakeContext {
   faker: Faker
@@ -11,19 +14,23 @@ export interface FakeContext {
   /** Fields of the OpenAPI schema, by id. */
   fields: Map<string, Field>
   entityFor: (word: string) => string
-  /** What the client sent: a JSON key it wrote is structure. */
-  sent: string
   /** A URL into the upstream API, rewritten to Sosie's address with its values faked; undefined for any other text. */
   url: (text: string) => string | undefined
+  /** Items of a list at most; the rest are cut, as rows are by --max-rows. */
+  maxItems: number
+  /** Resolves now and then, to let other clients in while a large body is faked. */
+  pace: () => Promise<void> | undefined
 }
 
-/** A JSON body, every value faked by the field it is: from the OpenAPI schema, or named by where it is. */
-export function fakeBody(body: unknown, route: Route, ctx: FakeContext): unknown {
-  return walk(body, route.operation?.response, route.entity, '', '', ctx)
+/** A JSON body, every value faked by the field it is: from the OpenAPI schema, or named by where it is. `cut` says a list was cut. */
+export async function fakeBody(body: unknown, route: Route, ctx: FakeContext): Promise<{ body: unknown; cut: boolean }> {
+  const state = { cut: false }
+  return { body: await walk(body, route.operation?.response, route.entity, '', '', ctx, state), cut: state.cut }
 }
 
-function walk(value: unknown, node: Node | undefined, entity: string, prefix: string, key: string, ctx: FakeContext): unknown {
+async function walk(value: unknown, node: Node | undefined, entity: string, prefix: string, key: string, ctx: FakeContext, state: { cut: boolean }): Promise<unknown> {
   if (value === null || value === undefined) return value
+  await ctx.pace()
   // A $ref starts the row of another entity.
   if (node?.$ref) {
     entity = refName(node.$ref)
@@ -32,20 +39,26 @@ function walk(value: unknown, node: Node | undefined, entity: string, prefix: st
   let schema = node && ctx.api ? merged(node, ctx.api.schemas) : undefined
   // A body that does not have the shape its document says is named by where its values sit.
   if (schema && Array.isArray(value) !== (schema.type === 'array') && schema.type !== undefined && typeof value === 'object') schema = undefined
-  if (Array.isArray(value)) return value.map((item) => walk(item, schema?.items, entity, prefix, key, ctx))
+  if (Array.isArray(value)) {
+    if (value.length > ctx.maxItems) state.cut = true
+    const out: unknown[] = []
+    for (const item of value.slice(0, ctx.maxItems)) out.push(await walk(item, schema?.items, entity, prefix, key, ctx, state))
+    return out
+  }
   if (typeof value === 'object') {
     const properties: Record<string, Node> | undefined = schema?.properties
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => {
-        const documented = properties?.[k]
-        const structural = documented !== undefined || structuralKey(k)
-        // A key that is a value (a map keyed by email) is faked, and never named in a field.
-        const out = structural ? k : (ctx.faker.computed(k, { kind: 'string' }, ctx.sent) as string)
-        const envelope = !schema && !prefix && ENVELOPES.has(k) && v !== null && typeof v === 'object'
-        const child = documented ?? (schema?.additionalProperties && typeof schema.additionalProperties === 'object' ? schema.additionalProperties : undefined)
-        return [out, walk(v, child, entity, envelope ? '' : `${prefix}${structural ? k : '*'}.`, structural ? k : '', ctx)]
-      }),
-    )
+    // A schema whose other keys are a map (additionalProperties: {schema}) says those keys are data.
+    const map = schema?.additionalProperties && typeof schema.additionalProperties === 'object' && Object.keys(schema.additionalProperties).length ? (schema.additionalProperties as Node) : undefined
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const documented = properties?.[k]
+      const structural = documented !== undefined || (!map && structuralKey(k))
+      // A key that is a value (a map keyed by email) is faked, and never named in a field.
+      const name = structural ? k : (ctx.faker.value(k, MAP_KEY) as string)
+      const envelope = !schema && !prefix && ENVELOPES.has(k) && v !== null && typeof v === 'object'
+      out[name] = await walk(v, documented ?? map, entity, envelope ? '' : `${prefix}${structural ? k : '*'}.`, structural ? k : '', ctx, state)
+    }
+    return out
   }
   if (typeof value === 'string') {
     const url = ctx.url(value)
@@ -72,10 +85,17 @@ function fieldAt(entity: string, prefix: string, key: string, value: unknown, ct
   return { id, name: key || 'value', type, ...(target && target !== entity && { references: `${target}.id` }) }
 }
 
-/** The fields a request's query parameters are compared with: id-like names by entity, others by the route's entity. */
-export function queryField(name: string, value: string, route: Route, entityFor: (word: string) => string): Field {
+/**
+ * The field a query parameter is compared with: id-like names by entity, a
+ * name the OpenAPI document gives by its field, others by the route's entity.
+ * A name that is not a word (q[Quillon]) is no field's: its values fake alike.
+ */
+export function queryField(name: string, value: string, route: Route, ctx: Pick<FakeContext, 'fields' | 'entityFor'>): Field {
+  if (!wordName(name)) return { id: `${route.entity}.*`, name: '', type: { kind: 'string' } }
   if (name === 'id') return idField(route.entity, value)
-  const target = referenceOf(name, entityFor)
+  const target = referenceOf(name, ctx.entityFor)
   if (target) return idField(target, value)
-  return { id: `${route.entity}.${name}`, name, type: VALUE_SEGMENT.test(value) && /^\d+$/.test(value) ? { kind: 'integer' } : { kind: 'string' } }
+  const documented = ctx.fields.get(`${route.entity}.${name}`)
+  if (documented) return documented
+  return { id: `${route.entity}.${name}`, name, type: /^(true|false)$/.test(value) ? { kind: 'boolean' } : { kind: 'string' } }
 }

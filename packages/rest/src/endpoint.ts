@@ -1,16 +1,21 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import type { Endpoint, Faker, Field } from '@sosie/core'
+import { localRequest, pacer, type Endpoint, type Faker, type Field } from '@sosie/core'
 import { fakeBody, queryField, type FakeContext } from './fake.js'
-import { referenceOf, type Api } from './openapi.js'
-import { route, singular, VALUE_SEGMENT } from './paths.js'
+import type { Api } from './openapi.js'
+import { PAGING, PATH_WORD, QUERY_NAME, route, singular, valueByHabit, wordName } from './paths.js'
 import type { RestUpstream } from './upstream.js'
 
 export interface RestContext {
   upstream: RestUpstream
   api: Api | undefined
   faker: Faker
+  /** Items of a list at most, as --max-rows. */
+  maxItems: number
   log: (line: string) => void
 }
+
+/** Words Sosie remembers as names of the API's, at most: those a client sent are added as the API answers them. */
+const MAX_KNOWN = 10_000
 
 /**
  * The local HTTP address clients use, with the API's own paths: a GET goes
@@ -22,55 +27,81 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
   const basePath = base.pathname.replace(/\/$/, '')
   const fields = new Map<string, Field>((ctx.api?.schema.entities ?? []).flatMap((e) => e.fields.map((f) => [f.id, f] as const)))
   const byWord = new Map((ctx.api?.schema.entities ?? []).map((e) => [singular(e.name.toLowerCase()), e.name]))
-  const entityFor = (word: string) => byWord.get(singular(word.toLowerCase())) ?? singular(word.toLowerCase())
+  // A word that is no name (an email in a path) names no entity, so it never becomes part of a domain.
+  const entityFor = (word: string) => byWord.get(singular(word.toLowerCase())) ?? (/^[A-Za-z][\w-]*$/.test(word) ? singular(word.toLowerCase()) : '*')
   const operations = ctx.api?.operations ?? []
+  /**
+   * Words of paths and query names that are the API's own, shown as they are:
+   * the OpenAPI document's fixed segments, and words a client sent that the API
+   * answered. Anything else in a link is faked.
+   */
+  const known = new Set(operations.flatMap((op) => op.segments.filter((s) => !s.startsWith('{'))))
+  const under = (path: string) => path === basePath || path.startsWith(`${basePath}/`)
   let local = ''
 
-  /** A URL into the API, as Sosie's own, with its values faked. */
-  const rewrite = (text: string): string | undefined => {
-    if (!/^https?:\/\//i.test(text)) return undefined
+  /** A URL into the API, as Sosie's own, with every value in it faked; undefined for any other text. */
+  const link = (text: string): string | undefined => {
+    // A link is one token: text that starts with a URL and goes on is text.
+    const absolute = /^https?:\/\/\S+$/i.test(text)
+    if (!absolute && !/^\/(?!\/)\S*$/.test(text)) return undefined
     let url: URL
     try {
-      url = new URL(text)
+      url = new URL(text, base.origin)
     } catch {
       return undefined
     }
-    if (url.origin !== base.origin || !(url.pathname === basePath || url.pathname.startsWith(`${basePath}/`))) return undefined
-    const segments = url.pathname.slice(basePath.length).split('/').filter(Boolean)
-    const rt = route(segments.map(decodeURIComponent), operations, entityFor, (s) => VALUE_SEGMENT.test(s))
-    const path = segments.map((s, i) => {
-      const field = rt.values.get(i)
-      return field ? encodeURIComponent(String(ctx.faker.value(decodeURIComponent(s), field))) : s
+    if (url.origin !== base.origin || !under(url.pathname)) return undefined
+    const real = segmentsOf(url.pathname.slice(basePath.length))
+    if (!real) return undefined
+    const rt = route(real, operations, entityFor, (segment, _, afterName) => valueByHabit(segment, afterName, known))
+    const path = real.map((segment, i) => {
+      const field = rt.values.get(i) ?? (known.has(segment) ? undefined : PATH_WORD)
+      return encodeURIComponent(field ? String(ctx.faker.value(segment, field)) : segment)
     })
     const query = new URLSearchParams()
     for (const [name, value] of url.searchParams) {
-      // A number that names nothing (page=2) stays; anything else is faked as the field it is.
-      const plain = /^\d+$/.test(value) && name !== 'id' && !referenceOf(name, entityFor)
-      query.append(name, plain ? value : String(ctx.faker.value(value, queryField(name, value, rt, entityFor))))
+      // Sosie's own credentials in the query (SOSIE_UPSTREAM's ?api_key=) are never shown.
+      if (ctx.upstream.params.has(name)) continue
+      const shown = wordName(name) || known.has(name) ? name : String(ctx.faker.value(name, QUERY_NAME))
+      const keep = PAGING.has(name) && /^\d+$/.test(value)
+      query.append(shown, keep ? value : String(ctx.faker.value(value, queryField(name, value, rt, { fields, entityFor }))))
     }
     const search = query.toString()
-    return `${local}${basePath}/${path.join('/')}${search ? `?${search}` : ''}${url.hash}`
+    // The fragment is the client's own business, and may hold anything: it is left out.
+    return `${absolute ? local : ''}${basePath}/${path.join('/')}${search ? `?${search}` : ''}`
   }
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
+    if (!localRequest(req.headers.host, listen.host)) {
+      return send(res, 403, { error: 'Sosie answers requests for localhost only.' })
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       return send(res, 405, { error: 'Sosie is read-only: only GET and HEAD reach the API.' }, { allow: 'GET, HEAD' })
     }
     const incoming = new URL(req.url ?? '/', 'http://sosie.local')
-    if (!(incoming.pathname === basePath || incoming.pathname.startsWith(`${basePath}/`) || !basePath)) {
-      return send(res, 404, { error: `Sosie serves the API under ${basePath}.` })
-    }
-    const scope = ctx.faker.request(decodeURIComponent(`${incoming.pathname}${incoming.search}`))
-    const segments = incoming.pathname.slice(basePath.length).split('/').filter(Boolean).map(decodeURIComponent)
-    // A segment that is a fake Sosie gave is a value, whatever its shape.
-    const rt = route(segments, operations, entityFor, (s) => VALUE_SEGMENT.test(s) || scope.lookup(s) !== undefined)
-    const real = segments.map((s, i) => {
+    if (basePath && !under(incoming.pathname)) return send(res, 404, { error: `Sosie serves the API under ${basePath}.` })
+    const sent = segmentsOf(incoming.pathname.slice(basePath.length))
+    if (!sent) return send(res, 400, { error: 'The path has a % that does not start an escape (%20).' })
+    const scope = ctx.faker.request(`${sent.join('/')}?${[...incoming.searchParams].flat().join('&')}`)
+
+    // A word Sosie made up for a link turns back into the API's word; a known word stays.
+    const words = sent.map((segment) => (known.has(segment) ? segment : scope.lookup(segment, PATH_WORD)))
+    const routed = sent.map((segment, i) => words[i] ?? segment)
+    // Any other segment that is a fake Sosie gave is a value, whatever its shape.
+    const rt = route(routed, operations, entityFor, (segment, i, afterName) =>
+      words[i] === undefined && (valueByHabit(segment, afterName, known) || scope.lookup(segment) !== undefined),
+    )
+    const real = routed.map((segment, i) => {
       const field = rt.values.get(i)
-      return encodeURIComponent((field && (scope.lookup(s, field) ?? scope.lookup(s))) ?? s)
+      // A value is looked up in its field; text, not a bare number, anywhere too: /users/7 never reads another entity's 7.
+      return encodeURIComponent((field && (scope.lookup(segment, field) ?? (/^\d+$/.test(segment) ? undefined : scope.lookup(segment)))) ?? segment)
     })
     const query = new URLSearchParams()
-    for (const [name, value] of incoming.searchParams) {
-      const near = scope.lookup(value, queryField(name, value, rt, entityFor))
+    const names: string[] = []
+    for (const [sentName, value] of incoming.searchParams) {
+      const name = wordName(sentName) || known.has(sentName) ? sentName : (scope.lookup(sentName, QUERY_NAME) ?? sentName)
+      if (name === sentName) names.push(name)
+      const near = scope.lookup(value, queryField(name, value, rt, { fields, entityFor }))
       // A number that names no field (limit=10) stays as written; other text is looked up anywhere.
       query.append(name, near ?? (/^\d+$/.test(value) ? undefined : scope.lookup(value)) ?? value)
     }
@@ -82,11 +113,19 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       ctx.log(`The API answered ${answer.status} to ${incoming.pathname}: check SOSIE_UPSTREAM_HEADERS.`)
     }
     const json = /[/+]json\b/i.test(answer.type)
+    if (json && answer.status >= 200 && answer.status < 300 && known.size < MAX_KNOWN) {
+      // Names the client wrote itself and the API answered: links may show them.
+      sent.forEach((segment, i) => {
+        if (!rt.values.has(i) && words[i] === undefined) known.add(segment)
+      })
+      for (const name of names) known.add(name)
+    }
     if (req.method === 'HEAD' || !answer.body) {
       res.writeHead(answer.status, json ? { 'content-type': 'application/json; charset=utf-8' } : {})
       return res.end()
     }
     if (!json) {
+      // The status passes, so a missing record stays a 404; the body, which Sosie cannot fake, does not.
       return send(res, answer.status >= 400 ? answer.status : 502, {
         error:
           answer.status >= 400
@@ -100,8 +139,10 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     } catch {
       return send(res, 502, { error: 'The API answered with JSON that does not parse.' })
     }
-    const fake: FakeContext = { faker: ctx.faker, api: ctx.api, fields, entityFor, sent: `${incoming.pathname}${incoming.search}`, url: rewrite }
-    return send(res, answer.status, fakeBody(body, rt, fake))
+    const fake: FakeContext = { faker: ctx.faker, api: ctx.api, fields, entityFor, url: link, maxItems: ctx.maxItems, pace: pacer() }
+    const faked = await fakeBody(body, rt, fake)
+    const notice = `Sosie returned the first ${ctx.maxItems} items of a list; the rest were cut. Narrow the request, or start Sosie with a higher --max-rows.`
+    return send(res, answer.status, faked.body, faked.cut ? { 'sosie-notice': notice } : {})
   }
 
   const accept = (req: IncomingMessage, res: ServerResponse) => {
@@ -131,6 +172,15 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
         ),
       )
     },
+  }
+}
+
+/** The segments of a path, decoded; undefined when a % starts no escape. */
+function segmentsOf(path: string): string[] | undefined {
+  try {
+    return path.split('/').filter(Boolean).map(decodeURIComponent)
+  } catch {
+    return undefined
   }
 }
 
