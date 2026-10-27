@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Operation } from '../src/openapi.js'
 import { route, singular } from '../src/paths.js'
-import { parseHeaders } from '../src/upstream.js'
+import { upstreamHeaders as parseHeaders } from '@sosie/core'
 
 const entityFor = (word: string) => singular(word.toLowerCase())
 const numbers = (s: string) => /^\d+$/.test(s)

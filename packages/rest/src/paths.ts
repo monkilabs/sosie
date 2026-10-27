@@ -1,13 +1,7 @@
-import type { Field } from '@sosie/core'
+import { singular, type Field } from '@sosie/core'
 import type { Operation } from './openapi.js'
 
-/** 'users' to 'user', 'categories' to 'category', 'addresses' to 'address'. */
-export function singular(word: string): string {
-  if (/ies$/.test(word) && word.length > 4) return `${word.slice(0, -3)}y`
-  if (/(ss|x|ch|sh)es$/.test(word)) return word.slice(0, -2)
-  if (/[^su]s$/.test(word) && !/is$/.test(word) && word.length > 3) return word.slice(0, -1)
-  return word
-}
+export { singular }
 
 /** A path segment that is a value, not a name: a number or a UUID. */
 export const VALUE_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i

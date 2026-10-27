@@ -1,9 +1,11 @@
-import type { Entity, Field, FieldType, Schema } from '@sosie/core'
+import { linkByName, referenceOf, type Entity, type Field, type FieldType, type Schema } from '@sosie/core'
 import { parse as parseYaml } from 'yaml'
-import { singular } from './paths.js'
+
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- an OpenAPI document is JSON of many shapes. */
 export type Node = Record<string, any>
+
+export { referenceOf }
 
 /** A GET operation: its path template, and the schema of a successful response. */
 export interface Operation {
@@ -67,7 +69,7 @@ export function readApi(doc: Node): Api {
     add(properties, '')
     entities.push({ id: name, name, fields })
   }
-  link(entities)
+  linkByName(entities)
 
   const operations: Operation[] = []
   for (const [template, item] of Object.entries<Node>(doc.paths ?? {})) {
@@ -88,23 +90,6 @@ export function readApi(doc: Node): Api {
 
   const version = doc.openapi ? `OpenAPI ${String(doc.openapi).split('.').slice(0, 2).join('.')}` : `Swagger ${doc.swagger}`
   return { schema: { entities }, operations, schemas, version }
-}
-
-/** A field named like `userId` or `user_id` shares the values of the id of the entity it names. */
-export function link(entities: Entity[]): void {
-  const byName = new Map(entities.map((e) => [singular(e.name.toLowerCase()), e]))
-  for (const entity of entities) {
-    for (const field of entity.fields) {
-      const target = referenceOf(field.name, (name) => byName.get(name))
-      if (target && target.id !== entity.id && target.fields.some((f) => f.id === `${target.id}.id`)) field.references = `${target.id}.id`
-    }
-  }
-}
-
-/** The entity a key like `userId`, `user_id` or `userIds` refers to, by name. */
-export function referenceOf<T>(key: string, find: (name: string) => T | undefined): T | undefined {
-  const m = /^(.+?)(?:Id|_id|Ids|_ids)$/.exec(key)
-  return m ? find(singular(m[1]!.toLowerCase())) : undefined
 }
 
 /** The entity a response schema is about: a $ref, or an array of them. */
