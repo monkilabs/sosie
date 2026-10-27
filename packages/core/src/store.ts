@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
@@ -41,10 +41,10 @@ const ATTEMPTS = 96
 const CACHE_SIZE = 50_000
 
 /**
- * The mapping store: one SQLite file per upstream. It remembers each fake for
- * each real value, so fakes are consistent across sessions and a fake in a
- * query can be turned back into the real value. Real values are sealed with a
- * key that never leaves this folder.
+ * The mapping store: one SQLite file for every upstream. It remembers each
+ * fake for each real value, so fakes are consistent across sessions and a fake
+ * in a query can be turned back into the real value. Real values are sealed
+ * with a key that never leaves this folder.
  */
 export class Store {
   readonly #db: DatabaseSync
@@ -73,20 +73,31 @@ export class Store {
     this.#byFakeIn = db.prepare('SELECT sealed FROM value WHERE fake = ? AND domain = ?')
   }
 
-  /** Open a store, creating its folder, key and tables on first use. */
+  /** Open a store, creating its folder, key and tables on first use. Several Sosies may open one at once. */
   static open(dir: string, { create = true } = {}): Store {
     const keyFile = join(dir, 'key')
     if (!existsSync(keyFile)) {
       if (!create) throw new Error(`No store in ${dir}`)
       mkdirSync(dir, { recursive: true, mode: 0o700 })
-      writeFileSync(keyFile, randomBytes(32), { mode: 0o600, flag: 'wx' })
+      createKey(keyFile)
     }
     chmodSync(keyFile, 0o600)
     const db = new DatabaseSync(join(dir, 'store.db'))
+    // The timeout first, so each step below waits for another Sosie's lock.
+    db.exec('PRAGMA busy_timeout = 5000')
+    // Switching to WAL needs the file to itself, and SQLite answers busy at once rather than wait: try again.
+    for (let tries = 0; (db.prepare('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode !== 'wal'; tries++) {
+      try {
+        db.exec('PRAGMA journal_mode = WAL')
+      } catch (error) {
+        if (tries >= 100 || !/locked|busy/i.test((error as Error).message)) throw error
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
+      }
+    }
+    db.exec('PRAGMA synchronous = NORMAL')
+    // In a write transaction from the start, so creating the tables waits its turn too.
     db.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA synchronous = NORMAL;
-      PRAGMA busy_timeout = 5000;
+      BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS value (
         domain    TEXT    NOT NULL,
         mac       BLOB    NOT NULL,
@@ -99,9 +110,16 @@ export class Store {
       ) WITHOUT ROWID;
       CREATE INDEX IF NOT EXISTS value_fake ON value (fake, domain);
       CREATE INDEX IF NOT EXISTS value_scan ON value (mac_ci) WHERE scannable = 1;
+      COMMIT;
     `)
-    // Readable by the owner only, like the key; the folder already is.
-    for (const file of ['store.db', 'store.db-wal', 'store.db-shm']) if (existsSync(join(dir, file))) chmodSync(join(dir, file), 0o600)
+    // Readable by the owner only, like the key; the folder already is. Another Sosie may remove the WAL files meanwhile.
+    for (const file of ['store.db', 'store.db-wal', 'store.db-shm']) {
+      try {
+        chmodSync(join(dir, file), 0o600)
+      } catch {
+        // Not there.
+      }
+    }
     return new Store(dir, db, readFileSync(keyFile))
   }
 
@@ -118,21 +136,7 @@ export class Store {
 
     const mac = this.#mac(real)
     let fake = (this.#get.get(domain, mac) as { fake: string } | undefined)?.fake
-    if (fake === undefined) {
-      // A value with no letter or digit in it (empty, '-', NaN, infinity) has nothing to fake:
-      // every draw returns it, so after the last attempt it stays as it is.
-      let candidate = real
-      for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-        const drawn = draw(this.seed(domain, real, attempt), attempt)
-        if (drawn === real) continue
-        candidate = drawn
-        if (!allocation.unique || attempt >= ATTEMPTS_UNIQUE || !this.#taken.get(domain, candidate)) break
-      }
-      const scannable = allocation.scannable && distinctive(real) ? 1 : 0
-      this.#insert.run(domain, mac, this.#macCi(real), candidate, normalize(candidate), this.#seal(real), scannable)
-      // Another Sosie on the same upstream may have stored this value first; its fake wins.
-      fake = (this.#get.get(domain, mac) as { fake: string }).fake
-    }
+    if (fake === undefined) fake = this.#allocate(domain, real, mac, allocation, draw)
     if (this.#cache.size >= CACHE_SIZE) this.#cache.clear()
     this.#cache.set(cacheKey, fake)
     return fake
@@ -169,6 +173,38 @@ export class Store {
     this.#db.close()
   }
 
+  /**
+   * Draw and store a new fake. In a write transaction, so two Sosies on the
+   * store never give one fake to two values of a domain: the second waits,
+   * and finds the first one's fake, or sees it taken.
+   */
+  #allocate(domain: string, real: string, mac: Buffer, allocation: Allocation, draw: Draw): string {
+    this.#db.exec('BEGIN IMMEDIATE')
+    try {
+      const stored = (this.#get.get(domain, mac) as { fake: string } | undefined)?.fake
+      if (stored !== undefined) {
+        this.#db.exec('COMMIT')
+        return stored
+      }
+      // A value with no letter or digit in it (empty, '-', NaN, infinity) has nothing to fake:
+      // every draw returns it, so after the last attempt it stays as it is.
+      let candidate = real
+      for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+        const drawn = draw(this.seed(domain, real, attempt), attempt)
+        if (drawn === real) continue
+        candidate = drawn
+        if (!allocation.unique || attempt >= ATTEMPTS_UNIQUE || !this.#taken.get(domain, candidate)) break
+      }
+      const scannable = allocation.scannable && distinctive(real) ? 1 : 0
+      this.#insert.run(domain, mac, this.#macCi(real), candidate, normalize(candidate), this.#seal(real), scannable)
+      this.#db.exec('COMMIT')
+      return candidate
+    } catch (error) {
+      this.#db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
   #mac(real: string): Buffer {
     return createHmac('sha256', this.#macKey).update(real).digest()
   }
@@ -189,6 +225,20 @@ export class Store {
     const decipher = createDecipheriv('aes-256-gcm', this.#sealKey, buf.subarray(0, 12))
     decipher.setAuthTag(buf.subarray(buf.length - 16))
     return Buffer.concat([decipher.update(buf.subarray(12, buf.length - 16)), decipher.final()]).toString('utf8')
+  }
+}
+
+/** Write a new key where another Sosie may be writing one too: whole, and only once. */
+function createKey(keyFile: string): void {
+  const draft = `${keyFile}.${process.pid}`
+  writeFileSync(draft, randomBytes(32), { mode: 0o600 })
+  try {
+    linkSync(draft, keyFile)
+  } catch (error) {
+    // Another Sosie made it first: use theirs.
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  } finally {
+    rmSync(draft, { force: true })
   }
 }
 

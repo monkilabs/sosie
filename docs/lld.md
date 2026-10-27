@@ -1,6 +1,6 @@
 # Sosie: low-level design
 
-How v0.1 is built. The [high-level design](hld.md) says why.
+How Sosie is built. The [high-level design](hld.md) says why.
 
 ## Stack
 
@@ -322,9 +322,11 @@ CREATE INDEX value_scan ON value (mac_ci) WHERE scannable = 1;
 - **Lookup.** A fake compared with a field is looked up in that field's domain.
   A fake compared with something Sosie cannot place is used when it names
   exactly one real value across all domains, and otherwise left as written.
-- **Several Sosies** share the store, for one upstream or several: SQLite's WAL
-  and a busy timeout serialise them, and the first fake stored for a value
-  wins.
+- **Several Sosies** share the store, for one upstream or several, and may
+  start at the same moment: the key is written to a draft file and linked into
+  place, so it is made once and whole; SQLite's WAL and a busy timeout
+  serialise the rest. A new fake is drawn and stored in a write transaction,
+  so two Sosies never give one fake to two values of a domain.
 
 ## Core: `sosie scan`
 
@@ -347,8 +349,9 @@ value, and exits 1 if it finds one, so CI can run it.
 
 The core serves `describe` from the neutral schemas under `running/`, one per
 running Sosie; each source adds its own tools, which run inside `sosie mcp` and
-talk to the newest running endpoint of their kind, so the MCP process never
-holds credentials or real values.
+talk to a running endpoint of their kind, so the MCP process never holds
+credentials or real values. Each takes an optional `address`, as `describe`
+lists it, for when several Sosies of a kind run; without it, the newest.
 
 | Tool | From | Input | Returns |
 | --- | --- | --- | --- |
