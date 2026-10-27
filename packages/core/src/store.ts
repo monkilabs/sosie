@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -10,9 +10,12 @@ export function sosieHome(env: NodeJS.ProcessEnv = process.env): string {
   return env.SOSIE_HOME || join(homedir(), '.sosie')
 }
 
-/** The folder of one upstream's store: the first 12 hex digits of the SHA-256 of its label. */
-export function storeDir(home: string, label: string): string {
-  return join(home, createHash('sha256').update(label).digest('hex').slice(0, 12))
+/**
+ * The folder of the store: one for every upstream, so a person's email is the
+ * same fake from a database and from an API.
+ */
+export function storeDir(home: string): string {
+  return join(home, 'store')
 }
 
 /** Every store under a home, for `sosie scan`. */

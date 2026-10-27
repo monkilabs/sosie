@@ -64,7 +64,7 @@ packages/
     text.ts          how scan compares text
     scan.ts          sosie scan
     mcp.ts           the MCP server: describe, and each source's tools
-    running.ts       current.json, for sosie mcp
+    running.ts       which Sosies run, for sosie mcp
   postgres/src/
     index.ts         the Source: matches postgres://, connects, serves
     endpoint.ts      the TCP server
@@ -185,8 +185,10 @@ change between minor versions.
 | `sosie mcp` | MCP server over stdio, connected to the running `sosie` |
 | `sosie scan <path>…` | Search files and folders for real values; exit 1 if one is found |
 
-Flags for `sosie`: `--port` (7674), `--host` (127.0.0.1), `--rules` (`./sosie.yml`
-when present), `--max-rows` (1000, at least 1). A `--host` other than this
+Flags for `sosie`: `--port` (7674; without it, a Sosie whose port is taken tries
+the next nine, so a second Sosie, for another upstream, just starts), `--host`
+(127.0.0.1), `--rules` (`./sosie.yml` when present), `--max-rows` (1000, at
+least 1). A `--host` other than this
 machine is allowed, for running Sosie on a host of its own, with a warning:
 the endpoint has no password, so anyone who can reach it can query the fakes. Exit codes: 0, 1 for a failure (cannot
 connect, a problem in `sosie.yml`, a real value found), 2 for a usage error.
@@ -205,10 +207,11 @@ it in, `sosie` says to set `SOSIE_UPSTREAM`.
   Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp
 ```
 
-`sosie` writes `$SOSIE_HOME/current.json` (default `~/.sosie`) for `sosie mcp`:
-the local address, the source kind, the neutral schema and the fields that
-pass. Nothing real: no upstream, no credentials, no values. It is removed on
-Ctrl+C, and `sosie mcp` checks the process that wrote it is still running.
+Each `sosie` writes `$SOSIE_HOME/running/<pid>.json` (default `~/.sosie`) for
+`sosie mcp`: the local address, the source kind, the neutral schema and the
+fields that pass. Nothing real: no upstream, no credentials, no values. It is
+removed on Ctrl+C, and `sosie mcp` skips, and removes, the entry of a process
+that is gone.
 
 ## `sosie.yml`
 
@@ -245,8 +248,8 @@ A field that shares another's values cannot pass alone:
 2. `connect`: the source reads its catalog on a read-only connection and
    returns the neutral schema.
 3. Load `sosie.yml` and check it against the schema.
-4. Open the store for this upstream, creating its key on first use.
-5. `serve`; write `current.json`; print the address.
+4. Open the store, creating its key on first use.
+5. `serve`; write its entry under `running/`; print the address.
 
 ## Core: domains
 
@@ -287,8 +290,9 @@ same real value gives the same fake in every session.
 
 ## Core: store
 
-One SQLite file per upstream: `~/.sosie/<id>/store.db`, where `<id>` is the first
-12 hex digits of the SHA-256 of the source's label (host, port and database).
+One SQLite file for every upstream: `~/.sosie/store/store.db`. One store, one
+key: a person's email is the same fake from a database and from an API, through
+its format domain, as the high-level design promises.
 
 ```sql
 CREATE TABLE value (
@@ -305,7 +309,7 @@ CREATE INDEX value_fake ON value (fake, domain);
 CREATE INDEX value_scan ON value (mac_ci) WHERE scannable = 1;
 ```
 
-- **Keys.** `~/.sosie/<id>/key` holds 32 random bytes, created on first start
+- **Keys.** `~/.sosie/store/key` holds 32 random bytes, created on first start
   with mode 0600 in a folder of mode 0700; the database files are 0600 too. The HMAC, sealing and seeding keys
   are derived from it with HKDF.
 - **Allocation.** The fake is drawn from a seed taken from the value's keyed
@@ -318,8 +322,9 @@ CREATE INDEX value_scan ON value (mac_ci) WHERE scannable = 1;
 - **Lookup.** A fake compared with a field is looked up in that field's domain.
   A fake compared with something Sosie cannot place is used when it names
   exactly one real value across all domains, and otherwise left as written.
-- **Two Sosies on one upstream** share the store: SQLite's WAL and a busy
-  timeout serialise them, and the first fake stored for a value wins.
+- **Several Sosies** share the store, for one upstream or several: SQLite's WAL
+  and a busy timeout serialise them, and the first fake stored for a value
+  wins.
 
 ## Core: `sosie scan`
 
@@ -340,9 +345,10 @@ value, and exits 1 if it finds one, so CI can run it.
 
 ## Core: `sosie mcp`
 
-The core serves `describe` from the neutral schema in `current.json`; each
-source adds its own tools, which run inside `sosie mcp` and talk to the
-running endpoint, so the MCP process never holds credentials or real values.
+The core serves `describe` from the neutral schemas under `running/`, one per
+running Sosie; each source adds its own tools, which run inside `sosie mcp` and
+talk to the newest running endpoint of their kind, so the MCP process never
+holds credentials or real values.
 
 | Tool | From | Input | Returns |
 | --- | --- | --- | --- |

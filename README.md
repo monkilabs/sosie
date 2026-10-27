@@ -76,8 +76,10 @@ format:
 ```
 
 Installed once with `npm i -g @sosie/cli`, the command is just `sosie`.
-Options: `--port` (7674), `--host` (127.0.0.1), `--rules` (`./sosie.yml`) and
-`--max-rows` (1000).
+Options: `--port` (7674, or the next free one), `--host` (127.0.0.1), `--rules`
+(`./sosie.yml`) and `--max-rows` (1000). Several Sosies, one per upstream, share
+one store, so a person is the same fake in each, and `sosie mcp` serves them
+all.
 
 Tested with `psql`, `node-postgres`, `postgres.js`, Drizzle and Prisma.
 Postgres is the first source. More databases and your own REST and GraphQL

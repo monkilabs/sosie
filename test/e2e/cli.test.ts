@@ -76,7 +76,7 @@ describe('sosie', () => {
     expect(out).toMatch(/Your agent, app and psql:\s+postgres:\/\/localhost:\d+\/sosie_test_\w+/)
     expect(out).toContain('claude mcp add sosie -- npx @sosie/cli mcp')
     expect(out).not.toContain('reader')
-    const running = readFileSync(join(home, 'current.json'), 'utf8')
+    const running = readFileSync(join(home, 'running', `${sosie.child.pid}.json`), 'utf8')
     expect(running).not.toContain('reader')
     expect(JSON.parse(running).address).toBe(sosie.address)
   })
@@ -127,7 +127,7 @@ describe('sosie', () => {
 
   it('stops on Ctrl+C, and MCP then says how to start it', async () => {
     expect(await stop(sosie.child)).toBe(0)
-    expect(existsSync(join(home, 'current.json'))).toBe(false)
+    expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`))).toBe(false)
     const mcp = await mcpClient(home)
     const result = await mcp.callTool({ name: 'describe', arguments: {} })
     expect(result.isError).toBe(true)
@@ -169,6 +169,19 @@ describe('sosie, when something is wrong', () => {
     const result = run([], { SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home }, dir)
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('✗ sosie.yml: users.emial is not a field. Did you mean users.email?')
+  })
+
+  it('starts a second Sosie on the next free port, and MCP serves both', async () => {
+    const shared = mkdtempSync(join(tmpdir(), 'sosie-two-'))
+    const first = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: shared }, [])
+    const second = await start({ SOSIE_UPSTREAM: inject('admin'), SOSIE_HOME: shared }, [])
+    expect(Number(new URL(second.address).port)).toBeGreaterThan(Number(new URL(first.address).port))
+    const mcp = await mcpClient(shared)
+    const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'countries' } })))
+    expect(all.sources.map((s: { address: string }) => s.address)).toEqual([second.address, first.address])
+    await mcp.close()
+    await stop(second.child)
+    await stop(first.child)
   })
 
   it('counts the fields that pass', async () => {

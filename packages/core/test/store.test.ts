@@ -84,11 +84,9 @@ describe('the mapping store', () => {
     expect(index.find('kim novak')).toBeUndefined()
   })
 
-  it('lists the stores under a home', () => {
+  it('is one store for every upstream under a home', () => {
     const home = mkdtempSync(join(tmpdir(), 'sosie-home-'))
-    Store.open(storeDir(home, 'db.internal:5432/app')).close()
-    Store.open(storeDir(home, 'db.internal:5432/crm')).close()
-    expect(storeDirs(home)).toHaveLength(2)
-    expect(storeDir(home, 'db.internal:5432/app')).toMatch(/[0-9a-f]{12}$/)
+    Store.open(storeDir(home)).close()
+    expect(storeDirs(home)).toEqual([join(home, 'store')])
   })
 })
