@@ -2,6 +2,20 @@
   "name": "@sosie/cli",
   "version": "0.1.0",
   "description": "Your AI agent sees a double of your data. Never the real thing.",
+  "keywords": [
+    "ai",
+    "agents",
+    "llm",
+    "mcp",
+    "postgres",
+    "privacy",
+    "fake-data",
+    "anonymization"
+  ],
+  "homepage": "https://github.com/monkilabs/sosie#readme",
+  "bugs": {
+    "url": "https://github.com/monkilabs/sosie/issues"
+  },
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -18,8 +32,12 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
