@@ -8,6 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
+import { startApi, TOKEN } from './api.js'
 import { canariesIn } from './canaries.js'
 
 const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url))
@@ -37,7 +38,7 @@ async function start(more: Record<string, string | undefined>, args: string[] = 
     child.stdout.on('data', () => stdout.includes('Claude Code:') && (clearTimeout(timer), resolve()))
     child.on('exit', () => (clearTimeout(timer), reject(new Error(`exited: ${stdout}${stderr}`))))
   })
-  const address = /Your agent, app and psql:\s+(\S+)/.exec(stdout)![1]!
+  const address = /Your agent, app and \w+:\s+(\S+)/.exec(stdout)![1]!
   return { child, address, stdout: () => stdout }
 }
 
@@ -93,7 +94,7 @@ describe('sosie', () => {
 
   it('serves describe and query over MCP', async () => {
     const mcp = await mcpClient(home)
-    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query'])
+    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'request'])
     const users = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
     expect(users.entities[0].fields).toContainEqual({ field: 'email', type: 'string', key: 'unique' })
     const result = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT * FROM users u JOIN orders o ON o.user_id = u.id' } })
@@ -136,6 +137,31 @@ describe('sosie', () => {
   })
 })
 
+describe('sosie, in front of an API', () => {
+  it('starts, serves curl and MCP, and says it found no OpenAPI document', async () => {
+    const api = await startApi()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-rest-'))
+    const sosie = await start({ SOSIE_UPSTREAM: api.url, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home }, ['--port', '0'])
+    const out = sosie.stdout()
+    expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document/)
+    expect(out).toContain('! No OpenAPI document found')
+    expect(out).toMatch(/Your agent, app and curl:\s+http:\/\/localhost:\d+\/v1/)
+    expect(out).not.toContain(TOKEN)
+    const users = (await (await fetch(`${sosie.address}/users`)).json()) as { data: unknown[] }
+    expect(users.data).toHaveLength(3)
+    const mcp = await mcpClient(home)
+    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'request'])
+    const result = JSON.parse(text(await mcp.callTool({ name: 'request', arguments: { path: '/users' } })))
+    expect(result.body.data).toHaveLength(3)
+    expect(canariesIn(JSON.stringify([users, result]))).toEqual([])
+    const query = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT 1' } })
+    expect(text(query)).toBe('Sosie serves rest here, not postgres: query is for postgres.')
+    await mcp.close()
+    expect(await stop(sosie.child)).toBe(0)
+    await api.close()
+  })
+})
+
 describe('sosie, when something is wrong', () => {
   const home = mkdtempSync(join(tmpdir(), 'sosie-cli-'))
 
@@ -148,10 +174,10 @@ describe('sosie, when something is wrong', () => {
   it('names an upstream it cannot read, without echoing it', () => {
     const result = run([], { SOSIE_UPSTREAM: 'mysql://kim:secret@db/app', SOSIE_HOME: home })
     expect(result.status).toBe(2)
-    expect(result.stderr).toContain('Sosie reads postgres:// upstreams for now, not mysql://.')
+    expect(result.stderr).toContain('Sosie reads postgres:// databases and http:// or https:// APIs for now, not mysql://.')
     expect(result.stderr).not.toContain('secret')
     const notUrl = run([], { SOSIE_UPSTREAM: 'host=db password=secret', SOSIE_HOME: home })
-    expect(notUrl.stderr).toContain('The connection string is not a URL.')
+    expect(notUrl.stderr).toContain('The upstream is not a URL.')
     expect(notUrl.stderr).not.toContain('secret')
   })
 

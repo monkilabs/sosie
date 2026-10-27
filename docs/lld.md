@@ -28,16 +28,17 @@ been wrapped around the same code.
 
 ## Packages
 
-One repository, npm workspaces, three packages:
+One repository, npm workspaces, four packages:
 
 | Package | Published as | Holds |
 | --- | --- | --- |
 | `packages/cli` | `@sosie/cli` | The CLI, run with `npx @sosie/cli` or installed as the `sosie` command, and the official sources it bundles |
 | `packages/core` | `@sosie/core` | Everything that does not depend on a source: the source interface, the neutral schema, rules, faking, the store, `scan`, the MCP server |
 | `packages/postgres` | `@sosie/postgres` | The Postgres source: endpoint, guard, rewriting, schema reading |
+| `packages/rest` | `@sosie/rest` | The REST source: an HTTP endpoint for the team's own API, OpenAPI reading, JSON faking |
 
-Later sources are packages of their own in the same scope: `@sosie/rest`,
-`@sosie/graphql`, `@sosie/mysql`. The `@sosie` scope is an npm organisation,
+Later sources are packages of their own in the same scope: `@sosie/graphql`,
+`@sosie/mysql`. The `@sosie` scope is an npm organisation,
 registered on 25 October 2026, so nobody else can take a name in it. Its team
 `developers` publishes.
 
@@ -77,13 +78,21 @@ packages/
     results.ts       which field each result column came from
     arrays.ts        Postgres array text
     mcp.ts           the query tool
+  rest/src/
+    index.ts         the Source: matches http:// and https://, finds the OpenAPI document
+    endpoint.ts      the HTTP server: the guard, paths and queries back to real values
+    upstream.ts      the API: Sosie's credentials, same-origin redirects, a timeout
+    openapi.ts       an OpenAPI document to the neutral schema and its GET operations
+    paths.ts         what a path names: an entity, and the field of each value in it
+    fake.ts          a JSON body, every value faked by its field
+    mcp.ts           the request tool
   cli/src/
     cli.ts           sosie, sosie mcp, sosie scan
     sources.ts       the sources this CLI knows
     prompt.ts        the hidden prompt
 test/
   memory-source/     a source that serves rows from memory, for core tests
-  e2e/               Postgres, seeded with canary values
+  e2e/               Postgres seeded with canary values, and a fake API serving the same people
 ```
 
 ## The source interface
@@ -354,6 +363,7 @@ holds credentials or real values.
 | --- | --- | --- | --- |
 | `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice; every value a consistent fake |
+| `request` | REST | `path` | The status and the JSON body of a GET through Sosie; up to 200 items of a list |
 
 When Sosie is not running, both say so, and how to start it.
 
@@ -570,6 +580,76 @@ upstream as the client wrote it.
 - `count(…)` with a filter answers yes-or-no questions about real values
   (`WHERE id <= (SELECT score …)`), as the threat model says of filters.
 
+## REST source
+
+For the team's own HTTP API, where the database's people come back as JSON.
+`SOSIE_UPSTREAM` is the API's base URL: `https://api.internal/v1`.
+
+### Endpoint and guard
+
+A local HTTP address with the API's own paths: `http://localhost:7674/v1/users`
+reads `https://api.internal/v1/users`. Only `GET` and `HEAD` reach the API;
+anything else gets `405` and never leaves Sosie. Requests outside the base path
+get `404`.
+
+### Credentials
+
+The API's credentials are Sosie's, never the client's: `SOSIE_UPSTREAM_HEADERS`
+holds them, one `Name: value` per line (`Authorization: Bearer …`), and a user
+and password in the URL become a Basic header. Headers the client sends,
+`Authorization` included, are not passed on. Redirects are followed inside
+Sosie, within the API's origin only, so credentials never go elsewhere and the
+client never sees a real URL. Each request has the statement timeout (30 s) and
+a body cap (20 MB).
+
+### Schema
+
+From an OpenAPI document, 3.x or Swagger 2.0, JSON or YAML: the file or URL in
+`SOSIE_OPENAPI`, or the first of `openapi.json`, `openapi.yaml`,
+`swagger.json`, `v3/api-docs`, `api-docs` and `docs/openapi.json` the API
+serves under its base. Each object schema is an entity (`allOf` merged), each
+property a field, a nested object's properties dotted (`User.address.city`).
+JSON Schema types and formats map to neutral types (`date-time` to `datetime`,
+`uuid`, `ipv4`, `enum` to `enum`); `format: email` and `uri` pick the email and
+URL formats. A property `id` is the entity's key; one named `userId`, `user_id`
+or `userIds` shares the values of the id of the entity it names, `User`.
+
+Without a document, the schema is learned as responses come: a value is the
+field of where it sits, in the entity its path names, singular (`/users` and
+`/users/87` are `user`; `{ "data": [{ "email": … }] }` is `user.email`, the
+envelope keys `data`, `items`, `results` and the like left out). The banner says
+so, and `sosie.yml` may name fields not met yet: they warn instead of failing,
+and apply once met. A body that does not have the shape its document says is
+read the same way.
+
+### Faking
+
+Every value of a JSON body is faked by its field, with the core's rules: types,
+domains, formats by name, `sosie.yml`. Formats are shared with every source, so
+a person's email is the same fake from the database and the API. A key that is
+structure (`city`, `createdAt`) stays; one that is a value (a map keyed by
+email) is faked. A URL into the API (`next`, `href`) points at Sosie instead,
+with its ids and query values faked, so following it reads the record it names.
+Status codes pass; error bodies in JSON are faked like any other; a body that is
+not JSON is not passed on (`502`, saying why).
+
+### Query by what you saw
+
+A path's segments that are values, a number, a UUID or a fake Sosie gave, turn
+back into real ones: in the domain of the id of the entity they follow
+(`/users/87` is `user.id`, `/users/{userId}/orders` by its OpenAPI name), else
+anywhere. A query parameter is looked up in the field it names (`?email=` in
+`user.email`, `?userId=` in `user.id`); other text anywhere; a number that names
+no field (`limit=10`, `page=2`) stays as written.
+
+### Limits
+
+- Response headers other than the content type are not passed on, `Link`
+  among them: pagination works through the body.
+- JSON only: images, files and HTML from the API are not passed on.
+- Ids are consistent within the API and across its links; an API's ids and a
+  database's are different fields, faked in their own domains.
+
 ## Adding a source after v0.1
 
 A new source is a package that exports a `Source`. It decides how clients talk
@@ -578,7 +658,7 @@ returns and every value a client sends. What each planned source maps:
 
 | Source | Endpoint for clients | Read-only guard | Field of a value |
 | --- | --- | --- | --- |
-| REST | A local HTTP address; paths and methods as upstream | `GET` and `HEAD` only | The OpenAPI document when given; otherwise the response's JSON path, until `sosie.yml` names it |
+| REST (built, above) | A local HTTP address; paths as upstream | `GET` and `HEAD` only | The OpenAPI document when there is one; otherwise where the value sits |
 | GraphQL | A local HTTP address | Queries only, no mutations | The schema, by introspection or a file |
 | MySQL | MySQL's wire protocol | Reads only, read-only session | Its result metadata, as with Postgres |
 
@@ -606,8 +686,13 @@ domains make a person's email the same fake from the database and from the API.
 - **Drivers.** `psql` (with `\d`), `node-postgres`, `postgres.js`, Drizzle over
   both, and Prisma 7 through its node-postgres adapter. The psql tests skip
   where psql is missing, except in CI.
-- **The CLI.** The built CLI is run: start, MCP over stdio, `scan`, Ctrl+C, and
-  the errors a developer meets first.
+- **REST, end to end.** A fake API under `/v1` wants a bearer token and serves
+  the database's canary people as JSON: an envelope, a map keyed by email,
+  links, an image, a redirect away, an error that quotes a canary; with and
+  without an OpenAPI document. A person's email is the same fake from the
+  database and from the API.
+- **The CLI.** The built CLI is run: start against a database and an API, MCP
+  over stdio, `scan`, Ctrl+C, and the errors a developer meets first.
 - **The dependency rule.** A test reads the imports and manifests.
 - **CI.** PostgreSQL 15, 16, 17 and 18 on Node 26; 18 on Node 24.
 

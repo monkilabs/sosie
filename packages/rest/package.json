@@ -1,0 +1,40 @@
+{
+  "name": "@sosie/rest",
+  "version": "0.1.0",
+  "description": "The REST source of Sosie: a local HTTP endpoint in front of your API that fakes every value.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monkilabs/sosie.git",
+    "directory": "packages/rest"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@sosie/core": "^0.1.0",
+    "yaml": "^2.9.1"
+  },
+  "keywords": [
+    "rest",
+    "openapi",
+    "ai",
+    "llm",
+    "privacy",
+    "fake-data",
+    "anonymization"
+  ]
+}

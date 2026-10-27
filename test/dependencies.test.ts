@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
  * core only, never on another source; the CLI brings them together.
  */
 const root = new URL('..', import.meta.url).pathname
-const SOURCES = ['@sosie/postgres']
+const SOURCES = ['@sosie/postgres', '@sosie/rest']
 
 function imports(pkg: string): string[] {
   const files: string[] = []
@@ -37,8 +37,8 @@ describe('the dependency rule', () => {
     }
   })
 
-  it('a source depends on the core only', () => {
-    const sosie = [...imports('postgres'), ...dependencies('postgres')].filter((n) => n.startsWith('@sosie/'))
+  it.each(['postgres', 'rest'])('the %s source depends on the core only', (source) => {
+    const sosie = [...imports(source), ...dependencies(source)].filter((n) => n.startsWith('@sosie/'))
     expect(new Set(sosie)).toEqual(new Set(['@sosie/core']))
   })
 
