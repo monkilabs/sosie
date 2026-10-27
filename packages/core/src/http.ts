@@ -25,6 +25,13 @@ export async function readCapped(response: Response, max: number): Promise<strin
   return Buffer.concat(chunks).toString('utf8')
 }
 
+/** Why a request failed, with the cause fetch keeps behind "fetch failed": a refused connection, a TLS error, a name not found. */
+export function why(error: unknown): string {
+  const { message, cause } = error as Error & { cause?: { message?: string; code?: string } }
+  const reason = cause?.message ?? cause?.code
+  return reason && !message.includes(reason) ? `${message}: ${reason}` : message
+}
+
 const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost'])
 
 /**

@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createFaker, loadRules, Store, storeDir, type Connection } from '@sosie/core'
 import { postgres } from '@sosie/postgres'
+import { rest } from '@sosie/rest'
+import { startApi } from './api.js'
 import { describe, expect, inject, it } from 'vitest'
 
 /** A port free on 127.0.0.1 that another program holds on ::1; undefined where this machine has no IPv6. */
@@ -46,6 +48,19 @@ describe('a port that another program holds on ::1, where localhost goes first',
     } finally {
       await connection.close()
       await held.close()
+    }
+  })
+
+  it('is busy for a REST Sosie too', async () => {
+    const held = await heldOnIpv6()
+    if (!held) return
+    const api = await startApi()
+    const connection = await rest.connect(new URL(api.url), { maxRows: 10, statementTimeout: 5000, env: {} })
+    try {
+      await expect(serve(connection, held.port)).rejects.toMatchObject({ code: 'EADDRINUSE' })
+    } finally {
+      await held.close()
+      await api.close()
     }
   })
 })

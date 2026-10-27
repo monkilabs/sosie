@@ -28,6 +28,11 @@ export interface Field {
   key?: 'primary' | 'unique'
   /** The id of the field whose values this one shares: a foreign key's target, or a view column's source. */
   references?: string
+  /**
+   * The reference was guessed from the field's name (userId to User.id), not read from the upstream: it shares
+   * the target's fakes, but never passes because the target does, since a wrong guess must let nothing through.
+   */
+  guessed?: boolean
   /** A format the upstream's own schema gives (OpenAPI's format: email), used when sosie.yml names none. */
   format?: string
 }

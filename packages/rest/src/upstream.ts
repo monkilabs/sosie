@@ -2,6 +2,8 @@ import { readCapped } from '@sosie/core'
 
 /** The API upstream: credentials Sosie holds, same-origin redirects only, a timeout and a size cap. */
 export interface UpstreamResponse {
+  /** Where the answer came from, after redirects within the API. */
+  url: URL
   status: number
   type: string
   body: string
@@ -40,7 +42,7 @@ export class RestUpstream {
         continue
       }
       const body = method === 'HEAD' ? '' : await readCapped(response, MAX_BODY)
-      return { status: response.status, type: response.headers.get('content-type') ?? '', body }
+      return { url: current, status: response.status, type: response.headers.get('content-type') ?? '', body }
     }
   }
 }

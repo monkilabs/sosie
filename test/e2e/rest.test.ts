@@ -146,6 +146,23 @@ describe('an API without an OpenAPI document', () => {
     expect(canariesIn(JSON.stringify(sosie.domains()))).toEqual([])
   })
 
+  it('shows a word a client typed in the links of its own answer only', async () => {
+    const own = (await sosie.get('/acme-industries/profile')).body
+    expect(own.self.startsWith(`${sosie.address}/acme-industries/`)).toBe(true)
+    const { body } = await sosie.get('/links')
+    expect(body.tenant).not.toContain('acme-industries')
+    expect(body.odd).toMatch(new RegExp(`^${sosie.address}/users\\?[^=]+=\\d+$`))
+    expect(body.odd).not.toContain('quillon')
+  })
+
+  it('reads an answer the API redirected by where it ended, so another kind’s rule does not apply', async () => {
+    const lenient = await startRest(api, { rules: 'pass:\n  - product.*\n' })
+    const { body } = await lenient.get('/products/featured')
+    expect(api.requests.at(-1)!.path).toBe('/v1/users/1')
+    expect(body.email).toMatch(/@example\.(com|net|org)$/)
+    await lenient.close()
+  })
+
   it('fakes a key that echoes a value it turned back, however it looks', async () => {
     const [{ handle }] = (await sosie.get('/handles')).body
     const { body } = await sosie.get(`/echo?handle=${handle}`)

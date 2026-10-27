@@ -90,7 +90,7 @@ person is the same fake from the API as from the database.
 
 ```sh
 export SOSIE_UPSTREAM='https://api.internal/v1'
-export SOSIE_UPSTREAM_HEADERS='Authorization: Bearer …'
+export SOSIE_UPSTREAM_HEADERS="$(cat ~/.config/api.headers)"   # Authorization: Bearer …
 npx @sosie/cli
 ```
 
@@ -102,7 +102,8 @@ npx @sosie/cli
 ```
 
 Only `GET` and `HEAD` reach the API, with Sosie's credentials, never the
-agent's. Sosie reads the API's OpenAPI document when it serves one, or the one
+agent's; read them from a file or a secret manager, as above, so they stay out
+of your shell's history. Sosie reads the API's OpenAPI document when it serves one, or the one
 in `SOSIE_OPENAPI`; without one, it names each value by where it sits. Links in
 the API's answers point at Sosie with every value in them faked, and following
 one reads the record it names.

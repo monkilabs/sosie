@@ -165,8 +165,17 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
         broken: `${origin}/v1/users/%zzVantablack`,
         paging: `${origin}/v1/users?start=7739182046&count=7739182046&offset=7739182046&page=2`,
         nested: `${origin}/v1/quillon/repos`,
+        tenant: `${origin}/v1/acme-industries/profile`,
+        odd: `${origin}/v1/users?quillon=1`,
         outside: `${origin}/static/Vantablack.png`,
       })
+    }
+    // A tenant's slug, as an app's settings would hold it, in a path of its own.
+    if (path === '/acme-industries/profile') return json(200, { self: `${origin}/v1/acme-industries/profile` })
+    // A path that redirects within the API, to a record of another kind.
+    if (path === '/products/featured') {
+      res.writeHead(302, { location: '/v1/users/1' })
+      return res.end()
     }
     if (path === '/handles') return json(200, Object.keys(handles).filter((h) => h === h.toLowerCase()).map((handle) => ({ handle })))
     // An API that answers with what it was asked, as a key: the real value Sosie sent it.

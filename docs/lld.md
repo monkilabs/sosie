@@ -366,7 +366,7 @@ lists it, for when several Sosies of a kind run; without it, the newest.
 | --- | --- | --- | --- |
 | `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice; every value a consistent fake |
-| `request` | REST | `path` | The status and the JSON body of a GET through Sosie, up to 200 items of each list; a path that names another host is refused |
+| `request` | REST | `path` | The status and the JSON body of a GET through Sosie, up to 200 items of each list, within 50 s; a path that names another host is refused |
 
 When Sosie is not running, both say so, and how to start it.
 
@@ -615,10 +615,16 @@ From an OpenAPI document, 3.x or Swagger 2.0, JSON or YAML: the file or URL in
 `swagger.json`, `v3/api-docs`, `api-docs` and `docs/openapi.json` the API
 serves under its base. Each object schema is an entity (`allOf` merged), each
 property a field, a nested object's properties dotted (`User.address.city`).
+A property that refers to another schema (`$ref`, or `allOf` of one, as
+OpenAPI 3.0 writes a nullable reference) is that entity's row, so a schema that
+refers to itself is read once. A document the API serves but Sosie cannot read
+is named in the banner's warning.
 JSON Schema types and formats map to neutral types (`date-time` to `datetime`,
 `uuid`, `ipv4`, `enum` to `enum`); `format: email` and `uri` pick the email and
 URL formats. A property `id` is the entity's key; one named `userId`, `user_id`
-or `userIds` shares the values of the id of the entity it names, `User`.
+or `userIds` shares the values of the id of the entity it names, `User`. Such a
+reference is a guess from a name: it shares the target's fakes, but never
+passes because the target does in `sosie.yml`.
 
 Without a document, the schema is learned as responses come: a value is the
 field of where it sits, in the entity its path names, singular (`/users` and
@@ -646,22 +652,29 @@ A URL into the API (`next`, `href`, or a path under the base) points at Sosie
 instead, with nothing real in it, so following it reads the record it names:
 
 - A path segment stays as written when it is a word Sosie knows as a name of
-  the API's: a fixed segment of an OpenAPI path, or one a client sent itself
-  and the API answered. A value (a number, a UUID, a template's parameter, or
+  the API's: a fixed segment of an OpenAPI path, a collection's name
+  (lowercase, plural) a client sent and the API answered, or a word of the
+  request the answer is for. Another word a client sent (a tenant's slug from
+  an app's settings) is never shown to another request. A value (a number, a UUID, a template's parameter, or
   what follows a collection's name, as in `/users/jdoe`) is faked as the id of
   what it follows; any other word is faked in a domain of its own (`$path`),
   and names no entity, so no domain holds it.
 - Query values are faked by the field they name, so a real value Sosie sent
   upstream comes back as the fake the client sent; a page's number (`page`,
-  `limit`, `offset` and the like, up to five digits) stays. A name that is not
-  a word (`q[Quillon]`) is faked; Sosie's own query credentials are left out.
+  `limit`, `offset` and the like, up to five digits) stays. A name stays when
+  it is a common one (`sort`, `cursor`, `q`), a field of the document, a key a
+  body has shown as structure, a reference (`userId`), or one of the request
+  the answer is for; any other (`q[Quillon]`, `?jdoe=1`) is faked, and its
+  value too, under no field's name. Sosie's own query credentials are left out.
 - A word or a name that is a value the request turned back is faked, however
   it looks.
 - The fragment is left out. Text that starts with a URL and goes on is text.
 
 Status codes pass; error bodies in JSON are faked like any other; a body that is
 not JSON is not passed on: an error status passes with Sosie's own message, and
-any other answer is `502`, saying why.
+any other answer is `502`, saying why. An answer the API redirected to another
+path is read by that path, as a link is, so another kind's rule in `sosie.yml`
+never applies to it.
 
 ### Query by what you saw
 
@@ -692,7 +705,8 @@ as written.
   the domains below it, which `sosie scan` prints. A link's query name that is
   a lowercase word (`?jdoe=1`) stays for the same reason.
 - A link reads less well than the API's own: a word no client has sent yet, and
-  one that follows a collection's name (`/users/by-email/…`), comes back faked.
+  one that follows a collection's name (`/users/by-email/…`), comes back faked,
+  and so does a query name Sosie cannot tell is structure.
 - An endpoint the API serves for `GET` that writes is the API's to guard: Sosie
   sends every `GET` on.
 

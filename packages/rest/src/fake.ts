@@ -1,5 +1,5 @@
 import { structuralKey, type Faker, type Field, type RequestScope } from '@sosie/core'
-import { merged, refName, referenceOf, type Api, type Node } from './openapi.js'
+import { merged, refName, refOf, referenceOf, type Api, type Node } from './openapi.js'
 import { idField, wordName, type Route } from './paths.js'
 
 /** Keys of a response's root that wrap its rows: { data: [...] }. A field below one is named as if it were not there. */
@@ -22,6 +22,8 @@ export interface FakeContext {
   maxItems: number
   /** Resolves now and then, to let other clients in while a large body is faked. */
   pace: () => Promise<void> | undefined
+  /** Told each key shown as structure: a client has seen it. */
+  shown?: (key: string) => void
 }
 
 /** A JSON body, every value faked by the field it is: from the OpenAPI schema, or named by where it is. `cut` says a list was cut. */
@@ -34,8 +36,9 @@ async function walk(value: unknown, node: Node | undefined, entity: string, pref
   if (value === null || value === undefined) return value
   await ctx.pace()
   // A $ref starts the row of another entity.
-  if (node?.$ref) {
-    entity = refName(node.$ref)
+  const ref = refOf(node)
+  if (ref) {
+    entity = refName(ref)
     prefix = ''
   }
   let schema = node && ctx.api ? merged(node, ctx.api.schemas) : undefined
@@ -57,6 +60,7 @@ async function walk(value: unknown, node: Node | undefined, entity: string, pref
       const structural = documented !== undefined || (!map && structuralKey(k) && !ctx.scope?.turnedBack(k))
       // A key that is a value (a map keyed by email) is faked, and never named in a field.
       const name = structural ? k : (ctx.faker.value(k, MAP_KEY, ctx.scope) as string)
+      if (structural) ctx.shown?.(k)
       const envelope = !schema && !prefix && ENVELOPES.has(k) && v !== null && typeof v === 'object'
       out[name] = await walk(v, documented ?? map, entity, envelope ? '' : `${prefix}${structural ? k : '*'}.`, structural ? k : '', ctx, state)
     }
@@ -84,7 +88,7 @@ function fieldAt(entity: string, prefix: string, key: string, value: unknown, ct
     typeof value === 'number' ? (Number.isInteger(value) ? { kind: 'integer' } : { kind: 'decimal' }) : typeof value === 'boolean' ? { kind: 'boolean' } : { kind: 'string' }
   if (key === 'id' && prefix === 'id.') return { ...idField(entity, String(value)), type }
   const target = referenceOf(key, (name) => ctx.entityFor(name))
-  return { id, name: key || 'value', type, ...(target && target !== entity && { references: `${target}.id` }) }
+  return { id, name: key || 'value', type, ...(target && target !== entity && { references: `${target}.id`, guessed: true }) }
 }
 
 /**
@@ -92,8 +96,9 @@ function fieldAt(entity: string, prefix: string, key: string, value: unknown, ct
  * name the OpenAPI document gives by its field, others by the route's entity.
  * A name that is not a word (q[Quillon]) is no field's: its values fake alike.
  */
-export function queryField(name: string, value: string, route: Route, ctx: Pick<FakeContext, 'fields' | 'entityFor'>): Field {
-  if (!wordName(name)) return { id: `${route.entity}.*`, name: '', type: { kind: 'string' } }
+export function queryField(name: string, value: string, route: Route, ctx: Pick<FakeContext, 'fields' | 'entityFor'>, hidden = false): Field {
+  // A name the client is not shown is no field's either, so no domain holds it.
+  if (hidden || !wordName(name)) return { id: `${route.entity}.*`, name: '', type: { kind: 'string' } }
   if (name === 'id') return idField(route.entity, value)
   const target = referenceOf(name, ctx.entityFor)
   if (target) return idField(target, value)

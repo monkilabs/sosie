@@ -45,14 +45,15 @@ export function readApi(doc: Node): Api {
     const properties = propertiesOf(node, schemas)
     if (!properties) continue
     const fields: Field[] = []
-    const add = (props: Record<string, Node>, prefix: string) => {
+    const add = (props: Record<string, Node>, prefix: string, depth: number) => {
       for (const [key, raw] of Object.entries(props)) {
         const prop = merged(raw, schemas)
-        // A property that is another entity is that entity's row, not a field of this one.
-        if (raw.$ref || (prop.type === 'array' && prop.items?.$ref)) continue
-        const nested = !raw.$ref && propertiesOf(prop, schemas)
+        // A property that is another entity is that entity's row, not a field of this one,
+        // so a schema that refers to itself (a user's manager) ends there.
+        if (refOf(raw) || (prop.type === 'array' && refOf(prop.items))) continue
+        const nested = propertiesOf(prop, schemas)
         if (nested && prop.type !== 'array') {
-          add(nested, `${prefix}${key}.`)
+          if (depth < MAX_DEPTH) add(nested, `${prefix}${key}.`, depth + 1)
           continue
         }
         fields.push({
@@ -64,7 +65,7 @@ export function readApi(doc: Node): Api {
         })
       }
     }
-    add(properties, '')
+    add(properties, '', 0)
     entities.push({ id: name, name, fields })
   }
   link(entities)
@@ -96,7 +97,10 @@ export function link(entities: Entity[]): void {
   for (const entity of entities) {
     for (const field of entity.fields) {
       const target = referenceOf(field.name, (name) => byName.get(name))
-      if (target && target.id !== entity.id && target.fields.some((f) => f.id === `${target.id}.id`)) field.references = `${target.id}.id`
+      if (target && target.id !== entity.id && target.fields.some((f) => f.id === `${target.id}.id`)) {
+        field.references = `${target.id}.id`
+        field.guessed = true
+      }
     }
   }
 }
@@ -110,7 +114,8 @@ export function referenceOf<T>(key: string, find: (name: string) => T | undefine
 /** The entity a response schema is about: a $ref, or an array of them. */
 export function entityOf(node: Node | undefined, schemas: Record<string, Node>): string | undefined {
   if (!node) return undefined
-  if (node.$ref) return refName(node.$ref)
+  const ref = refOf(node)
+  if (ref) return refName(ref)
   if (node.type === 'array') return entityOf(node.items, schemas)
   return undefined
 }
@@ -118,6 +123,20 @@ export function entityOf(node: Node | undefined, schemas: Record<string, Node>):
 export function refName(ref: string): string {
   return ref.split('/').at(-1)!
 }
+
+/**
+ * The schema a node refers to: its $ref, or the one schema of an allOf, as
+ * OpenAPI 3.0 writes a nullable reference ({ allOf: [{ $ref }], nullable: true }).
+ */
+export function refOf(node: Node | undefined): string | undefined {
+  if (!node) return undefined
+  if (typeof node.$ref === 'string') return node.$ref
+  const parts = Array.isArray(node.allOf) ? (node.allOf as Node[]) : []
+  return parts.length === 1 && typeof parts[0]?.$ref === 'string' && !node.properties ? parts[0].$ref : undefined
+}
+
+/** Levels of nested objects read into one entity's dotted fields. */
+const MAX_DEPTH = 8
 
 /** A schema with its $ref followed and its allOf merged. */
 export function merged(node: Node | undefined, schemas: Record<string, Node>, depth = 0): Node {
