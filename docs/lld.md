@@ -618,7 +618,7 @@ domains make a person's email the same fake from the database and from the API.
 
 | Setting | Default |
 | --- | --- |
-| Address | 127.0.0.1:7674 (7674 spells "sosi" on a phone keypad), and ::1 |
+| Address | 127.0.0.1:7674 (7674 spells "sosi" on a phone keypad), and ::1, where `localhost` often goes first; a port another program holds on ::1 counts as taken |
 | Rows per query | 1,000 |
 | Rows per MCP query | 200 |
 | Statement timeout upstream | 30 s |

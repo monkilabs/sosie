@@ -86,9 +86,11 @@ export class Store {
     // The timeout first, so each step below waits for another Sosie's lock.
     db.exec('PRAGMA busy_timeout = 5000')
     // Switching to WAL needs the file to itself, and SQLite answers busy at once rather than wait: try again.
-    for (let tries = 0; (db.prepare('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode !== 'wal'; tries++) {
+    // A file system without WAL keeps its mode without an error, and the store works without it.
+    for (let tries = 0; ; tries++) {
       try {
         db.exec('PRAGMA journal_mode = WAL')
+        break
       } catch (error) {
         if (tries >= 100 || !/locked|busy/i.test((error as Error).message)) throw error
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
