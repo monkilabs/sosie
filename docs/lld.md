@@ -296,7 +296,7 @@ Values a query computes fake in `computed:<type>`.
 | `enum` | A label of the same enum, by a fixed shuffle per domain; the shuffle may leave a label in place |
 | `date`, `datetime`, `time` | Shifted by up to a year, the same shift for the same value, in the same format |
 | Any type, a value with no letter or digit (`''`, `-`, `NaN`, `infinity`) | Itself: there is nothing in it to fake |
-| `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked |
+| `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked. Anywhere, a key that is a value the request turned back from a fake is faked, however it looks: an answer that holds it is echoing what the client sent |
 | `array` | Each element faked in the field's domain |
 | `ip` | An address from a documentation range |
 | `bytes` | Random bytes of the same length; derived, not stored |
@@ -644,7 +644,9 @@ domains, formats by name, `sosie.yml`. Formats are shared with every source, so
 a person's email is the same fake from the database and the API. A key that is
 structure (`city`, `createdAt`) stays; one that is a value (a map keyed by
 email) is faked, each to its own fake. Every key of a map the document declares
-(`additionalProperties` with a schema) is a value. A list keeps its first
+(`additionalProperties` with a schema) is a value, and so is a key that is a
+value the request turned back: an API that answers with what it was asked
+never hands the real value back. A list keeps its first
 `--max-rows` items, and the answer's `sosie-notice` header says the rest were
 cut; a large body is faked a slice at a time, so other clients are answered
 meanwhile.
@@ -656,11 +658,14 @@ instead, with nothing real in it, so following it reads the record it names:
   the API's: a fixed segment of an OpenAPI path, or one a client sent itself
   and the API answered. A value (a number, a UUID, a template's parameter, or
   what follows a collection's name, as in `/users/jdoe`) is faked as the id of
-  what it follows; any other word is faked in a domain of its own (`$path`).
+  what it follows; any other word is faked in a domain of its own (`$path`),
+  and names no entity, so no domain holds it.
 - Query values are faked by the field they name, so a real value Sosie sent
-  upstream comes back as the fake the client sent; numbers that page (`page`,
-  `limit`, `offset` and the like) stay. A name that is not a word
-  (`q[Quillon]`) is faked; Sosie's own query credentials are left out.
+  upstream comes back as the fake the client sent; a page's number (`page`,
+  `limit`, `offset` and the like, up to five digits) stays. A name that is not
+  a word (`q[Quillon]`) is faked; Sosie's own query credentials are left out.
+- A word or a name that is a value the request turned back is faked, however
+  it looks.
 - The fragment is left out. Text that starts with a URL and goes on is text.
 
 Status codes pass; error bodies in JSON are faked like any other; a body that is
@@ -690,9 +695,11 @@ as written.
 - Without a document, the same record read through two kinds of path may be
   two entities, with two fakes of its id: `/users/87` is `user`, while
   `/people/by-email/…` names its entity after the last word it can.
-- Without a document, a map keyed by lowercase words (`{ "jdoe": … }`) keeps
-  its keys, as a json column's do: they look like structure. Such a key is part
-  of the names of the domains below it, which `sosie scan` prints.
+- A map keyed by lowercase words (`{ "jdoe": … }`) keeps its keys, as a json
+  column's do, unless the document declares it a map or the request turned
+  that word back: they look like structure. Such a key is part of the names of
+  the domains below it, which `sosie scan` prints. A link's query name that is
+  a lowercase word (`?jdoe=1`) stays for the same reason.
 - A link reads less well than the API's own: a word no client has sent yet, and
   one that follows a collection's name (`/users/by-email/…`), comes back faked.
 - An endpoint the API serves for `GET` that writes is the API's to guard: Sosie

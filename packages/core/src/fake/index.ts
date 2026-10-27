@@ -142,18 +142,26 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
     }
   }
 
+  /** Whether a request turned a fake into this value: as a JSON key, an echo of what the client sent, and never structure. */
+  const echoed = (scope: RequestScope | undefined, key: string) => !!scope && turnedBack(scope, key)
+  const turnedBack = (scope: RequestScope, key: string) => {
+    const lower = key.toLowerCase()
+    for (const real of substitutions.get(scope)?.keys() ?? []) if (real.toLowerCase() === lower) return true
+    return false
+  }
+
   return {
-    value(value, field) {
+    value(value, field, scope) {
       const plan = planOf(field)
       if (plan.domain === null) return value
-      const out = fake(value, plan.type ?? field.type, plan.domain, plan, (k) => KEY_WORD.test(k) || names.has(k))
+      const out = fake(value, plan.type ?? field.type, plan.domain, plan, (k) => (KEY_WORD.test(k) || names.has(k)) && !echoed(scope, k))
       // A domain shared by fields of different lengths may hold a longer fake than this field takes.
       const max = field.type.kind === 'string' ? field.type.maxLength : undefined
       return max && typeof out === 'string' && out.length > max ? out.slice(0, max) : out
     },
 
-    computed(value, type, sent = '') {
-      return fake(value, type, `computed:${type.kind}`, { unique: false }, (k) => names.has(k) || appears(sent, k))
+    computed(value, type, sent = '', scope) {
+      return fake(value, type, `computed:${type.kind}`, { unique: false }, (k) => (names.has(k) || appears(sent, k)) && !echoed(scope, k))
     },
 
     passes(field) {
@@ -196,6 +204,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
 
       const scope: RequestScope = {
         lookup,
+        turnedBack: (text) => turnedBack(scope, text),
         scrub(text) {
           let out = text
           for (const [real, fakeValue] of [...substituted].sort((a, b) => b[0].length - a[0].length)) {

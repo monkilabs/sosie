@@ -1,4 +1,4 @@
-import type { Faker, Field, FieldType, Value } from '@sosie/core'
+import type { Faker, Field, FieldType, RequestScope, Value } from '@sosie/core'
 import { parseArray, serializeArray } from './arrays.js'
 import type { Analysis, Target } from './guard.js'
 import type { ColumnDescription } from './protocol.js'
@@ -47,12 +47,12 @@ function expand(targets: Target[] | undefined, count: number): Target[] | undefi
 }
 
 /** One row of text values, faked column by column. */
-export function fakeRow(values: (string | null)[], plans: ColumnPlan[], faker: Faker, sent = ''): (string | null)[] {
+export function fakeRow(values: (string | null)[], plans: ColumnPlan[], faker: Faker, sent = '', scope?: RequestScope): (string | null)[] {
   return values.map((value, i) => {
     const plan = plans[i]
     if (value === null || !plan || 'pass' in plan) return value
     const type = 'field' in plan ? plan.field.type : plan.type
-    const fake = (v: Value) => ('field' in plan ? faker.value(v, plan.field) : faker.computed(v, plan.type, sent))
+    const fake = (v: Value) => ('field' in plan ? faker.value(v, plan.field, scope) : faker.computed(v, plan.type, sent, scope))
     if (type.kind === 'array') {
       try {
         const { bounds, items } = parseArray(value)

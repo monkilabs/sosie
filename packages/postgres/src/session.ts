@@ -340,7 +340,7 @@ export class Session {
         !portal.prepared.analysis.catalogOnly,
       )
       if (message.name === 'dataRow') {
-        if (count++ < allowed) this.#write(backend.dataRow(fakeRow(message.fields as (string | null)[], portal.plans ?? [], this.#ctx.faker, portal.prepared.sent)))
+        if (count++ < allowed) this.#write(backend.dataRow(fakeRow(message.fields as (string | null)[], portal.plans ?? [], this.#ctx.faker, portal.prepared.sent, portal.scope)))
         continue
       }
       portal.returned += Math.min(count, allowed)

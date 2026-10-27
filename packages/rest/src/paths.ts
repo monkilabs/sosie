@@ -73,7 +73,7 @@ export function wordName(name: string): boolean {
 }
 
 /** Query parameters whose numbers say where a page starts and how long it is: they stay as written. */
-export const PAGING = new Set(['page', 'limit', 'offset', 'per_page', 'perPage', 'page_size', 'pageSize', 'size', 'skip', 'take', 'count', 'first', 'last', 'start'])
+export const PAGING = new Set(['page', 'limit', 'offset', 'per_page', 'perPage', 'page_size', 'pageSize', 'size', 'skip', 'take'])
 
 /** The id field of an entity, typed by the value's shape. */
 export function idField(entity: string, value: string): Field {
