@@ -31,6 +31,7 @@ describe('sosie mcp', () => {
     const { tools } = await mcp.listTools()
     expect(tools.map((t) => t.name)).toEqual(['describe', 'echo'])
     expect(tools[1]!.inputSchema.required).toEqual(['text'])
+    expect(Object.keys(tools[1]!.inputSchema.properties!)).toEqual(['text', 'extra', 'address'])
   })
 
   it('describes entities, fields, keys, references and what passes', async () => {
@@ -80,5 +81,22 @@ describe('sosie mcp', () => {
     const users = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
     expect(users.sources.map((s: { address: string }) => s.address)).toEqual(['memory://app', 'memory://older'])
     expect(JSON.parse(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi' } }))).address).toBe('memory://app')
+    expect(JSON.parse(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi', address: 'memory://older' } })))).toEqual({
+      text: 'hi',
+      address: 'memory://older',
+    })
+    const wrong = await mcp.callTool({ name: 'echo', arguments: { text: 'hi', address: 'http://localhost:7675' } })
+    expect(wrong.isError).toBe(true)
+    expect(text(wrong)).toBe('No memory Sosie runs at http://localhost:7675. Running: memory://app, memory://older.')
+  })
+
+  it('lists a Sosie that has met no entity yet, as an API without a schema document', async () => {
+    const learning: Running = { kind: 'rest', address: 'http://localhost:7675', schema: { entities: [] }, passing: [] }
+    const mcp = await connect(async () => [learning, one])
+    const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
+    expect(all.sources.map((s: { address: string; entities: unknown[] }) => [s.address, s.entities.length])).toEqual([
+      ['http://localhost:7675', 0],
+      ['memory://app', 3],
+    ])
   })
 })

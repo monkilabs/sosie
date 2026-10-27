@@ -1,10 +1,11 @@
 import { mkdtempSync } from 'node:fs'
+import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createFaker, loadRules, Store, storeDir, type Running } from '@sosie/core'
 import { rest } from '@sosie/rest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { startApi, TOKEN, type FakeApi } from './api.js'
+import { startApi, startRecorder, TOKEN, type FakeApi } from './api.js'
 import { canariesIn } from './canaries.js'
 import { startSosie } from './sosie.js'
 
@@ -14,9 +15,12 @@ type Json = any
 /** Everything Sosie returned in this file, searched for canaries at the end. */
 const seen: unknown[] = []
 
-async function startRest(api: FakeApi, { home = mkdtempSync(join(tmpdir(), 'sosie-rest-')), rules = '', env = {} as Record<string, string> } = {}) {
-  const connection = await rest.connect(new URL(api.url), {
-    maxRows: 1000,
+async function startRest(
+  api: FakeApi,
+  { home = mkdtempSync(join(tmpdir(), 'sosie-rest-')), rules = '', env = {} as Record<string, string>, maxRows = 1000, query = '' } = {},
+) {
+  const connection = await rest.connect(new URL(`${api.url}${query}`), {
+    maxRows,
     statementTimeout: 5000,
     env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, ...env },
   })
@@ -24,12 +28,13 @@ async function startRest(api: FakeApi, { home = mkdtempSync(join(tmpdir(), 'sosi
   const loaded = loadRules(rules, connection.schema, 'sosie.yml', { learns: !!connection.learns })
   const faker = createFaker({ schema: connection.schema, rules: loaded, store })
   const endpoint = await connection.serve({ host: '127.0.0.1', port: 0 }, faker)
-  const get = async (path: string, init?: RequestInit): Promise<{ status: number; body: Json }> => {
-    const response = await fetch(path.startsWith('http') ? path : `${endpoint.address}${path}`, init)
+  const get = async (path: string, init?: RequestInit): Promise<{ status: number; body: Json; notice: string | null }> => {
+    const url = path.startsWith('http') ? path : path.startsWith('/v1/') ? `${new URL(endpoint.address).origin}${path}` : `${endpoint.address}${path}`
+    const response = await fetch(url, init)
     const text = await response.text()
     const body = text ? JSON.parse(text) : null
     seen.push(body)
-    return { status: response.status, body }
+    return { status: response.status, body, notice: response.headers.get('sosie-notice') }
   }
   return {
     address: endpoint.address,
@@ -70,7 +75,7 @@ describe('an API without an OpenAPI document', () => {
     expect(body.data).toHaveLength(3)
     expect(body.data[0].email).toMatch(/@example\.(com|net|org)$/)
     expect(body.data[0].id).not.toBe(1)
-    expect(Object.keys(body.data[0])).toEqual(['id', 'email', 'name', 'role', 'address', 'apiKey'])
+    expect(Object.keys(body.data[0])).toEqual(['id', 'email', 'name', 'phone', 'role', 'active', 'address', 'apiKey'])
   })
 
   it('finds a record by a fake id in the path, or a fake value in the query', async () => {
@@ -104,6 +109,73 @@ describe('an API without an OpenAPI document', () => {
     expect(next).toBe(`${sosie.address}/users?page=2`)
   })
 
+  it('fakes every value a link carries: path words, query names and values; and drops its fragment', async () => {
+    const { body } = await sosie.get('/links')
+    expect(canariesIn(JSON.stringify(body))).toEqual([])
+    expect(body.login).toMatch(new RegExp(`^${sosie.address}/users/[^/]+$`))
+    expect(body.next).toMatch(new RegExp(`^${sosie.address}/users\\?after=[^&#]+&phone=[^&#]+$`))
+    expect(body.relative).toMatch(/^\/v1\/users\/[^/?]+\?page=2$/)
+    // Text that starts with a link is text; a link Sosie cannot read is faked like any value.
+    expect(body.note).not.toMatch(/^http/)
+    expect(body.broken).not.toContain('localhost')
+    const [quill] = (await sosie.get('/users')).body.data
+    // Each link leads back to the record it names, through Sosie.
+    expect((await sosie.get(body.login)).body).toEqual(quill)
+    expect((await sosie.get(body.relative)).body).toEqual(quill)
+    expect((await sosie.get(body.profile)).body.email).toBe(quill.email)
+    const repos = (await sosie.get(body.repos)).body
+    expect(repos).toHaveLength(1)
+    expect(api.requests.at(-1)!.path).toBe('/v1/users/Vantablack/repos')
+    await sosie.get(body.search)
+    expect(api.requests.at(-1)!.path).toBe('/v1/search?q%5BQuillon%5D=1&Vantablack=1')
+    await sosie.get(body.next)
+    expect(api.requests.at(-1)!.path).toBe('/v1/users?after=7739182046&phone=7739182046')
+  })
+
+  it('fakes again in a link the real value it turned a fake into', async () => {
+    const [quill] = (await sosie.get('/users')).body.data
+    const { body } = await sosie.get(`/users?phone=${quill.phone}`)
+    expect(api.requests.at(-1)!.path).toBe('/v1/users?phone=7739182046')
+    expect(body.data).toEqual([quill])
+    expect(body.next).toBe(`${sosie.address}/users?phone=${quill.phone}&page=2`)
+  })
+
+  it('finds records by a boolean it showed, flipped back', async () => {
+    // A field's booleans flip or not by the store's key: find a store where they flip.
+    for (let tries = 0; tries < 12; tries++) {
+      const s = await startRest(api)
+      const [quill] = (await s.get('/users')).body.data
+      if (quill.active === true) {
+        await s.close()
+        continue
+      }
+      const shown = (await s.get('/users?active=false')).body.data
+      expect(api.requests.at(-1)!.path).toBe('/v1/users?active=true')
+      expect(shown).toContainEqual(quill)
+      await s.close()
+      return
+    }
+    throw new Error('No store flipped user.active in 12 tries.')
+  })
+
+  it('reads a number in a path as the id of what it follows, never as another entity’s fake', async () => {
+    const fresh = await startRest(api)
+    // Nine ids of /big fake to the digits 1 to 9: 1 is the fake of one of them, and of no user's id.
+    await fresh.get('/big?n=9')
+    await fresh.get('/users/1')
+    expect(api.requests.at(-1)!.path).toBe('/v1/users/1')
+    await fresh.close()
+  })
+
+  it('cuts a list at --max-rows, and says so', async () => {
+    const small = await startRest(api, { maxRows: 2 })
+    const { body, notice } = await small.get('/users')
+    expect(body.data).toHaveLength(2)
+    expect(notice).toBe('Sosie returned the first 2 items of a list; the rest were cut. Narrow the request, or start Sosie with a higher --max-rows.')
+    expect((await small.get('/users/1')).notice).toBeNull()
+    await small.close()
+  })
+
   it('applies sosie.yml to fields not met yet, and warns that they are', async () => {
     const lenient = await startRest(api, { rules: 'pass:\n  - order.status\n' })
     expect(lenient.rules.warnings).toEqual(['sosie.yml: order is not known yet; It applies once Sosie meets it.'])
@@ -117,7 +189,7 @@ describe('the guard and the credentials', () => {
   it('sends only GET and HEAD to the API', async () => {
     const before = api.requests.length
     const post = await sosie.get('/users', { method: 'POST', body: '{}' })
-    expect(post).toEqual({ status: 405, body: { error: 'Sosie is read-only: only GET and HEAD reach the API.' } })
+    expect(post).toMatchObject({ status: 405, body: { error: 'Sosie is read-only: only GET and HEAD reach the API.' } })
     expect(api.requests.length).toBe(before)
     const head = await fetch(`${sosie.address}/users`, { method: 'HEAD' })
     expect(head.status).toBe(200)
@@ -130,19 +202,64 @@ describe('the guard and the credentials', () => {
 
   it('passes a refusal on, with its body faked', async () => {
     const without = await startRest(api, { env: { SOSIE_UPSTREAM_HEADERS: '' } })
-    expect((await without.get('/users')).status).toBe(401)
+    const refused = await without.get('/users')
+    expect(refused.status).toBe(401)
+    expect(Object.keys(refused.body)).toEqual(['error'])
+    expect(refused.body.error).not.toBe('unauthorized')
     await without.close()
+  })
+
+  it('sends a query the upstream URL carries with every request, and never shows it', async () => {
+    const keyed = await startRest(api, { query: '?api_key=k-live-8842' })
+    const { body } = await keyed.get('/users')
+    expect(api.requests.at(-1)!.path).toBe('/v1/users?api_key=k-live-8842')
+    expect(body.next).toBe(`${keyed.address}/users?page=2`)
+    expect(keyed.address).not.toContain('k-live')
+    await keyed.close()
+  })
+
+  it('never follows a redirect to another origin: the credentials stay with the API', async () => {
+    const recorder = await startRecorder()
+    const redirecting = await startApi({ elsewhere: recorder.url })
+    const s = await startRest(redirecting)
+    expect((await s.get('/elsewhere')).status).toBe(502)
+    expect((await s.get('/elsewhere-relative')).status).toBe(502)
+    expect(recorder.requests).toEqual([])
+    // Within the API's origin, Sosie follows it.
+    expect((await s.get('/moved')).body.email).toMatch(/@example\.(com|net|org)$/)
+    await s.close()
+    await redirecting.close()
+    await recorder.close()
+  })
+
+  it('answers requests for localhost only, so a web page cannot rebind its name to Sosie', async () => {
+    const { port } = new URL(sosie.address)
+    const status = (host: string) =>
+      new Promise<number>((resolve, reject) => {
+        httpRequest({ host: '127.0.0.1', port, path: '/v1/users', headers: { host } }, (res) => {
+          res.resume()
+          resolve(res.statusCode!)
+        })
+          .on('error', reject)
+          .end()
+      })
+    expect(await status('attacker.example')).toBe(403)
+    expect(await status(`localhost:${port}`)).toBe(200)
+    expect(await status(`127.0.0.1:${port}`)).toBe(200)
+  })
+
+  it('refuses a path it cannot decode, instead of failing', async () => {
+    expect(await sosie.get('/users/%zz')).toMatchObject({ status: 400, body: { error: 'The path has a % that does not start an escape (%20).' } })
   })
 
   it('fakes error bodies, and does not pass on what it cannot fake', async () => {
     const missing = await sosie.get('/missing')
     expect(missing.status).toBe(404)
     expect(missing.body.error).not.toMatch(/canary/)
-    expect(await sosie.get('/avatar')).toEqual({
+    expect(await sosie.get('/avatar')).toMatchObject({
       status: 502,
       body: { error: 'The API answered with image/png; Sosie fakes JSON only, so it does not pass it on.' },
     })
-    expect((await sosie.get('/elsewhere')).status).toBe(502)
   })
 })
 
@@ -150,7 +267,7 @@ describe('an API with an OpenAPI document', () => {
   it('finds the document, and fakes each value by its schema', async () => {
     const documented = await startApi({ withOpenapi: true })
     const s = await startRest(documented)
-    expect(s.connection.summary).toBe('OpenAPI 3.1, 2 schemas, 3 GET paths')
+    expect(s.connection.summary).toBe('OpenAPI 3.1, 3 schemas, 4 GET paths')
     expect(s.connection.schema.entities.find((e) => e.id === 'Order')!.fields.find((f) => f.name === 'userId')!.references).toBe('User.id')
     const users = (await s.get('/users')).body.data
     for (const u of users) expect(['admin', 'editor', 'viewer']).toContain(u.role)
@@ -158,6 +275,28 @@ describe('an API with an OpenAPI document', () => {
     for (const o of orders) {
       expect(o.userId).toBe(users[0].id)
       expect(['new', 'paid', 'shipped']).toContain(o.status)
+    }
+    await s.close()
+    await documented.close()
+  })
+
+  it('fakes every key of a map the document declares, lowercase words too', async () => {
+    const documented = await startApi({ withOpenapi: true })
+    const s = await startRest(documented)
+    const { body } = await s.get('/members')
+    expect(Object.keys(body)).toHaveLength(2)
+    expect(Object.keys(body)).not.toContain('quillon')
+    await s.close()
+    await documented.close()
+  })
+
+  it('finds records by an enum label or a boolean it showed, by the document', async () => {
+    const documented = await startApi({ withOpenapi: true })
+    const s = await startRest(documented)
+    const users = (await s.get('/users')).body.data
+    for (const user of users) {
+      expect((await s.get(`/users?role=${user.role}`)).body.data).toEqual([user])
+      expect((await s.get(`/users?active=${user.active}`)).body.data).toContainEqual(user)
     }
     await s.close()
     await documented.close()
@@ -186,5 +325,16 @@ describe('the MCP tool', () => {
     expect(result.status).toBe(200)
     expect(result.body.data).toHaveLength(3)
     seen.push(result)
+  })
+
+  it('reaches Sosie only, whatever the path says', async () => {
+    const root = await startApi()
+    const running: Running = { kind: 'rest', address: `http://localhost:${new URL(sosie.address).port}`, schema: { entities: [] }, passing: [] }
+    const before = root.requests.length
+    for (const path of [`//${new URL(root.url).host}/v1/users`, `/\\${new URL(root.url).host}/v1/users`]) {
+      await expect(rest.tools![0]!.run({ path }, running)).rejects.toThrow('The path must be a path of the API, such as /users?limit=10.')
+    }
+    expect(root.requests.length).toBe(before)
+    await root.close()
   })
 })

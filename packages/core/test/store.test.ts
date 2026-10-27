@@ -1,6 +1,9 @@
+import { execFile } from 'node:child_process'
 import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { Store, storeDir, storeDirs } from '../src/store.js'
 
@@ -15,6 +18,18 @@ describe('the mapping store', () => {
     expect(statSync(join(dir, 'store.db')).mode & 0o777).toBe(0o600)
     expect(statSync(dir).mode & 0o777).toBe(0o700)
     expect(readFileSync(join(dir, 'key'))).toHaveLength(32)
+  })
+
+  it('lets several Sosies start on a new store at once, and gives each fake to one value', async () => {
+    const dir = fresh()
+    const script = fileURLToPath(new URL('./store-race.mjs', import.meta.url))
+    const runs = await Promise.all(Array.from({ length: 6 }, () => promisify(execFile)(process.execPath, [script, dir])))
+    const mappings = runs.map((r) => JSON.parse(r.stdout) as Record<string, string>)
+    for (const mapping of mappings) expect(mapping).toEqual(mappings[0])
+    const store = Store.open(dir)
+    for (const fake of new Set(Object.values(mappings[0]!))) expect(store.reals(fake, 'd')).toHaveLength(1)
+    expect(new Set(Object.values(mappings[0]!)).size).toBe(30)
+    store.close()
   })
 
   it('remembers a fake across sessions', () => {

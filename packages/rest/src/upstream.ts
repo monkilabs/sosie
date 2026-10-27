@@ -1,3 +1,5 @@
+import { readCapped } from '@sosie/core'
+
 /** The API upstream: credentials Sosie holds, same-origin redirects only, a timeout and a size cap. */
 export interface UpstreamResponse {
   status: number
@@ -13,11 +15,14 @@ export class RestUpstream {
     readonly base: URL,
     readonly headers: Record<string, string>,
     readonly timeout: number,
+    /** Query parameters SOSIE_UPSTREAM carries, such as an api_key: sent with every request, never shown. */
+    readonly params = new URLSearchParams(),
   ) {}
 
   async get(url: URL, method: 'GET' | 'HEAD' = 'GET'): Promise<UpstreamResponse> {
     let current = url
     for (let hop = 0; ; hop++) {
+      for (const [name, value] of this.params) current.searchParams.set(name, value)
       const response = await fetch(current, {
         method,
         headers: { accept: 'application/json', 'user-agent': 'sosie', ...this.headers },
@@ -30,13 +35,11 @@ export class RestUpstream {
         // Credentials go to the API's own origin only.
         if (next.origin !== this.base.origin) throw new Error(`The API redirected to ${next.origin}; Sosie follows redirects within ${this.base.origin} only.`)
         if (hop >= MAX_REDIRECTS) throw new Error('The API redirected too many times.')
+        await response.body?.cancel()
         current = next
         continue
       }
-      const length = Number(response.headers.get('content-length') ?? 0)
-      if (length > MAX_BODY) throw new Error(`The API answered with ${length} bytes; Sosie fakes up to ${MAX_BODY}.`)
-      const body = method === 'HEAD' ? '' : await response.text()
-      if (body.length > MAX_BODY) throw new Error(`The API answered with more than ${MAX_BODY} bytes; Sosie fakes up to that.`)
+      const body = method === 'HEAD' ? '' : await readCapped(response, MAX_BODY)
       return { status: response.status, type: response.headers.get('content-type') ?? '', body }
     }
   }

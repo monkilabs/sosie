@@ -103,7 +103,9 @@ npx @sosie/cli
 
 Only `GET` and `HEAD` reach the API, with Sosie's credentials, never the
 agent's. Sosie reads the API's OpenAPI document when it serves one, or the one
-in `SOSIE_OPENAPI`; without one, it names each value by where it sits.
+in `SOSIE_OPENAPI`; without one, it names each value by where it sits. Links in
+the API's answers point at Sosie with every value in them faked, and following
+one reads the record it names.
 
 A GraphQL API works the same way: point `SOSIE_UPSTREAM` at its endpoint
 (`https://api.internal/graphql`). Sosie reads the schema by introspection, or

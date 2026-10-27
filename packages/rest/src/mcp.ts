@@ -1,4 +1,4 @@
-import type { McpTool } from '@sosie/core'
+import { capLists, type McpTool } from '@sosie/core'
 
 const MAX_ITEMS = 200
 
@@ -15,7 +15,10 @@ export const requestTool: McpTool = {
     let path = input.path ?? '/'
     if (!path.startsWith('/')) path = `/${path}`
     if (basePath && path !== basePath && !path.startsWith(`${basePath}/`) && !path.startsWith(`${basePath}?`)) path = `${basePath}${path}`
-    const response = await fetch(new URL(path, base.origin))
+    const url = new URL(path, base.origin)
+    // A path such as //host/x names another host: the tool reaches Sosie only.
+    if (url.origin !== base.origin) throw new Error('The path must be a path of the API, such as /users?limit=10.')
+    const response = await fetch(url)
     const text = await response.text()
     let body: unknown = text
     try {
@@ -23,9 +26,8 @@ export const requestTool: McpTool = {
     } catch {
       // Sosie answers with JSON; anything else is shown as text.
     }
-    if (Array.isArray(body) && body.length > MAX_ITEMS) {
-      return { status: response.status, body: body.slice(0, MAX_ITEMS), note: `Only the first ${MAX_ITEMS} of ${body.length} items are shown.` }
-    }
-    return { status: response.status, body }
+    const capped = capLists(body, MAX_ITEMS)
+    const notes = [response.headers.get('sosie-notice'), capped.cut && `Only the first ${MAX_ITEMS} items of each list are shown.`].filter(Boolean)
+    return { status: response.status, body: capped.value, ...(notes.length && { note: notes.join(' ') }) }
   },
 }
