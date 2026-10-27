@@ -28,6 +28,8 @@ export interface Field {
   key?: 'primary' | 'unique'
   /** The id of the field whose values this one shares: a foreign key's target, or a view column's source. */
   references?: string
+  /** A format the upstream's own schema gives (OpenAPI's format: email), used when sosie.yml names none. */
+  format?: string
 }
 
 export type FieldType =
@@ -77,6 +79,8 @@ export interface SourceOptions {
   maxRows: number
   /** Milliseconds a statement may run upstream. */
   statementTimeout: number
+  /** Where a source reads its own settings, never arguments: SOSIE_UPSTREAM_HEADERS, SOSIE_OPENAPI. */
+  env?: Record<string, string | undefined>
 }
 
 export interface Source {
@@ -98,6 +102,10 @@ export interface Connection {
   readonly summary: string
   /** Things the developer should know, for the terminal. */
   readonly warnings: string[]
+  /** The schema grows as values come (an API without a schema): sosie.yml may name fields not met yet. */
+  readonly learns?: boolean
+  /** The tool a developer would point at the address, for the terminal: 'psql', 'curl'. */
+  readonly client?: string
   /** Start the endpoint clients use. Every value it returns goes through the Faker. */
   serve(listen: { host: string; port: number }, faker: Faker): Promise<Endpoint>
   close(): Promise<void>

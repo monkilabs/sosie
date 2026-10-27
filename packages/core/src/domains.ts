@@ -1,4 +1,4 @@
-import { formatByName, PERSONAL, type Format } from './fake/formats.js'
+import { FORMATS, formatByName, PERSONAL, type Format } from './fake/formats.js'
 import type { Rules } from './rules.js'
 import type { Entity, Field, FieldType, Schema } from './source.js'
 
@@ -21,33 +21,46 @@ const PASS: FieldPlan = { domain: null, unique: false }
  * 2. it shares another field's values: that field's domain, so orders.user_id fakes like users.id;
  * 3. its format is personal: the format's domain, so one person's email is one fake everywhere;
  * 4. otherwise its own id.
+ * Fields a source learns as values come (an API without a schema) are planned the same way, when first met.
  */
-export function planFields(schema: Schema, rules: Rules): Map<string, FieldPlan> {
-  const fields = new Map<string, { field: Field; entity: Entity }>()
-  for (const entity of schema.entities) for (const field of entity.fields) fields.set(field.id, { field, entity })
+export function planner(schema: Schema, rules: Rules): (field: Field) => FieldPlan {
+  const known = new Map<string, { field: Field; entity: Entity }>()
+  for (const entity of schema.entities) for (const field of entity.fields) known.set(field.id, { field, entity })
+  const entityOf = (id: string) => id.slice(0, id.lastIndexOf('.'))
+  const passes = (id: string) => rules.pass.has(id) || rules.pass.has(`${entityOf(id)}.*`)
 
   const plans = new Map<string, FieldPlan>()
-  const resolve = (id: string, seen: Set<string>): FieldPlan => {
-    const known = plans.get(id)
-    if (known) return known
-    const entry = fields.get(id)
-    if (!entry) return PASS
-    const { field, entity } = entry
+  const resolve = (field: Field, entity: Pick<Entity, 'name'>, seen: Set<string>, learned: boolean): FieldPlan => {
+    const cached = plans.get(field.id)
+    if (cached) return cached
     let plan: FieldPlan
-    if (rules.pass.has(id)) plan = PASS
-    else if (field.references && fields.has(field.references) && !seen.has(field.references)) {
-      plan = resolve(field.references, new Set(seen).add(id))
+    if (passes(field.id)) plan = PASS
+    else if (field.references && !seen.has(field.references)) {
+      const target = known.get(field.references)
+      plan = target
+        ? resolve(target.field, target.entity, new Set(seen).add(field.id), false)
+        : passes(field.references)
+          ? PASS
+          : { domain: field.references, unique: true }
     } else {
-      const format = rules.format.get(id) ?? (field.type.kind === 'string' ? formatByName(field, entity) : undefined)
+      const given = field.format && (FORMATS as readonly string[]).includes(field.format) ? (field.format as Format) : undefined
+      const format = rules.format.get(field.id) ?? given ?? (field.type.kind === 'string' ? formatByName(field, entity) : undefined)
       const unique = !!field.key || !!field.references || field.type.kind === 'string' || field.type.kind === 'uuid'
       plan =
         format && PERSONAL.has(format)
           ? { domain: `format:${format}`, format, unique: true }
-          : { domain: id, unique, type: field.type, ...(format && { format }) }
+          : // A learned field may hold another type next time: its fakes are drawn for the value's own type.
+            { domain: field.id, unique, ...(!learned && { type: field.type }), ...(format && { format }) }
     }
-    plans.set(id, plan)
+    plans.set(field.id, plan)
     return plan
   }
-  for (const id of fields.keys()) resolve(id, new Set([id]))
-  return plans
+  for (const { field, entity } of known.values()) resolve(field, entity, new Set([field.id]), false)
+  return (field) => plans.get(field.id) ?? resolve(field, { name: entityOf(field.id) }, new Set([field.id]), true)
+}
+
+/** The plan of every field in the schema. */
+export function planFields(schema: Schema, rules: Rules): Map<string, FieldPlan> {
+  const plan = planner(schema, rules)
+  return new Map(schema.entities.flatMap((e) => e.fields.map((f) => [f.id, plan(f)] as const)))
 }

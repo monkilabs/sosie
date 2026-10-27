@@ -1,5 +1,5 @@
 import { base, en, Faker as FakerJs } from '@faker-js/faker'
-import { planFields, type FieldPlan } from '../domains.js'
+import { planner, type FieldPlan } from '../domains.js'
 import type { Rules } from '../rules.js'
 import type { Store } from '../store.js'
 import type { Faker, Field, FieldType, RequestScope, Schema, Value } from '../source.js'
@@ -12,6 +12,11 @@ const TRUE = /^(t|true|y|yes|on|1)$/i
 const BOOLEAN = /^(t|f|true|false|y|n|yes|no|on|off|1|0)$/i
 /** A key of a json column that looks like structure: a lowercase or camelCase word, perhaps ending in a number. */
 const KEY_WORD = /^[a-z_]+(?:[A-Z][a-z]*)*\d{0,2}$/
+
+/** Whether a JSON key looks like structure (city, createdAt, address_line1) rather than a value (a name, an email, a code). */
+export function structuralKey(key: string): boolean {
+  return KEY_WORD.test(key)
+}
 /** A word with a digit in it, as Postgres prints some values unquoted: 'date field value out of range: 1988-14-29'. */
 const DIGITS = /[\w.:+-]*\d[\w.:+-]*/g
 
@@ -30,7 +35,7 @@ function appears(sent: string, token: string): boolean {
 
 /** The core's Faker: every value a source returns goes through it, and every fake a client sends comes back through it. */
 export function createFaker({ schema, rules, store }: { schema: Schema; rules: Rules; store: Store }): Faker {
-  const plans = planFields(schema, rules)
+  const planOf = planner(schema, rules)
   /** Names of entities and fields: an error quoting one quotes structure, not a value. */
   const names = new Set(
     schema.entities.flatMap((e) => [e.id, e.name, ...e.fields.flatMap((f) => [f.id, f.name, `${e.name}.${f.name}`])]),
@@ -43,9 +48,6 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
   }
   const substitutions = new WeakMap<RequestScope, Map<string, string>>()
   const fakerJs = new FakerJs({ locale: [en, base] })
-
-  const planOf = (field: Field): FieldPlan =>
-    plans.get(field.id) ?? { domain: field.id, unique: !!field.key || field.type.kind === 'string' }
 
   /** Booleans flip or not, once per domain, by the key. */
   const flips = (domain: string) => (store.seed(domain, '\0boolean')[0]! & 1) === 1

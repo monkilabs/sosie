@@ -8,6 +8,8 @@ export interface Rules {
   pass: Set<string>
   /** Formats for fields Sosie cannot tell from their names. */
   format: Map<string, Format>
+  /** Fields not met yet, for a source that learns its fields: kept, and worth a look. */
+  warnings: string[]
 }
 
 export class RulesError extends Error {
@@ -17,10 +19,13 @@ export class RulesError extends Error {
   }
 }
 
-export const NO_RULES: Rules = { pass: new Set(), format: new Map() }
+export const NO_RULES: Rules = { pass: new Set(), format: new Map(), warnings: [] }
 
-/** Parse and check sosie.yml. Every problem is reported at once, each naming what is wrong. */
-export function loadRules(text: string, schema: Schema, file = 'sosie.yml'): Rules {
+/**
+ * Parse and check sosie.yml. Every problem is reported at once, each naming what is wrong.
+ * For a source that `learns` its fields, a field not met yet is kept, with a warning.
+ */
+export function loadRules(text: string, schema: Schema, file = 'sosie.yml', { learns = false } = {}): Rules {
   let doc: unknown
   try {
     doc = parse(text)
@@ -47,7 +52,12 @@ export function loadRules(text: string, schema: Schema, file = 'sosie.yml'): Rul
     return `${file}: ${id} is not a field.${hint ? ` Did you mean ${hint}?` : ''}`
   }
 
-  const rules: Rules = { pass: new Set(), format: new Map() }
+  const rules: Rules = { pass: new Set(), format: new Map(), warnings: [] }
+  const unknown = (id: string, keep: () => void) => {
+    if (!learns) return problems.push(unknownField(id))
+    keep()
+    rules.warnings.push(`${unknownField(id).replace(/ is not a (table|field)\./, ' is not known yet;')} It applies once Sosie meets it.`)
+  }
   for (const [key, value] of Object.entries(doc)) {
     if (key === 'pass') {
       if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
@@ -57,12 +67,12 @@ export function loadRules(text: string, schema: Schema, file = 'sosie.yml'): Rul
       for (const pattern of value as string[]) {
         if (pattern.endsWith('.*')) {
           const entity = entities.get(pattern.slice(0, -2))
-          if (!entity) problems.push(unknownField(`${pattern.slice(0, -2)}.*`))
+          if (!entity) unknown(`${pattern.slice(0, -2)}.*`, () => rules.pass.add(pattern))
           else for (const field of entity.fields) rules.pass.add(field.id)
         } else if (fields.has(pattern)) {
           rules.pass.add(pattern)
         } else {
-          problems.push(unknownField(pattern))
+          unknown(pattern, () => rules.pass.add(pattern))
         }
       }
     } else if (key === 'format') {
@@ -71,13 +81,13 @@ export function loadRules(text: string, schema: Schema, file = 'sosie.yml'): Rul
         continue
       }
       for (const [id, format] of Object.entries(value)) {
-        if (!fields.has(id)) problems.push(unknownField(id))
-        else if (typeof format !== 'string' || !FORMATS.includes(format as Format)) {
+        if (typeof format !== 'string' || !FORMATS.includes(format as Format)) {
           const hint = typeof format === 'string' ? suggest(format, [...FORMATS]) : undefined
           problems.push(
             `${file}: ${String(format)} is not a format.${hint ? ` Did you mean ${hint}?` : ''} Formats: ${FORMATS.join(', ')}.`,
           )
-        } else rules.format.set(id, format as Format)
+        } else if (!fields.has(id)) unknown(id, () => rules.format.set(id, format as Format))
+        else rules.format.set(id, format as Format)
       }
     } else {
       const hint = suggest(key, ['pass', 'format'])
