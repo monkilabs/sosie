@@ -33,7 +33,8 @@ export async function serveMcp({ version, tools, running, transport }: McpOption
         if (all.length === 1) return describe(all[0]!.schema, all[0]!.passing, entity)
         const sources = all
           .map((r) => ({ kind: r.kind, address: r.address, ...describe(r.schema, r.passing, entity, false) }))
-          .filter((s) => s.entities.length)
+          // A Sosie whose schema is learned as values come has no entities yet: still listed, unless one is asked for.
+          .filter((s) => !entity || s.entities.length)
         if (entity && !sources.length) throw new Error(`${entity} is not an entity of any upstream Sosie serves.`)
         return { note: NOTE, sources: sources.map(({ note: _, ...s }) => s) }
       }),
@@ -46,18 +47,24 @@ export async function serveMcp({ version, tools, running, transport }: McpOption
         return [name, input.optional ? field.optional() : field]
       }),
     )
+    shape.address = z
+      .string()
+      .optional()
+      .describe(`With several ${kind} Sosies running, the address of the one to use, as describe lists it; the newest when left out.`)
     server.registerTool(
       tool.name,
       { description: tool.description, inputSchema: shape, annotations: { readOnlyHint: true } },
-      async (input: Record<string, string | undefined>) =>
+      async ({ address, ...input }: Record<string, string | undefined>) =>
         respond(async () => {
           const all = await running()
-          const now = all.find((r) => r.kind === kind)
-          if (!now) {
+          const ofKind = all.filter((r) => r.kind === kind)
+          if (!ofKind.length) {
             const kinds = [...new Set(all.map((r) => r.kind))].join(' and ')
             throw new Error(`Sosie serves ${kinds} here, not ${kind}: ${tool.name} is for ${kind}.`)
           }
-          return tool.run(input, now)
+          const target = address ? ofKind.find((r) => r.address === address) : ofKind[0]
+          if (!target) throw new Error(`No ${kind} Sosie runs at ${address}. Running: ${ofKind.map((r) => r.address).join(', ')}.`)
+          return tool.run(input, target)
         }),
     )
   }
