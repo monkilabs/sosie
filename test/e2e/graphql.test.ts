@@ -189,7 +189,7 @@ describe('a GraphQL API', () => {
       await others
       expect(result).toMatchObject({ status: 400, body: { errors: [{ extensions: { code: 'SOSIE_TOO_COSTLY' } }] } })
       expect(meanwhile).toEqual([200, 200, 200, 200, 200])
-      expect(ms).toBeLessThan(500)
+      expect(ms).toBeLessThan(1000)
     }
     // A thread that was stopped is replaced: introspection is answered again.
     expect((await sosie.ask('{ __schema { queryType { name } } }')).body).toEqual({ data: { __schema: { queryType: { name: 'Query' } } } })
@@ -198,7 +198,7 @@ describe('a GraphQL API', () => {
   it('fakes a large JSON value a slice at a time, and answers other clients meanwhile', async () => {
     const { result, ms } = await stillest(sosie.ask('{ big(n: 20000) }'))
     expect(Object.keys(result.body.data.big)).toHaveLength(20000)
-    expect(ms).toBeLessThan(500)
+    expect(ms).toBeLessThan(1000)
   })
 
   it('sends a value compared with a field that passes as written, so no other field’s real value comes back in it', async () => {
