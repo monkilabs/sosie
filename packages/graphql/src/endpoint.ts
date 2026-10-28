@@ -266,7 +266,11 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       else res.end()
     })
   }
-  const servers = await listenLocal(listen, accept)
+  // A port taken, where the CLI tries the next one, leaves no checking thread behind.
+  const servers = await listenLocal(listen, accept).catch(async (error: unknown) => {
+    await checker.close()
+    throw error
+  })
   const bound = servers[0]!.address()
   const port = bound && typeof bound === 'object' ? bound.port : listen.port
   const host = listen.host === '127.0.0.1' || listen.host === '::1' ? 'localhost' : listen.host

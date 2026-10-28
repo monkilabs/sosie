@@ -32,6 +32,9 @@ export interface Names {
   passes: (field: Field) => boolean
 }
 
+/** A use of a variable: the argument or input key it is the value of, and the type that argument's field returns. */
+type Use = { type: GraphQLNamedType | undefined; name: string }
+
 /** `sosieTypename_: __typename`, asked of every object of an interface or a union, so Sosie knows how to fake it. */
 const ASK_TYPENAME: FieldNode = { kind: Kind.FIELD, alias: { kind: Kind.NAME, value: TYPENAME }, name: { kind: Kind.NAME, value: '__typename' } }
 
@@ -52,7 +55,8 @@ export function rewrite(
   names: Names,
 ): Rewritten {
   let changed = false
-  const usages = new Map<string, { type: GraphQLNamedType | undefined; name: string }>()
+  /** Where each variable is used: the field each use compares with is where its value is looked up. */
+  const usages = new Map<string, Use[]>()
 
   /** The fields an argument may name: on the type its field returns, or on each type an interface or a union may be. */
   const near = (name: string, type: GraphQLNamedType | undefined): Field[] => {
@@ -112,7 +116,7 @@ export function rewrite(
       case Kind.OBJECT:
         return { ...node, fields: node.fields.map((f) => ({ ...f, value: value(f.value, within(f.name.value, name, type), type) })) }
       case Kind.VARIABLE:
-        usages.set(node.name.value, { type, name })
+        usages.set(node.name.value, [...(usages.get(node.name.value) ?? []), { type, name }])
         return node
       default:
         return node
@@ -143,22 +147,29 @@ export function rewrite(
     }),
   )
 
-  const variable = (v: unknown, name: string, type: GraphQLNamedType | undefined): unknown => {
-    if (Array.isArray(v)) return v.map((item) => variable(item, name, type))
-    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, item]) => [k, variable(item, within(k, name, type), type)]))
+  /**
+   * A variable's value, looked up in the fields of all its uses at once: one value is sent for every use,
+   * so it is real only when they agree, and stays as written when any use compares it with a field that passes.
+   */
+  const variable = (v: unknown, uses: Use[]): unknown => {
+    if (Array.isArray(v)) return v.map((item) => variable(item, uses))
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(Object.entries(v).map(([k, item]) => [k, variable(item, uses.map((use) => ({ ...use, name: within(k, use.name, use.type) })))]))
+    }
+    const fields = [...new Map(uses.flatMap((use) => near(use.name, use.type)).map((f) => [f.id, f])).values()]
     if (typeof v === 'boolean') {
-      const real = lookup(String(v), near(name, type), false)
+      const real = lookup(String(v), fields, false)
       if (real === undefined || real === String(v)) return v
       changed = true
       return real === 'true'
     }
     if (typeof v !== 'string' && typeof v !== 'number') return v
-    const real = lookup(String(v), near(name, type))
+    const real = lookup(String(v), fields)
     if (real === undefined || real === String(v)) return v
     changed = true
     return typeof v === 'number' && /^-?\d+(\.\d+)?$/.test(real) ? Number(real) : real
   }
   const real = { ...variables }
-  for (const [name, usage] of usages) if (name in real) real[name] = variable(real[name], usage.name, usage.type)
+  for (const [name, uses] of usages) if (name in real) real[name] = variable(real[name], uses)
   return { document: rewritten, variables: real, changed }
 }

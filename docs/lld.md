@@ -814,7 +814,10 @@ quoting only what the client sent. A query of more than 10,000 tokens is
 refused before it is parsed. Checking runs on two threads of Sosie's own, each
 query within 2 seconds and 256 MB: graphql-js can take minutes over a small
 query that repeats a field, so one that needs more is refused
-(`SOSIE_TOO_COSTLY`), and the other thread answers everyone else meanwhile.
+(`SOSIE_TOO_COSTLY`). One costly query leaves the other thread to answer
+everyone else; while both work on costly queries, others wait their turn, at
+most 2 seconds for each costly query ahead of them, since each is refused by
+then. A Sosie that cannot listen on its port stops its threads.
 Only queries reach the API, and only the operation to run with the fragments
 it uses: a mutation or a subscription is answered with an error, and its text
 never leaves Sosie. A persisted query without its text is refused. POSTs are
@@ -868,7 +871,10 @@ that field of each type it may be, when they agree: `node(id:)` in `User.id`,
 `Order.id` and the rest. Text it names no field for is looked up anywhere; a
 number that names no field (`first: 10`) stays as written; a directive's
 argument (`@include(if:)`) is left alone. A value compared with a field that
-passes is real already, and stays as written, as for REST.
+passes is real already, and stays as written, as for REST. A variable has one
+value for all its uses, so it is looked up in the fields of every use at once:
+it is real only when they agree, and stays as written when any use compares it
+with a field that passes.
 
 ### Limits
 

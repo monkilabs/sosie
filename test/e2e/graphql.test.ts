@@ -1,11 +1,12 @@
 import { mkdtempSync, writeFileSync } from 'node:fs'
-import { request as httpRequest } from 'node:http'
+import { createServer, request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { createFaker, loadRules, Store, storeDir, type Running } from '@sosie/core'
 import { graphql } from '@sosie/graphql'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { Checker } from '../../packages/graphql/src/check.js'
 import { startRecorder, TOKEN } from './api.js'
 import { canariesIn } from './canaries.js'
 import { SDL, startGraphql, type FakeGraphql } from './graphql-api.js'
@@ -212,6 +213,39 @@ describe('a GraphQL API', () => {
     expect(api.received.at(-1)!.query).toContain('"quill.vantablack@canary-mail.test"')
     expect(echo.data.report.note).toBe(`Results for ${quill.email}`)
     await lenient.close()
+  })
+
+  it('sends a variable as written for every use when one compares it with a field that passes', async () => {
+    const lenient = await startGraphqlSosie(api, { rules: 'pass:\n  - Report.country\n' })
+    const [quill] = (await lenient.ask('{ users { email } }')).body.data.users
+    // One value goes for every use: compared first with a field that passes, it stays the fake, whatever comes after.
+    await lenient.ask('query ($v: String) { report(country: $v) { country } users(email: $v) { id } }', { v: quill.email })
+    expect(api.received.at(-1)!.variables).toEqual({ v: quill.email })
+    await lenient.ask('query ($v: String) { users(email: $v) { id } report(country: $v) { country } }', { v: quill.email })
+    expect(api.received.at(-1)!.variables).toEqual({ v: quill.email })
+    // Used only where no field passes, it is the real value.
+    await lenient.ask('query ($v: String) { a: users(email: $v) { id } b: users(email: $v) { id } }', { v: quill.email })
+    expect(api.received.at(-1)!.variables).toEqual({ v: 'quill.vantablack@canary-mail.test' })
+    await lenient.close()
+  })
+
+  it('stops its checking threads when its port is taken', async () => {
+    const taken = createServer()
+    await new Promise<void>((resolve) => taken.listen(0, '127.0.0.1', resolve))
+    const { port } = taken.address() as { port: number }
+    const connection = await graphql.connect(new URL(api.url), { maxRows: 10, statementTimeout: 5000, env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}` } })
+    const store = Store.open(storeDir(mkdtempSync(join(tmpdir(), 'sosie-gql-'))))
+    const close = vi.spyOn(Checker.prototype, 'close')
+    try {
+      const faker = createFaker({ schema: connection.schema, rules: loadRules('', connection.schema), store })
+      await expect(connection.serve({ host: '127.0.0.1', port }, faker)).rejects.toThrow(/EADDRINUSE|in use/)
+      expect(close).toHaveBeenCalledTimes(1)
+    } finally {
+      close.mockRestore()
+      store.close()
+      await connection.close()
+      await new Promise((resolve) => taken.close(resolve))
+    }
   })
 
   it('lets sosie.yml name a scalar of the query type', async () => {
