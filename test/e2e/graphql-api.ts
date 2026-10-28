@@ -4,6 +4,8 @@ import { TOKEN } from './api.js'
 
 export const SDL = `
 scalar EmailAddress
+scalar JSON
+scalar jsonb
 enum Role { admin editor viewer }
 enum Status { new paid shipped }
 interface Node { id: ID! }
@@ -14,6 +16,8 @@ type User implements Node {
   name: String
   role: Role
   active: Boolean
+  handle: String
+  settings: jsonb
   address: Address
   apiKey: String
   orders: [Order!]!
@@ -27,6 +31,9 @@ type Order implements Node {
   user: User
 }
 type Product { id: ID! name: String sku: String }
+input IdComparison { _eq: ID }
+input BooleanComparison { _eq: Boolean }
+input UserFilter { id: IdComparison, active: BooleanComparison }
 union SearchResult = Product | User
 type Query {
   users(email: String, role: Role, active: Boolean): [User!]!
@@ -37,6 +44,9 @@ type Query {
   broken: String
   refused: String
   moved: String
+  motd: String
+  usersByHandles(handles: [String!]!): JSON
+  filtered(where: UserFilter): [User!]!
 }
 type Mutation {
   deleteUser(id: ID!): Boolean
@@ -45,9 +55,9 @@ type Mutation {
 
 /** The same people as the database seed and the REST fake. */
 const people = [
-  { id: '1', email: 'quill.vantablack@canary-mail.test', name: 'Quillon Vantablack', role: 'admin', active: true, address: { city: 'Vantaville' }, apiKey: 'sk_live_9Qv7Xc2Lm8Rt' },
-  { id: '2', email: 'zephyrine@orrowmoor.test', name: 'Zephyrine Orrowmoor', role: 'editor', active: false, address: { city: 'Orrowmoor' }, apiKey: 'sk_live_Zz8yYx7wWv6u' },
-  { id: '3', email: 'person3@example.org', name: 'Person 3', role: 'viewer', active: true, address: { city: 'Springfield' }, apiKey: 'key_3' },
+  { id: '1', email: 'quill.vantablack@canary-mail.test', name: 'Quillon Vantablack', role: 'admin', active: true, handle: 'quillon', settings: { theme: 'dark', home: 'Vantaville' }, address: { city: 'Vantaville' }, apiKey: 'sk_live_9Qv7Xc2Lm8Rt' },
+  { id: '2', email: 'zephyrine@orrowmoor.test', name: 'Zephyrine Orrowmoor', role: 'editor', active: false, handle: 'zephyrine', settings: null, address: { city: 'Orrowmoor' }, apiKey: 'sk_live_Zz8yYx7wWv6u' },
+  { id: '3', email: 'person3@example.org', name: 'Person 3', role: 'viewer', active: true, handle: 'person3', settings: { theme: 'light' }, address: { city: 'Springfield' }, apiKey: 'key_3' },
 ]
 const purchases = [
   { id: '10', userId: '1', total: 120.5, status: 'paid', note: 'leave the parcel with Quillon' },
@@ -83,6 +93,11 @@ export async function startGraphql({ introspection = true, elsewhere = 'http://2
       return p ? user(p) : null
     },
     search: () => [user(people[0]!), { __typename: 'Product', id: 'p1', name: 'Plain Widget', sku: 'W-1' }],
+    motd: () => 'Hello',
+    // A lookup keyed by what it was asked, as JSON: the real handles Sosie sent it.
+    usersByHandles: ({ handles }: { handles: string[] }) => Object.fromEntries(handles.map((h) => [h, { found: people.some((p) => p.handle === h) }])),
+    filtered: ({ where }: { where?: { id?: { _eq?: string }; active?: { _eq?: boolean } } }) =>
+      people.filter((p) => (where?.id?._eq === undefined || p.id === where.id._eq) && (where?.active?._eq === undefined || p.active === where.active._eq)).map(user),
     user: ({ id }: { id: string }) => {
       const p = people.find((x) => x.id === id)
       return p ? user(p) : null
@@ -117,6 +132,9 @@ export async function startGraphql({ introspection = true, elsewhere = 'http://2
           errors: [
             { message: 'user quill.vantablack@canary-mail.test may not see Quillon Vantablack of Vantaville', path: ['Quillon', 0], extensions: { code: 'FORBIDDEN', detail: 'Vantaville' } },
             { message: 'Zephyrine', extensions: { code: 'Zephyrine Orrowmoor' } },
+            { message: 'Quillon', path: ['users', 7739182046], extensions: { code: 'QUILLON' } },
+            { message: 'Quillon', extensions: { code: 'QUILLON_VANTABLACK' } },
+            { message: 'nope', extensions: { code: 'ACCESS_DENIED' } },
           ],
         })
       }

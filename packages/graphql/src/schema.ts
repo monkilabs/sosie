@@ -15,10 +15,12 @@ import {
 /**
  * The neutral schema from a GraphQL schema: each object and interface type is
  * an entity, each field holding a scalar or an enum is a field. A field that
- * holds another object is that object's row, and fakes as its own entity.
+ * holds another object is that object's row, and fakes as its own entity. The
+ * query type is one when it holds scalars ({ version }), so sosie.yml can name them.
  */
 export function readSchema(schema: GraphQLSchema): Schema {
-  const roots = new Set([schema.getQueryType(), schema.getMutationType(), schema.getSubscriptionType()].filter(Boolean).map((t) => t!.name))
+  const query = schema.getQueryType()
+  const roots = new Set([schema.getMutationType(), schema.getSubscriptionType()].filter(Boolean).map((t) => t!.name))
   const entities: Entity[] = []
   for (const type of Object.values(schema.getTypeMap())) {
     if (type.name.startsWith('__') || roots.has(type.name) || !(isObjectType(type) || isInterfaceType(type))) continue
@@ -34,6 +36,7 @@ export function readSchema(schema: GraphQLSchema): Schema {
         ...(formatOf(field) && { format: formatOf(field) }),
       })
     }
+    if (type === query && !fields.length) continue
     entities.push({ id: type.name, name: type.name, fields })
   }
   linkByName(entities)
@@ -68,7 +71,12 @@ const SCALARS: Record<string, FieldType> = {
   time: { kind: 'time' },
   uuid: { kind: 'uuid' },
   json: { kind: 'json' },
+  jsonb: { kind: 'json' },
   jsonobject: { kind: 'json' },
+  map: { kind: 'json' },
+  any: { kind: 'json' },
+  object: { kind: 'json' },
+  genericscalar: { kind: 'json' },
 }
 
 /** A format a custom scalar names: Email, EmailAddress, URL, URI. */

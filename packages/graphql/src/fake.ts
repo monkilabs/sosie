@@ -1,4 +1,4 @@
-import type { Faker, Field } from '@sosie/core'
+import type { Faker, Field, RequestScope } from '@sosie/core'
 import {
   getNamedType,
   isAbstractType,
@@ -20,6 +20,10 @@ export const TYPENAME = 'sosieTypename_'
 export interface FakeContext {
   schema: GraphQLSchema
   faker: Faker
+  /** The request's scope: a JSON key that is a value it turned back is an echo, never structure. */
+  scope?: RequestScope
+  /** What the client sent: a key it wrote in the query is structure. */
+  sent?: string
   fields: Map<string, Field>
   fragments: Record<string, FragmentDefinitionNode>
   /** Items of a list at most; the rest are cut, as rows are by --max-rows. */
@@ -116,8 +120,14 @@ async function leaf(value: unknown, field: Field, ctx: FakeContext, state: { cut
     return out
   }
   await ctx.pace()
-  if (typeof value === 'object') return JSON.parse(ctx.faker.value(JSON.stringify(value), { ...field, type: { kind: 'json' } }) as string)
-  const fake = ctx.faker.value(String(value), field) as string | null
+  if (typeof value === 'object') {
+    // An object in a scalar's place: a JSON scalar's by its field, any other custom scalar's (jsonb, Map, Any) as JSON a query built.
+    if (ctx.faker.passes(field)) return value
+    const json = JSON.stringify(value)
+    const fake = field.type.kind === 'json' ? ctx.faker.value(json, field, ctx.scope) : ctx.faker.computed(json, { kind: 'json' }, ctx.sent, ctx.scope)
+    return JSON.parse(fake as string)
+  }
+  const fake = ctx.faker.value(String(value), field, ctx.scope) as string | null
   if (fake === null) return null
   if (typeof value === 'number') return Number.isFinite(Number(fake)) ? Number(fake) : fake
   if (typeof value === 'boolean') return /^(t|true)$/i.test(fake)

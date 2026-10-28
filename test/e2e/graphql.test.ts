@@ -28,11 +28,11 @@ async function startGraphqlSosie(
   const store = Store.open(storeDir(home))
   const faker = createFaker({ schema: connection.schema, rules: loadRules(rules, connection.schema), store })
   const endpoint = await connection.serve({ host: '127.0.0.1', port: 0 }, faker)
-  const ask = async (query: string, variables?: Record<string, unknown>): Promise<{ status: number; body: Json }> => {
+  const ask = async (query: string | { query: string; operationName: string }, variables?: Record<string, unknown>): Promise<{ status: number; body: Json }> => {
     const response = await fetch(endpoint.address, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query, ...(variables && { variables }) }),
+      body: JSON.stringify({ ...(typeof query === 'string' ? { query } : query), ...(variables && { variables }) }),
     })
     const body = await response.json()
     seen.push(body)
@@ -67,7 +67,7 @@ describe('a GraphQL API', () => {
   it('is read by introspection, and its types become entities', () => {
     expect(graphql.matches(new URL(api.url))).toBe(true)
     expect(graphql.matches(new URL('https://api.internal/v1/users'))).toBe(false)
-    expect(sosie.connection.summary).toBe('5 types, 8 queries')
+    expect(sosie.connection.summary).toBe('6 types, 11 queries')
     const user = sosie.connection.schema.entities.find((e) => e.id === 'User')!
     expect(user.fields.find((f) => f.name === 'email')).toMatchObject({ format: 'email' })
     expect(sosie.connection.schema.entities.find((e) => e.id === 'Order')!.fields.find((f) => f.name === 'userId')!.references).toBe('User.id')
@@ -124,6 +124,46 @@ describe('a GraphQL API', () => {
     const mixed = await sosie.ask(`{ __type(name: "User") { name } users(email: "${quill.email}") { id } }`)
     expect(mixed.body.errors[0].message).toBe('Ask for __schema and __type in a query of their own: Sosie answers them from the schema, without the API.')
     expect(api.received.length).toBe(before)
+  })
+
+  it('fakes a JSON key that echoes a value it turned back, and reads any scalar that holds an object', async () => {
+    const [quill] = (await sosie.ask('{ users { handle settings } }')).body.data.users
+    expect(Object.keys(quill.settings)).toEqual(['theme', 'home'])
+    const { body } = await sosie.ask('query ($h: [String!]!) { usersByHandles(handles: $h) }', { h: [quill.handle] })
+    expect(api.received.at(-1)!.variables).toEqual({ h: ['quillon'] })
+    expect(Object.keys(body.data.usersByHandles)).toHaveLength(1)
+    expect(Object.keys(body.data.usersByHandles)[0]).not.toBe('quillon')
+  })
+
+  it('sends the API only the operation to run, and the fragments it uses', async () => {
+    const { body } = await sosie.ask(
+      { query: 'query Q { users { ...F } } mutation M { deleteUser(id: "1") } fragment F on User { id }', operationName: 'Q' },
+    )
+    expect(body.data.users).toHaveLength(3)
+    expect(api.received.at(-1)!.query).toMatch(/fragment F on User/)
+    expect(api.received.at(-1)!.query).not.toMatch(/mutation|deleteUser/)
+  })
+
+  it('turns back a fake in a variable’s default, and in an operator’s object', async () => {
+    const [quill] = (await sosie.ask('{ users { id email } }')).body.data.users
+    const byDefault = await sosie.ask(`query ($id: ID! = "${quill.id}") { user(id: $id) { id email } }`)
+    expect(byDefault.body.data.user).toEqual(quill)
+    expect(api.received.at(-1)!.variables).toEqual({ id: '1' })
+    const filtered = await sosie.ask(`{ filtered(where: { id: { _eq: "${quill.id}" } }) { id } }`)
+    expect(filtered.body.data.filtered).toEqual([{ id: quill.id }])
+  })
+
+  it('refuses a query too large to read without keeping others waiting', async () => {
+    const { status, body } = await sosie.ask(`{ ${Array.from({ length: 3000 }, (_, i) => `a${i}: users { id }`).join(' ')} }`)
+    expect(status).toBe(400)
+    expect(body.errors[0].message).toMatch(/more than 10000 tokens/)
+  })
+
+  it('lets sosie.yml name a scalar of the query type', async () => {
+    expect((await sosie.ask('{ motd }')).body.data.motd).not.toBe('Hello')
+    const lenient = await startGraphqlSosie(api, { rules: 'pass:\n  - Query.motd\n' })
+    expect((await lenient.ask('{ motd }')).body.data.motd).toBe('Hello')
+    await lenient.close()
   })
 
   it('merges a field asked for twice, by fragments or aliases', async () => {
@@ -203,6 +243,9 @@ describe('the guard', () => {
       errors: [
         { message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.', extensions: { code: 'FORBIDDEN' } },
         { message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.' },
+        { message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.' },
+        { message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.' },
+        { message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.', extensions: { code: 'ACCESS_DENIED' } },
       ],
     })
   })
@@ -255,6 +298,14 @@ describe('the guard', () => {
     const invalid = await sosie.ask('{ users { nope } }')
     expect(invalid.status).toBe(400)
     expect(invalid.body.errors[0].message).toMatch(/^Cannot query field "nope" on type "User"\./)
+  })
+})
+
+describe('a schema that is not valid GraphQL', () => {
+  it('stops Sosie at start, saying why, instead of failing every query', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'sosie-sdl-')), 'schema.graphql')
+    writeFileSync(file, 'type Query { a: Empty }\ntype Empty\n')
+    await expect(startGraphqlSosie(api, { env: { SOSIE_GRAPHQL_SCHEMA: file } })).rejects.toThrow(/is not valid GraphQL: Type Empty must define one or more fields/)
   })
 })
 

@@ -168,7 +168,7 @@ describe('sosie, in front of a GraphQL API', () => {
     const api = await startGraphql()
     const home = mkdtempSync(join(tmpdir(), 'sosie-cli-gql-'))
     const sosie = await start({ SOSIE_UPSTREAM: api.url, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home }, ['--port', '0'])
-    expect(sosie.stdout()).toMatch(/✓ 127\.0\.0\.1:\d+\/api\/graphql, read-only: 5 types, 8 queries/)
+    expect(sosie.stdout()).toMatch(/✓ 127\.0\.0\.1:\d+\/api\/graphql, read-only: 6 types, 11 queries/)
     expect(sosie.address).toMatch(/^http:\/\/localhost:\d+\/api\/graphql$/)
     const mcp = await mcpClient(home)
     const result = JSON.parse(text(await mcp.callTool({ name: 'graphql', arguments: { query: '{ users { email } }' } })))

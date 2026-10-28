@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { upstreamHeaders, type Connection, type Field, type Source } from '@sosie/core'
-import { buildClientSchema, buildSchema, getIntrospectionQuery, type GraphQLSchema, type IntrospectionQuery } from 'graphql'
+import { upstreamHeaders, why, type Connection, type Field, type Source } from '@sosie/core'
+import { buildClientSchema, buildSchema, getIntrospectionQuery, validateSchema, type GraphQLSchema, type IntrospectionQuery } from 'graphql'
 import { startEndpoint } from './endpoint.js'
 import { graphqlTool } from './mcp.js'
 import { readSchema } from './schema.js'
@@ -35,7 +35,7 @@ export const graphql: Source = {
       try {
         answer = await api.post({ query: getIntrospectionQuery() })
       } catch (error) {
-        throw new Error(`Cannot reach ${label}: ${(error as Error).message}`)
+        throw new Error(`Cannot reach ${label}: ${why(error)}`)
       }
       let result: { data?: IntrospectionQuery; errors?: { message: string }[] } = {}
       try {
@@ -50,6 +50,9 @@ export const graphql: Source = {
       schema = buildClientSchema(result.data)
     }
 
+    // Every query is checked against the schema: one that is not valid GraphQL would fail them all.
+    const problem = validateSchema(schema)[0]
+    if (problem) throw new Error(`The schema of ${label} is not valid GraphQL: ${problem.message}`)
     const neutral = readSchema(schema)
     const fields = new Map<string, Field>(neutral.entities.flatMap((e) => e.fields.map((f) => [f.id, f] as const)))
     const queries = Object.keys(schema.getQueryType()?.getFields() ?? {}).length

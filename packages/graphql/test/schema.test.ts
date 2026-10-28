@@ -58,6 +58,7 @@ describe('rewriting a request', () => {
       return ({ 'User.id:u-87': 'u-1', 'User.email:kim@example.net': 'real@corp.test', 'Post.title:Fake title': 'Real title' } as Record<string, string>)[`${near?.id}:${fake}`]
     },
     scrub: (t) => t,
+    turnedBack: () => false,
   }
 
   it('looks arguments up in the field they name, and leaves the rest', () => {

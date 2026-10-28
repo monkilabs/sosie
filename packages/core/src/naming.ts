@@ -35,12 +35,24 @@ export function linkByName(entities: Entity[]): void {
   }
 }
 
-/** SOSIE_UPSTREAM_HEADERS: one `Name: value` per line, for the credentials an HTTP upstream wants. */
+/**
+ * SOSIE_UPSTREAM_HEADERS: one `Name: value` per line, for the credentials an HTTP upstream wants.
+ * A line that is no valid header is refused by its number, never quoted: it may hold a secret.
+ */
 export function upstreamHeaders(text: string | undefined): Record<string, string> {
   const headers: Record<string, string> = {}
-  for (const line of (text ?? '').split(/\r?\n|\\n/)) {
+  ;(text ?? '').split(/\r?\n|\\n/).forEach((line, i) => {
     const at = line.indexOf(':')
-    if (at > 0) headers[line.slice(0, at).trim().toLowerCase()] = line.slice(at + 1).trim()
-  }
+    if (!line.trim()) return
+    const name = line.slice(0, at).trim().toLowerCase()
+    const value = line.slice(at + 1).trim()
+    try {
+      if (at <= 0) throw new Error()
+      new Headers([[name, value]])
+    } catch {
+      throw new Error(`SOSIE_UPSTREAM_HEADERS: line ${i + 1} is not a header. Write one Name: value per line.`)
+    }
+    headers[name] = value
+  })
   return headers
 }

@@ -609,7 +609,8 @@ that rebinds its own name to this machine cannot read the fakes.
 ### Credentials
 
 The API's credentials are Sosie's, never the client's: `SOSIE_UPSTREAM_HEADERS`
-holds them, one `Name: value` per line (`Authorization: Bearer …`), and a user
+holds them, one `Name: value` per line (`Authorization: Bearer …`; a line that is no
+header stops Sosie, named by its number, never quoted), and a user
 and password in the URL become a Basic header; a query on it (`?api_key=…`) goes
 with every request and is never shown, links included. Headers the client sends,
 `Authorization` included, are not passed on. Redirects are followed inside
@@ -734,9 +735,13 @@ introspection off is read from `SOSIE_GRAPHQL_SCHEMA`: its SDL, or an
 introspection result as JSON. Each object and interface type is an entity, each
 field that holds a scalar or an enum is a field; one that holds another object
 is that object's row. Built-in scalars map to neutral types, and custom ones by
-name (`DateTime`, `Date`, `UUID`, `JSON`, `BigInt`); `Email` and
-`EmailAddress` pick the email format, `URL` and `URI` the URL format. A field
-`id` is the type's key; one named `userId` shares the values of `User.id`.
+name (`DateTime`, `Date`, `UUID`, `JSON`, `jsonb`, `Map`, `Any`, `BigInt`);
+`Email` and `EmailAddress` pick the email format, `URL` and `URI` the URL
+format; an object in any other custom scalar's place is faked as JSON a query
+builds. The query type is an entity too when it holds scalars (`{ version }`),
+so `sosie.yml` can name them. A field `id` is the type's key; one named `userId`
+shares the values of `User.id`, as a guess that never passes. A schema that is
+not valid GraphQL stops Sosie at start, saying why.
 
 ### Endpoint and guard
 
@@ -746,8 +751,10 @@ or `text/plain` would send, gets `415`. On 127.0.0.1, a `Host` other than
 localhost gets `403`, as for REST. Each operation is parsed and checked against
 the schema, and its variables against their types, so the API is never asked
 about a value Sosie turned back: what fails there gets `400`, quoting only what
-the client sent. Only queries reach the API, so a mutation or a subscription is
-answered with an error and never sent. A persisted query without its text is
+the client sent. A query of more than 10,000 tokens is refused before it is
+checked, so one client cannot keep the others waiting. Only queries reach the
+API, and only the operation to run with the fragments it uses: a mutation or a
+subscription is answered with an error, and its text never leaves Sosie. A persisted query without its text is
 refused. POSTs are not redirected: the body and the credentials stay with the
 API.
 
@@ -774,8 +781,11 @@ the rest were cut; a large answer is faked a slice at a time.
 Errors: since Sosie checked the query and its variables itself, anything the API
 says beyond that may quote data, whether it ran the query (`data` is there) or
 not. Every message is replaced by Sosie's; an error's `path` comes back when it
-is made of the query's own keys and list positions, its `extensions.code` when
-it looks like a code (`FORBIDDEN`); nothing else does.
+is made of the query's own keys and positions in a list Sosie would show, its
+`extensions.code` when it is a code servers use (`FORBIDDEN`,
+`validation-failed`) or words that say what failed (`ACCESS_DENIED`); nothing
+else does. A `401` or `403` from the API tells the terminal to check
+`SOSIE_UPSTREAM_HEADERS`.
 
 ### Query by what you saw
 
@@ -783,7 +793,9 @@ Each argument, and each variable where it is used, is looked up in the field it
 names on the type its field returns: `user(id:)` in `User.id`,
 `users(email:)` in `User.email`, `orders(userId:)` in `User.id`,
 `users(role: viewer)` and `users(active: false)` as the label and the boolean
-they show; inside input objects and lists too. On an interface or a union, in
+they show; inside input objects and lists too, where a key that names no field
+(an operator: `where: { id: { _eq: 8 } }`) compares with the field around it,
+and in a variable's default. On an interface or a union, in
 that field of each type it may be, when they agree: `node(id:)` in `User.id`,
 `Order.id` and the rest. Text it names no field for is looked up anywhere; a
 number that names no field (`first: 10`) stays as written; a directive's
@@ -792,7 +804,7 @@ argument (`@include(if:)`) is left alone.
 ### Limits
 
 - A JSON scalar's keys that look like words (`{ "jdoe": … }`) stay, as a json
-  column's do.
+  column's do, unless the request turned that word back.
 - The schema, its descriptions included, is visible: it is the API, not its
   data.
 

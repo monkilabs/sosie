@@ -64,6 +64,8 @@ export function rewrite(
     return [...new Map(fields.filter((f) => f !== undefined).map((f) => [f.id, f])).values()]
   }
 
+  const within = (key: string, outer: string, type: GraphQLNamedType | undefined) => (near(key, type).length ? key : outer)
+
   /** The real value behind a fake: in the fields it may name, when they agree; text, but no bare number, anywhere when none does. */
   const lookup = (text: string, fields: Field[], anywhere = true): string | undefined => {
     const reals = new Set(fields.map((f) => scope.lookup(text, f)).filter((r) => r !== undefined))
@@ -98,8 +100,9 @@ export function rewrite(
       }
       case Kind.LIST:
         return { ...node, values: node.values.map((v) => value(v, name, type)) }
+      // A key that names no field, as an operator does (where: { id: { _eq: 8 } }), compares with the field around it.
       case Kind.OBJECT:
-        return { ...node, fields: node.fields.map((f) => ({ ...f, value: value(f.value, f.name.value, type) })) }
+        return { ...node, fields: node.fields.map((f) => ({ ...f, value: value(f.value, within(f.name.value, name, type), type) })) }
       case Kind.VARIABLE:
         usages.set(node.name.value, { type, name })
         return node
@@ -134,7 +137,7 @@ export function rewrite(
 
   const variable = (v: unknown, name: string, type: GraphQLNamedType | undefined): unknown => {
     if (Array.isArray(v)) return v.map((item) => variable(item, name, type))
-    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, item]) => [k, variable(item, k, type)]))
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, item]) => [k, variable(item, within(k, name, type), type)]))
     if (typeof v === 'boolean') {
       const real = lookup(String(v), near(name, type), false)
       if (real === undefined || real === String(v)) return v
