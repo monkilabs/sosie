@@ -178,8 +178,10 @@ async function start(options: {
       store.close()
       done()
     }
+    // Ctrl+C, a kill, or the terminal closing: each leaves no running/ file behind.
     process.once('SIGINT', stop)
     process.once('SIGTERM', stop)
+    process.once('SIGHUP', stop)
   })
 }
 
