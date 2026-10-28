@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -25,6 +25,8 @@ describe('the running Sosies', () => {
     writeRunning(home, entry('postgres://localhost:7674/a'))
     const file = join(home, 'running', `${process.pid}.json`)
     expect(Object.keys(JSON.parse(readFileSync(file, 'utf8'))).sort()).toEqual(['address', 'kind', 'passing', 'pid', 'schema', 'startedAt'])
+    expect(statSync(file).mode & 0o777).toBe(0o600)
+    expect(statSync(join(home, 'running')).mode & 0o777).toBe(0o700)
     clearRunning(home)
     expect(existsSync(file)).toBe(false)
   })

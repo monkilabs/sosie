@@ -6,6 +6,23 @@ export { singular }
 /** A path segment that is a value, not a name: a number or a UUID. */
 export const VALUE_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
 
+/**
+ * Whether a decoded segment is one segment to any server: no / or \ in it, and not . or ..; an
+ * API, or a proxy before it, that decodes %2F and resolves .. would read another path than Sosie.
+ */
+export function oneSegment(segment: string): boolean {
+  return !/[/\\]/.test(segment) && segment !== '.' && segment !== '..'
+}
+
+/** The segments of a path, decoded; undefined when a % starts no escape. */
+export function segmentsOf(path: string): string[] | undefined {
+  try {
+    return path.split('/').filter(Boolean).map(decodeURIComponent)
+  } catch {
+    return undefined
+  }
+}
+
 /** What a request path names. */
 export interface Route {
   /** The entity its response is about. */
@@ -61,10 +78,10 @@ export function valueByHabit(segment: string, afterName: boolean, known: Set<str
 }
 
 /** Words of a link's path that are neither known nor values fake here: a domain of their own, never a value's field. */
-export const PATH_WORD: Field = { id: '$path', name: 'path', type: { kind: 'string' }, format: 'shape' }
+export const PATH_WORD: Field = { id: '$path', name: 'path', type: { kind: 'string' }, format: 'shape', words: true }
 
 /** Names of a link's query parameters that are not words (q[Quillon]) fake here. */
-export const QUERY_NAME: Field = { id: '$query', name: 'query', type: { kind: 'string' }, format: 'shape' }
+export const QUERY_NAME: Field = { id: '$query', name: 'query', type: { kind: 'string' }, format: 'shape', words: true }
 
 /** Whether a query parameter's name is structure: words, as in page, sort-by, filter[email] or pageSize, with indexes after a word (ids[0]). */
 export function wordName(name: string): boolean {

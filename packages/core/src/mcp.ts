@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { z } from 'zod'
+import { exactInteger } from './json.js'
 import type { McpTool, Running, Schema } from './source.js'
 
 export interface McpOptions {
@@ -90,7 +91,7 @@ export function capLists(value: unknown, max: number): { value: unknown; cut: bo
       if (node.length > max) cut = true
       return node.slice(0, max).map(walk)
     }
-    if (node && typeof node === 'object') return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, walk(v)]))
+    if (node && typeof node === 'object' && exactInteger(node) === undefined) return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, walk(v)]))
     return node
   }
   return { value: walk(value), cut }

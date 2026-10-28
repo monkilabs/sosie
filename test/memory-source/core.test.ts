@@ -234,6 +234,39 @@ describe('fakes by type', async () => {
     expect(faker.value('quill.vantablack@canary-mail.test', city)).toBe('quill.vantablack@canary-mail.test')
   })
 
+  it('a field that passes and holds a value the request turned back in another form is faked whole', async () => {
+    const { faker } = await serve('pass:\n  - users.city\n  - users.tags\n')
+    const name = faker.value('Quillon Vantablack', { id: 'users.name', name: 'name', type: { kind: 'string' } }) as string
+    const email = faker.value('quill.vantablack@canary-mail.test', { id: 'users.email', name: 'email', type: { kind: 'string' } }) as string
+    const city = { id: 'users.city', name: 'city', type: { kind: 'string' } } as const
+    const scope = faker.request(`SELECT city FROM users WHERE name = '${name}' OR email = '${email}'`)
+    expect(scope.lookup(name)).toBe('Quillon Vantablack')
+    expect(scope.lookup(email)).toBe('quill.vantablack@canary-mail.test')
+    // Escaped as a URL or a form escapes it, spaced, or cased otherwise.
+    for (const echo of ['Results for quill.vantablack%40canary-mail.test', 'q=Quillon+Vantablack', 'quillon-vantablack', 'QuillonVantablack', 'by_quill_vantablack_canary_mail_test']) {
+      expect(faker.value(echo, city, scope) as string, echo).not.toMatch(/vantablack/i)
+    }
+    // In an array, the item that holds one is faked with the rest.
+    const tags = faker.value(['Reykjavik', 'quillon_vantablack'], { id: 'users.tags', name: 'tags', type: { kind: 'array', of: { kind: 'string' } } }, scope)
+    expect(JSON.stringify(tags)).not.toMatch(/vantablack/i)
+    // Text that holds none stays, a word of a value included.
+    expect(faker.value('Quillon Street', city, scope)).toBe('Quillon Street')
+  })
+
+  it('checks a field that passes for every value the request turned back at once, not one by one', async () => {
+    const { faker } = await serve('pass:\n  - users.city\n')
+    const email = { id: 'users.email', name: 'email', type: { kind: 'string' } } as const
+    const fakes = Array.from({ length: 2000 }, (_, i) => faker.value(`person${i}@canary-mail.test`, email) as string)
+    const scope = faker.request('SELECT city FROM users WHERE email = ANY($1)')
+    for (const fakeEmail of fakes) scope.lookup(fakeEmail, email)
+    const city = { id: 'users.city', name: 'city', type: { kind: 'string' } } as const
+    // A query by two thousand fakes that returns two thousand rows: one by one, millions of checks and seconds.
+    const started = performance.now()
+    for (let i = 0; i < 2000; i++) expect(faker.value(`Reykjavik, street ${i}`, city, scope)).toBe(`Reykjavik, street ${i}`)
+    expect(faker.value('Results for person1999@canary-mail.test', city, scope)).toBe(`Results for ${fakes[1999]}`)
+    expect(performance.now() - started).toBeLessThan(500)
+  })
+
   it('a value of another form than its type, as an API may send, is faked whole', async () => {
     const { faker } = await serve()
     // An "e" in text is no exponent, and a "/" no prefix length: nothing of either value stays.

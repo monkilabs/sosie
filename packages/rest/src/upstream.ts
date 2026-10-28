@@ -1,4 +1,5 @@
 import { readCapped } from '@sosie/core'
+import { oneSegment, segmentsOf } from './paths.js'
 
 /** The API upstream: credentials Sosie holds, redirects within the API only, a timeout and a size cap. */
 export interface UpstreamResponse {
@@ -36,9 +37,11 @@ export class RestUpstream {
         const next = new URL(location, current)
         // Credentials go to the API's own origin only, and within it to the API's own paths, as a client's requests do.
         if (next.origin !== this.base.origin) throw new Error(`The API redirected to ${next.origin}; Sosie follows redirects within ${this.base.origin} only.`)
+        if (next.username || next.password) throw new Error('The API redirected to an address with a user name in it; Sosie does not follow it.')
         const base = this.base.pathname.replace(/\/$/, '')
-        if (base && next.pathname !== base && !next.pathname.startsWith(`${base}/`)) {
-          throw new Error(`The API redirected outside ${base}; Sosie follows redirects within it only.`)
+        // A segment that decodes to a / or a .. may lead out of the base at an API that decodes it.
+        if ((base && next.pathname !== base && !next.pathname.startsWith(`${base}/`)) || !segmentsOf(next.pathname)?.every(oneSegment)) {
+          throw new Error(`The API redirected outside ${base || '/'}; Sosie follows redirects within it only.`)
         }
         if (hop >= MAX_REDIRECTS) throw new Error('The API redirected too many times.')
         await response.body?.cancel()

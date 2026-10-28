@@ -1,4 +1,4 @@
-import { structuralKey, type Faker, type Field, type RequestScope } from '@sosie/core'
+import { exactInteger, integerOf, structuralKey, type Faker, type Field, type RequestScope } from '@sosie/core'
 import { merged, refName, refOf, referenceOf, type Api, type Node } from './openapi.js'
 import { idField, wordName, type Route } from './paths.js'
 
@@ -24,6 +24,8 @@ export interface FakeContext {
   pace: () => Promise<void> | undefined
   /** Told each key shown as structure: a client has seen it. */
   shown?: (key: string) => void
+  /** Whether a key holds Sosie's own credentials: it is faked, however much it looks like a word. */
+  secret?: (key: string) => boolean
 }
 
 /** A JSON body, every value faked by the field it is: from the OpenAPI schema, or named by where it is. `cut` says a list was cut. */
@@ -50,14 +52,16 @@ async function walk(value: unknown, node: Node | undefined, entity: string, pref
     for (const item of value.slice(0, ctx.maxItems)) out.push(await walk(item, schema?.items, entity, prefix, key, ctx, state))
     return out
   }
-  if (typeof value === 'object') {
+  // An integer beyond 2^53, kept as written: a value, not an object.
+  const exact = exactInteger(value)
+  if (typeof value === 'object' && exact === undefined) {
     const properties: Record<string, Node> | undefined = schema?.properties
     // A schema whose other keys are a map (additionalProperties: {schema}) says those keys are data.
     const map = schema?.additionalProperties && typeof schema.additionalProperties === 'object' && Object.keys(schema.additionalProperties).length ? (schema.additionalProperties as Node) : undefined
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       const documented = properties?.[k]
-      const structural = documented !== undefined || (!map && structuralKey(k) && !ctx.scope?.turnedBack(k))
+      const structural = documented !== undefined || (!map && structuralKey(k) && !ctx.scope?.turnedBack(k) && !ctx.secret?.(k))
       // A key that is a value (a map keyed by email) is faked, and never named in a field.
       const name = structural ? k : (ctx.faker.value(k, MAP_KEY, ctx.scope) as string)
       if (structural) ctx.shown?.(k)
@@ -70,10 +74,11 @@ async function walk(value: unknown, node: Node | undefined, entity: string, pref
     const url = ctx.url(value)
     if (url !== undefined) return url
   }
-  const field = fieldAt(entity, prefix, key, value, ctx)
-  const text = typeof value === 'string' ? value : String(value)
+  const field = fieldAt(entity, prefix, key, exact !== undefined ? Number(exact) : value, ctx)
+  const text = exact ?? (typeof value === 'string' ? value : String(value))
   const fake = ctx.faker.value(text, field, ctx.scope) as string | null
   if (fake === null) return null
+  if (exact !== undefined) return /^-?\d+$/.test(fake) ? integerOf(fake) : fake
   if (typeof value === 'number') return Number.isFinite(Number(fake)) ? Number(fake) : fake
   if (typeof value === 'boolean') return /^(t|true)$/i.test(fake)
   return fake

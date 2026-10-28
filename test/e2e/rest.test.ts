@@ -46,6 +46,11 @@ async function startRest(
       (new DatabaseSync(join(storeDir(home), 'store.db'), { readOnly: true }).prepare('SELECT DISTINCT domain FROM value').all() as { domain: string }[]).map(
         (r) => r.domain,
       ),
+    /** How many values a domain holds, and how many of them `sosie scan` looks for. */
+    scanned: (domain: string) =>
+      new DatabaseSync(join(storeDir(home), 'store.db'), { readOnly: true })
+        .prepare('SELECT COUNT(*) AS held, COALESCE(SUM(scannable), 0) AS looked FROM value WHERE domain = ?')
+        .get(domain) as { held: number; looked: number },
     get,
     async close() {
       await endpoint.close()
@@ -144,6 +149,14 @@ describe('an API without an OpenAPI document', () => {
     await sosie.get(body.nested)
     expect(api.requests.at(-1)!.path).toBe('/v1/quillon/repos')
     expect(canariesIn(JSON.stringify(sosie.domains()))).toEqual([])
+    // The API's words are faked, but they are its structure: `sosie scan` does not look for them in transcripts.
+    for (const words of ['$path', '$query']) expect(sosie.scanned(words), words).toMatchObject({ held: expect.any(Number), looked: 0 })
+    expect(sosie.scanned('$path').held).toBeGreaterThan(0)
+  })
+
+  it('names no entity after a word a client typed that is no name, so no domain holds it', async () => {
+    for (const path of ['/Vantablack', '/quill.vantablack@canary-mail.test/settings']) expect((await sosie.get(path)).status).toBe(404)
+    expect(sosie.domains().join(' ')).not.toMatch(/vantablack/i)
   })
 
   it('shows a word a client typed in the links of its own answer only', async () => {
@@ -291,7 +304,42 @@ describe('the guard and the credentials', () => {
     expect(api.requests.at(-1)!.path).toBe('/v1/users?api_key=k-live-8842')
     expect(body.next).toBe(`${keyed.address}/users?page=2`)
     expect(keyed.address).not.toContain('k-live')
+    // Nor in the terminal: a redirect with a user and password in it is refused, and why is said without the query.
+    const said: string[] = []
+    const write = process.stderr.write.bind(process.stderr)
+    process.stderr.write = ((line: string) => said.push(String(line)) > 0) as typeof process.stderr.write
+    try {
+      expect((await keyed.get('/userinfo')).status).toBe(502)
+    } finally {
+      process.stderr.write = write
+    }
+    expect(said.join('')).toMatch(/Cannot read the API: The API redirected to an address with a user name in it/)
+    expect(said.join('')).not.toMatch(/k-live|pass@/)
     await keyed.close()
+  })
+
+  it('keeps an id beyond 2^53 exact, so its fake leads back to its record', async () => {
+    const text = await (await fetch(`${sosie.address}/big-ids`)).text()
+    expect(text).not.toMatch(/1234567890123456789|Vantablack/)
+    const id = /"id":\s*(\d+)/.exec(text)![1]!
+    const one = await fetch(`${sosie.address}/big-ids/${id}`)
+    expect(api.requests.at(-1)!.path).toBe('/v1/big-ids/1234567890123456789')
+    expect(one.status).toBe(200)
+    expect(await one.text()).toMatch(new RegExp(`"id":\\s*${id}\\b`))
+    // So does the MCP tool's answer.
+    const running: Running = { kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
+    const result = await rest.tools![0]!.run({ path: `/big-ids/${id}` }, running)
+    expect(JSON.stringify(result)).toMatch(new RegExp(`"id":${id}\\b`))
+  })
+
+  it('fakes a key that holds its own credentials, even one that looks like a word', async () => {
+    const s = await startRest(api, { query: '?api_key=opensesame', env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Lower: sesamesecretword` } })
+    const { body } = await s.get('/echo-credentials')
+    expect(api.requests.at(-1)!.path).toBe('/v1/echo-credentials?api_key=opensesame')
+    expect(Object.keys(body)).toHaveLength(3)
+    expect(body.theme).toBeDefined()
+    expect(JSON.stringify(body)).not.toMatch(/sesamesecretword|opensesame/)
+    await s.close()
   })
 
   it('never follows a redirect to another origin: the credentials stay with the API', async () => {
@@ -304,6 +352,9 @@ describe('the guard and the credentials', () => {
     // Nor to the API's origin outside its base path, where a client's own request gets 404.
     expect((await s.get('/out-of-base')).status).toBe(502)
     expect(redirecting.requests.map((r) => r.path)).not.toContain('/admin/secret')
+    // Nor by a segment that leaves it at an API that decodes %2F.
+    expect((await s.get('/sneaky')).status).toBe(502)
+    expect(redirecting.requests.map((r) => r.path)).not.toContain('/v1/..%2F..%2Fadmin%2Fsecret')
     // Within the API's origin, Sosie follows it.
     expect((await s.get('/moved')).body.email).toMatch(/@example\.(com|net|org)$/)
     await s.close()
@@ -350,6 +401,22 @@ describe('the guard and the credentials', () => {
 
   it('refuses a path it cannot decode, instead of failing', async () => {
     expect(await sosie.get('/users/%zz')).toMatchObject({ status: 400, body: { error: 'The path has a % that does not start an escape (%20).' } })
+  })
+
+  it('refuses a segment the API could read as another path: an escaped / or \\, or . or ..', async () => {
+    const before = api.requests.length
+    // At an API, or a proxy before it, that decodes %2F and resolves .., these leave the base or name another kind.
+    for (const path of ['/x%2F..%2F..%2Fadmin%2Fsecret', '/countries/x%2Fusers%2F1', '/users/..%5C..%5Cadmin', '/users/%2E%2E%2F']) {
+      expect(await sosie.get(path), path).toMatchObject({ status: 400, body: { error: expect.stringMatching(/another path/) } })
+    }
+    expect(api.requests.slice(before)).toEqual([])
+    // Nor does a value the API holds go in one segment when it is a path itself.
+    const [note] = (await sosie.get('/notes')).body
+    // The fake is one segment; only the value it stands for is not.
+    expect(note.login).not.toMatch(/admin|[/\\]/)
+    const asked = api.requests.length
+    expect(await sosie.get(`/notes/${encodeURIComponent(note.login)}`)).toMatchObject({ status: 400, body: { error: expect.stringMatching(/another path/) } })
+    expect(api.requests.slice(asked)).toEqual([])
   })
 
   it('fakes error bodies, and does not pass on what it cannot fake', async () => {

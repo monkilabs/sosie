@@ -61,6 +61,125 @@ function appears(sent: string, token: string): boolean {
   return false
 }
 
+/** Texts by their first three characters, longest first: which of them starts at a place in another text. */
+class Starts {
+  readonly #by = new Map<string, [text: string, tag: string][]>()
+
+  add(text: string, tag: string): void {
+    const list = this.#by.get(text.slice(0, 3))
+    if (list) list.push([text, tag])
+    else this.#by.set(text.slice(0, 3), [[text, tag]])
+  }
+
+  /** Once every text is in: of those that start alike, the longest is tried first. */
+  sorted(): this {
+    for (const list of this.#by.values()) list.sort((a, b) => b[0].length - a[0].length)
+    return this
+  }
+
+  /** The longest text that starts at `at` in `within`, with its tag. */
+  at(within: string, at: number): [string, string] | undefined {
+    return this.#by.get(within.slice(at, at + 3))?.find(([text]) => within.startsWith(text, at))
+  }
+}
+
+/** Whether a value a request turned back may be echoed: it has a letter, or is long. A short number may be any count. */
+const counts = (real: string) => /\p{L}/u.test(real) || real.length >= 6
+
+/** Text as a URL or a form escapes it, unescaped: %40 and + as what they stand for. */
+function unescaped(text: string): string {
+  if (!/[%+]/.test(text)) return text
+  try {
+    return decodeURIComponent(text.replace(/\+/g, ' '))
+  } catch {
+    return text
+  }
+}
+
+/**
+ * The values a request turned back, each with the fake the client sent, indexed once: a text is
+ * checked for all of them in time of its own length, so a query by a thousand fakes that returns
+ * a thousand rows takes thousands of steps, not a million.
+ */
+class Echoes {
+  /** Every value, lowercased. */
+  readonly #keys = new Set<string>()
+  /** Values that may be echoed, lowercased, with their fakes. */
+  readonly #values = new Map<string, string>()
+  /** Values squashed, of three characters or more: a text's whole, or one of its words. */
+  readonly #words = new Set<string>()
+  readonly #counted = new Set<string>()
+  /** Values squashed, of six characters or more: within a text. */
+  readonly #long = new Starts()
+  /** Values that may be echoed, of three characters or more, lowercased as written and as a JSON string holds them, with their fakes. */
+  readonly #plain = new Starts()
+  readonly #json = new Starts()
+
+  constructor(reals: Map<string, string>) {
+    for (const [real, fakeValue] of reals) {
+      const lower = real.toLowerCase()
+      const whole = squash(real)
+      this.#keys.add(lower)
+      if (whole.length >= 3) this.#words.add(whole)
+      if (whole.length >= 6) this.#long.add(whole, '')
+      if (!counts(real)) continue
+      this.#values.set(lower, fakeValue)
+      if (whole.length >= 3) this.#counted.add(whole)
+      if (real.length < 3) continue
+      this.#plain.add(lower, fakeValue)
+      this.#json.add(JSON.stringify(real).slice(1, -1).toLowerCase(), JSON.stringify(fakeValue).slice(1, -1))
+    }
+    this.#long.sorted()
+    this.#plain.sorted()
+    this.#json.sorted()
+  }
+
+  /**
+   * Whether text holds a value, ignoring case and separators: the value itself, or the value among
+   * the text's words (quillon_profile, quillonSettings), or within it when the value is long enough
+   * to be no word's part.
+   */
+  holds(text: string): boolean {
+    return this.#keys.has(text.toLowerCase()) || this.#squashed(text, this.#words)
+  }
+
+  /**
+   * Text with each value that may be echoed shown as its fake, whole or within it, whatever its case;
+   * undefined when it holds one in another form (escaped, spaced, cased otherwise), which only faking hides.
+   */
+  shown(text: string, kind: FieldType['kind']): string | undefined {
+    const lower = text.toLowerCase()
+    const whole = this.#values.get(lower)
+    if (whole !== undefined) return whole
+    let out = text
+    // Lowercasing that changes a text's length (İ) leaves no place to match at: the check below finds it instead.
+    if (lower.length === text.length) {
+      const starts = kind === 'json' ? this.#json : this.#plain
+      let from = 0
+      out = ''
+      for (let at = 0; at + 3 <= lower.length; ) {
+        const hit = starts.at(lower, at)
+        if (!hit) {
+          at++
+          continue
+        }
+        out += text.slice(from, at) + hit[1]
+        at += hit[0].length
+        from = at
+      }
+      out += text.slice(from)
+    }
+    return this.#squashed(out, this.#counted) || this.#squashed(unescaped(out), this.#counted) ? undefined : out
+  }
+
+  #squashed(text: string, words: Set<string>): boolean {
+    const squashed = squash(text)
+    if (words.has(squashed) || wordsOf(text).some((word) => words.has(word))) return true
+    for (let at = 0; at + 6 <= squashed.length; at++) if (this.#long.at(squashed, at)) return true
+    return false
+  }
+}
+
 /** The core's Faker: every value a source returns goes through it, and every fake a client sends comes back through it. */
 export function createFaker({ schema, rules, store }: { schema: Schema; rules: Rules; store: Store }): Faker {
   const planOf = planner(schema, rules)
@@ -91,7 +210,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
   /** Enum labels map to other labels of the same enum, by a fixed shuffle per domain. */
   const shuffled = (domain: string, labels: string[]) => new Random(store.seed(domain, '\0enum')).shuffle(labels)
 
-  const scalar = (real: string, type: FieldType & { kind: ScalarKind }, domain: string, plan: Pick<FieldPlan, 'format' | 'unique'>) => {
+  const scalar = (real: string, type: FieldType & { kind: ScalarKind }, domain: string, plan: Pick<FieldPlan, 'format' | 'unique' | 'words'>) => {
     const draw = (seed: Uint8Array, attempt: number) => {
       const random = new Random(seed)
       fakerJs.seed(random.words())
@@ -99,7 +218,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
     }
     // Bytes can be large and are never looked up: derived, not stored.
     if (type.kind === 'bytes') return draw(store.seed(domain, real), 0)
-    return store.fake(domain, real, { unique: plan.unique, scannable: SCANNABLE.has(type.kind) }, draw)
+    return store.fake(domain, real, { unique: plan.unique, scannable: SCANNABLE.has(type.kind) && !plan.words }, draw)
   }
 
   /**
@@ -185,43 +304,37 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
    * itself, or the value among the text's words (quillon_profile, quillonSettings), or within it
    * when the value is long enough to be no word's part.
    */
-  const turnedBack = (scope: RequestScope, text: string) => {
+  const turnedBack = (scope: RequestScope, text: string) => echoesOf(scope)?.holds(text) ?? false
+  /** The values a request turned back, indexed when first asked for and again after the request turns back another. */
+  const echoes = new WeakMap<RequestScope, Echoes>()
+  const echoesOf = (scope: RequestScope) => {
     const reals = substitutions.get(scope)
-    if (!reals?.size) return false
-    const lower = text.toLowerCase()
-    const squashed = squash(text)
-    const parts = new Set(wordsOf(text))
-    for (const real of reals.keys()) {
-      if (real.toLowerCase() === lower) return true
-      const whole = squash(real)
-      if (whole.length >= 3 && (whole === squashed || parts.has(whole) || (whole.length >= 6 && squashed.includes(whole)))) return true
-    }
-    return false
+    if (!reals?.size) return undefined
+    let index = echoes.get(scope)
+    if (!index) echoes.set(scope, (index = new Echoes(reals)))
+    return index
   }
 
   /**
    * A value that passes, with each value the request turned back shown as the fake the client sent, whatever
    * the case: an answer that holds it is echoing what the client sent, and the field's rule is not about that.
+   * Undefined when it holds one in another form, escaped or spaced or cased otherwise: then it is faked.
    */
-  const unechoed = (value: Value, kind: FieldType['kind'], scope: RequestScope | undefined): Value => {
-    const reals = scope && substitutions.get(scope)
-    if (!reals?.size || value === null) return value
-    if (Array.isArray(value)) return value.map((item) => unechoed(item, kind, scope))
-    let out = value
-    for (const [real, fakeValue] of [...reals].sort((a, b) => b[0].length - a[0].length)) {
-      // A short number may be any other number, a passing count or quantity: an echo has a letter, or is long.
-      if (!/\p{L}/u.test(real) && real.length < 6) continue
-      if (out.toLowerCase() === real.toLowerCase()) return fakeValue
-      if (real.length < 3) continue
-      const form = (text: string) => (kind === 'json' ? JSON.stringify(text).slice(1, -1) : text)
-      out = out.replace(new RegExp(form(real).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), () => form(fakeValue))
-    }
-    return out
+  const unechoed = (value: Value, kind: FieldType['kind'], scope: RequestScope | undefined): Value | undefined => {
+    const index = scope && echoesOf(scope)
+    if (!index || value === null) return value
+    if (!Array.isArray(value)) return index.shown(value, kind)
+    const items = value.map((item) => unechoed(item, kind, scope))
+    return items.includes(undefined) ? undefined : (items as Value[])
   }
 
   function* ofField(value: Value, field: Field, scope: RequestScope | undefined): Steps<Value> {
     const plan = planOf(field)
-    if (plan.domain === null) return unechoed(value, field.type.kind, scope)
+    if (plan.domain === null) {
+      const shown = unechoed(value, field.type.kind, scope)
+      if (shown !== undefined) return shown
+      return yield* fake(value, field.type, `computed:${field.type.kind}`, { unique: false }, (k) => names.has(k) && !echoed(scope, k))
+    }
     const out = yield* fake(value, plan.type ?? field.type, plan.domain, plan, (k) => (KEY_WORD.test(k) || names.has(k)) && !echoed(scope, k))
     // A domain shared by fields of different lengths may hold a longer fake than this field takes.
     const max = field.type.kind === 'string' ? field.type.maxLength : undefined
@@ -282,7 +395,10 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
       }
 
       const record = (real: string, fakeValue: string) => {
-        if (real !== fakeValue) substituted.set(real, fakeValue)
+        if (real !== fakeValue && substituted.get(real) !== fakeValue) {
+          substituted.set(real, fakeValue)
+          echoes.delete(scope)
+        }
         return real
       }
 

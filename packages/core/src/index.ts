@@ -7,6 +7,7 @@ export { Store, sosieHome, storeDir, storeDirs, type ScanIndex } from './store.j
 export { scan, findIn, type Finding, type ScanResult } from './scan.js'
 export { serveMcp, describe, capLists } from './mcp.js'
 export { crossSite, readCapped, localRequest, pacer, why } from './http.js'
+export { exactInteger, integerOf, parseJson } from './json.js'
 export { readRunning, writeRunning, clearRunning } from './running.js'
 export { normalize, tokens, distinctive } from './text.js'
 export { singular, referenceOf, linkByName, upstreamHeaders } from './naming.js'

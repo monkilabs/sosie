@@ -202,7 +202,8 @@ export class Store {
       this.#db.exec('COMMIT')
       return candidate
     } catch (error) {
-      this.#db.exec('ROLLBACK')
+      // SQLite ends a transaction itself on some errors: a ROLLBACK then would fail, and hide why.
+      if (this.#db.isTransaction) this.#db.exec('ROLLBACK')
       throw error
     }
   }

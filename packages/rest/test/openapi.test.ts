@@ -120,6 +120,24 @@ describe('an OpenAPI document', () => {
     expect(api.schema.entities[0]!.fields.map((f) => f.name)).toEqual(['id', 'email'])
   })
 
+  it('reads an array of itself without end, as JSON', () => {
+    const api = readApi({
+      openapi: '3.1.0',
+      paths: {},
+      components: {
+        schemas: {
+          Grid: { type: 'array', items: { $ref: '#/components/schemas/Grid' } },
+          Board: {
+            type: 'object',
+            properties: { id: { type: 'integer' }, cells: { type: 'array', items: { type: 'array', items: { $ref: '#/components/schemas/Grid' } } } },
+          },
+        },
+      },
+    })
+    const cells = api.schema.entities.find((e) => e.name === 'Board')!.fields.find((f) => f.name === 'cells')!
+    expect(JSON.stringify(cells.type)).toMatch(/"kind":"json"/)
+  })
+
   it('reads the GET operations, the most specific first', () => {
     expect(api.operations.map((o) => [o.template, o.entity])).toEqual([
       ['/users/me', 'User'],
