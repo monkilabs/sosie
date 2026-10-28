@@ -66,8 +66,19 @@ export function crossSite(headers: IncomingHttpHeaders, listening: string): bool
   }
 }
 
-/** A pause every so many values, so faking one large body lets other clients in between. */
-export function pacer(every = 256): () => Promise<void> | undefined {
-  let count = 0
-  return () => (++count % every === 0 ? new Promise<void>((resolve) => setImmediate(resolve)) : undefined)
+/**
+ * A pause once faking has run for a slice of milliseconds, so one large body lets other clients in
+ * between: by time, not by values, since a value may take a microsecond, or a store's write on a slow disk.
+ */
+export function pacer(slice = 20): () => Promise<void> | undefined {
+  let since = performance.now()
+  return () => {
+    if (performance.now() - since < slice) return undefined
+    return new Promise<void>((resolve) =>
+      setImmediate(() => {
+        since = performance.now()
+        resolve()
+      }),
+    )
+  }
 }

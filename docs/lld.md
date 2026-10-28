@@ -665,8 +665,8 @@ value the request turned back, whatever its case and separators
 (`quillon_profile`, `quillonSettings` for `quillon`): an API that answers with
 what it was asked never hands the real value back. A list keeps its first
 `--max-rows` items, and the answer's `sosie-notice` header says the rest were
-cut; a large body is faked a slice at a time, so other clients are answered
-meanwhile.
+cut; a large body is faked a slice of 20 ms at a time, so other clients are
+answered meanwhile.
 
 A URL into the API (`next`, `href`, or a path under the base) points at Sosie
 instead, with nothing real in it, so following it reads the record it names:
