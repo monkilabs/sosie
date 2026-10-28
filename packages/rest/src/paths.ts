@@ -84,10 +84,10 @@ export function valueByHabit(segment: string, afterName: boolean, known: Set<str
 }
 
 /** Words of a link's path that are neither known nor values fake here: a domain of their own, never a value's field. */
-export const PATH_WORD: Field = { id: '$path', name: 'path', type: { kind: 'string' }, format: 'shape' }
+export const PATH_WORD: Field = { id: '$path', name: 'path', type: { kind: 'string' }, format: 'shape', words: true }
 
 /** Names of a link's query parameters that are not words (q[Quillon]) fake here. */
-export const QUERY_NAME: Field = { id: '$query', name: 'query', type: { kind: 'string' }, format: 'shape' }
+export const QUERY_NAME: Field = { id: '$query', name: 'query', type: { kind: 'string' }, format: 'shape', words: true }
 
 /** Whether a query parameter's name is structure: words, as in page, sort-by, filter[email] or pageSize, with indexes after a word (ids[0]). */
 export function wordName(name: string): boolean {

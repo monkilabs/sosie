@@ -46,6 +46,11 @@ async function startRest(
       (new DatabaseSync(join(storeDir(home), 'store.db'), { readOnly: true }).prepare('SELECT DISTINCT domain FROM value').all() as { domain: string }[]).map(
         (r) => r.domain,
       ),
+    /** How many values a domain holds, and how many of them `sosie scan` looks for. */
+    scanned: (domain: string) =>
+      new DatabaseSync(join(storeDir(home), 'store.db'), { readOnly: true })
+        .prepare('SELECT COUNT(*) AS held, COALESCE(SUM(scannable), 0) AS looked FROM value WHERE domain = ?')
+        .get(domain) as { held: number; looked: number },
     get,
     async close() {
       await endpoint.close()
@@ -144,6 +149,14 @@ describe('an API without an OpenAPI document', () => {
     await sosie.get(body.nested)
     expect(api.requests.at(-1)!.path).toBe('/v1/quillon/repos')
     expect(canariesIn(JSON.stringify(sosie.domains()))).toEqual([])
+    // The API's words are faked, but they are its structure: `sosie scan` does not look for them in transcripts.
+    for (const words of ['$path', '$query']) expect(sosie.scanned(words), words).toMatchObject({ held: expect.any(Number), looked: 0 })
+    expect(sosie.scanned('$path').held).toBeGreaterThan(0)
+  })
+
+  it('names no entity after a word a client typed that is no name, so no domain holds it', async () => {
+    for (const path of ['/Vantablack', '/quill.vantablack@canary-mail.test/settings']) expect((await sosie.get(path)).status).toBe(404)
+    expect(sosie.domains().join(' ')).not.toMatch(/vantablack/i)
   })
 
   it('shows a word a client typed in the links of its own answer only', async () => {
@@ -303,6 +316,30 @@ describe('the guard and the credentials', () => {
     expect(said.join('')).toMatch(/Cannot read the API: The API redirected to an address with a user name in it/)
     expect(said.join('')).not.toMatch(/k-live|pass@/)
     await keyed.close()
+  })
+
+  it('keeps an id beyond 2^53 exact, so its fake leads back to its record', async () => {
+    const text = await (await fetch(`${sosie.address}/big-ids`)).text()
+    expect(text).not.toMatch(/1234567890123456789|Vantablack/)
+    const id = /"id":\s*(\d+)/.exec(text)![1]!
+    const one = await fetch(`${sosie.address}/big-ids/${id}`)
+    expect(api.requests.at(-1)!.path).toBe('/v1/big-ids/1234567890123456789')
+    expect(one.status).toBe(200)
+    expect(await one.text()).toMatch(new RegExp(`"id":\\s*${id}\\b`))
+    // So does the MCP tool's answer.
+    const running: Running = { kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
+    const result = await rest.tools![0]!.run({ path: `/big-ids/${id}` }, running)
+    expect(JSON.stringify(result)).toMatch(new RegExp(`"id":${id}\\b`))
+  })
+
+  it('fakes a key that holds its own credentials, even one that looks like a word', async () => {
+    const s = await startRest(api, { query: '?api_key=opensesame', env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Lower: sesamesecretword` } })
+    const { body } = await s.get('/echo-credentials')
+    expect(api.requests.at(-1)!.path).toBe('/v1/echo-credentials?api_key=opensesame')
+    expect(Object.keys(body)).toHaveLength(3)
+    expect(body.theme).toBeDefined()
+    expect(JSON.stringify(body)).not.toMatch(/sesamesecretword|opensesame/)
+    await s.close()
   })
 
   it('never follows a redirect to another origin: the credentials stay with the API', async () => {

@@ -35,6 +35,8 @@ export interface Field {
   guessed?: boolean
   /** A format the upstream's own schema gives (OpenAPI's format: email), used when sosie.yml names none. */
   format?: string
+  /** The upstream's own words (a path's, a query's names): faked so none shows, but structure, so `sosie scan` does not look for them. */
+  words?: boolean
 }
 
 export type FieldType =

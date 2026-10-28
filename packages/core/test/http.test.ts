@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { crossSite, localRequest, readCapped, why } from '../src/http.js'
+import { parseJson } from '../src/json.js'
 import { capLists } from '../src/mcp.js'
 
 /** A body sent in chunks, with no content-length, as a chunked answer is. */
@@ -64,5 +65,7 @@ describe('HTTP sources', () => {
   it('cut every list of a body for an agent, nested ones too', () => {
     expect(capLists({ data: [1, 2, 3], meta: { tags: ['a', 'b'] } }, 2)).toEqual({ value: { data: [1, 2], meta: { tags: ['a', 'b'] } }, cut: true })
     expect(capLists([{ items: [1] }], 2)).toEqual({ value: [{ items: [1] }], cut: false })
+    // An integer beyond 2^53, parsed as written, is written as it was.
+    expect(JSON.stringify(capLists(parseJson('{"ids":[12345678901234567890,7]}'), 2).value)).toBe('{"ids":[12345678901234567890,7]}')
   })
 })

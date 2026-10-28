@@ -359,8 +359,13 @@ punctuation around them, and compares every run of one to four words, by
 keyed hash, with the store's real values. Only distinctive values are looked
 for: one to four words of at least four characters, and numbers of six digits
 or more, so years, ports and line numbers are not findings. A run that is also
-a fake is not counted: it is what the agent was shown. It never prints the real
-value, and exits 1 if it finds one, so CI can run it.
+a fake is not counted: it is what the agent was shown. An API's own words in
+paths and query names are structure, and not looked for. A real value that is
+a common word held as text rather than an enum (a role `admin`, a status
+`paid`) is looked for like any other, so a transcript that uses the word is a
+finding: such a field belongs under `pass` in `sosie.yml`, and a field that
+passes is neither stored nor looked for. It never prints the real value, and
+exits 1 if it finds one, so CI can run it.
 
 ```
   ✗ ~/.claude/projects/app/2026-11-02.jsonl:1203  a real value from users.email
@@ -616,7 +621,8 @@ gets `403`: a web page that rebinds its own name to this machine cannot read the
 fakes. So does a browser's request for a page of another site (an `Origin` that
 is not this machine, or `Sec-Fetch-Site: cross-site` without one): a web page
 cannot make Sosie send a `GET` with its credentials. A page of this machine, an
-app on another port, may.
+app on another port, is answered; Sosie sends no CORS headers, so a browser app
+reads it through its dev server's proxy.
 
 ### Credentials
 
@@ -640,8 +646,9 @@ serves under its base. Each object schema is an entity (`allOf` merged), each
 property a field, a nested object's properties dotted (`User.address.city`).
 A property that refers to another schema (`$ref`, or `allOf` of one, as
 OpenAPI 3.0 writes a nullable reference) is that entity's row, so a schema that
-refers to itself is read once. A document the API serves but Sosie cannot read
-is named in the banner's warning.
+refers to itself is read once, and an array of arrays of itself, so deep it
+has no end, is JSON. A document the API serves but Sosie cannot read is named
+in the banner's warning.
 JSON Schema types and formats map to neutral types (`date-time` to `datetime`,
 `uuid`, `ipv4`, `enum` to `enum`); `format: email` and `uri` pick the email and
 URL formats. A property `id` is the entity's key; one named `userId`, `user_id`
@@ -667,7 +674,11 @@ email) is faked, each to its own fake. Every key of a map the document declares
 (`additionalProperties` with a schema) is a value, and so is a key that holds a
 value the request turned back, whatever its case and separators
 (`quillon_profile`, `quillonSettings` for `quillon`): an API that answers with
-what it was asked never hands the real value back. A list keeps its first
+what it was asked never hands the real value back. So is a key that holds one
+of Sosie's own credentials, a part of a header value or a query credential of
+six characters or more. An integer beyond 2^53 (a 64-bit id) is read and
+written as its digits, never rounded, so its fake leads back to its record. A
+list keeps its first
 `--max-rows` items, and the answer's `sosie-notice` header says the rest were
 cut; a large body is faked a slice of 20 ms at a time, so other clients are
 answered meanwhile.
@@ -684,7 +695,11 @@ instead, with nothing real in it, so following it reads the record it names:
   value (a number, a UUID, a template's parameter, or what follows a
   collection's name, as in `/users/jdoe`) is faked as the id of what it
   follows; any other word is faked in a domain of its own (`$path`), and names
-  no entity, so no domain holds it.
+  no entity, so no domain holds it. Nor does a word a client typed that is no
+  name (`Vantablack`, an email): a name starts lowercase and runs on in
+  letters and digits, in kebab, snake or camel case. The API's words in
+  `$path` and in query names (`$query`) are its structure: `sosie scan` does
+  not look for them.
 - Query values are faked by the field they name, so a real value Sosie sent
   upstream comes back as the fake the client sent; a page's number (`page`,
   `limit`, `offset` and the like, up to five digits) stays. A name stays when
@@ -722,8 +737,18 @@ would turn into that field's real value, which the passing field would show.
 - Response headers other than the content type are not passed on, `Link`
   among them: pagination works through the body.
 - JSON only: images, files and HTML from the API are not passed on.
-- Ids are consistent within the API and across its links; an API's ids and a
-  database's are different fields, faked in their own domains.
+- Ids are consistent within the API and across its links. Domains are named
+  after entities and fields, so an API's ids and a database's share fakes only
+  when their names meet in one store (a GraphQL type and a Prisma model both
+  `User`, as `User.id`), and then the same id is the same fake in both.
+- Without a document, a field rule with a wildcard (`country.*`) passes every
+  top-level key of that entity the API ever answers with, a key that `expand=`
+  or a new release adds included. With a document, it passes the fields the
+  document names.
+- A word a client typed that looks like a name, a tenant's slug in lowercase
+  (`jones`, `acme-industries`), names an entity after it, and the domains of
+  that entity's fields, which `sosie scan` prints, are named after it too; a
+  link never shows it.
 - Without a document, the same record read through two kinds of path may be
   two entities, with two fakes of its id: `/users/87` is `user`, while
   `/people/by-email/…` names its entity after the last word it can.

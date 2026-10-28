@@ -1,4 +1,4 @@
-import { capLists, type McpTool } from '@sosie/core'
+import { capLists, parseJson, type McpTool } from '@sosie/core'
 
 const MAX_ITEMS = 200
 /** How long the tool waits for Sosie: less than MCP clients wait for a tool. */
@@ -32,7 +32,7 @@ export const requestTool: McpTool = {
     const text = await response.text()
     let body: unknown = text
     try {
-      body = JSON.parse(text)
+      body = parseJson(text)
     } catch {
       // Sosie answers with JSON; anything else is shown as text.
     }

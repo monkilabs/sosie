@@ -204,6 +204,16 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
       return res.end()
     }
     if (path === '/admin/secret') return json(200, { secret: 'Quillon' })
+    // Ids beyond 2^53, as a 64-bit key is written: no JavaScript number holds them.
+    if (path === '/big-ids' || path === '/big-ids/1234567890123456789') {
+      const record = '{"id":1234567890123456789,"name":"Quillon Vantablack"}'
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(path === '/big-ids' ? `[${record}]` : record)
+    }
+    // An API that echoes the credentials it was sent, as keys.
+    if (path === '/echo-credentials') {
+      return json(200, { [String(req.headers['x-lower'] ?? 'none')]: 1, [url.searchParams.get('api_key') ?? 'none']: 2, theme: 3 })
+    }
     // A redirect that stays under the base as written, and leaves it at an API that decodes %2F and resolves ..
     if (path === '/sneaky') {
       res.writeHead(302, { location: '/v1/..%2F..%2Fadmin%2Fsecret' })

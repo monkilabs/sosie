@@ -191,7 +191,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
   /** Enum labels map to other labels of the same enum, by a fixed shuffle per domain. */
   const shuffled = (domain: string, labels: string[]) => new Random(store.seed(domain, '\0enum')).shuffle(labels)
 
-  const scalar = (real: string, type: FieldType & { kind: ScalarKind }, domain: string, plan: Pick<FieldPlan, 'format' | 'unique'>) => {
+  const scalar = (real: string, type: FieldType & { kind: ScalarKind }, domain: string, plan: Pick<FieldPlan, 'format' | 'unique' | 'words'>) => {
     const draw = (seed: Uint8Array, attempt: number) => {
       const random = new Random(seed)
       fakerJs.seed(random.words())
@@ -199,7 +199,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
     }
     // Bytes can be large and are never looked up: derived, not stored.
     if (type.kind === 'bytes') return draw(store.seed(domain, real), 0)
-    return store.fake(domain, real, { unique: plan.unique, scannable: SCANNABLE.has(type.kind) }, draw)
+    return store.fake(domain, real, { unique: plan.unique, scannable: SCANNABLE.has(type.kind) && !plan.words }, draw)
   }
 
   /**

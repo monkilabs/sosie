@@ -11,6 +11,8 @@ export interface FieldPlan {
   unique: boolean
   /** The type fakes are drawn for: a foreign key's fakes are drawn as its key's. */
   type?: FieldType
+  /** The upstream's own words, not values: `sosie scan` does not look for them. */
+  words?: boolean
 }
 
 const PASS: FieldPlan = { domain: null, unique: false }
@@ -52,7 +54,7 @@ export function planner(schema: Schema, rules: Rules): (field: Field) => FieldPl
         format && PERSONAL.has(format)
           ? { domain: `format:${format}`, format, unique: true }
           : // A learned field may hold another type next time: its fakes are drawn for the value's own type.
-            { domain: field.id, unique, ...(!learned && { type: field.type }), ...(format && { format }) }
+            { domain: field.id, unique, ...(!learned && { type: field.type }), ...(format && { format }), ...(field.words && { words: true }) }
     }
     plans.set(field.id, plan)
     return plan

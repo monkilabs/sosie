@@ -156,7 +156,9 @@ function propertiesOf(node: Node, schemas: Record<string, Node>): Record<string,
   return m.properties && (m.type === 'object' || m.type === undefined) ? m.properties : undefined
 }
 
-function typeOf(node: Node, schemas: Record<string, Node>): FieldType {
+function typeOf(node: Node, schemas: Record<string, Node>, depth = 0): FieldType {
+  // An array of itself (Grid: array of Grid) has no end: so deep, it is JSON.
+  if (depth > 20) return { kind: 'json' }
   const type = Array.isArray(node.type) ? node.type.find((t: string) => t !== 'null') : node.type
   if (Array.isArray(node.enum) && node.enum.every((v: unknown) => typeof v === 'string')) return { kind: 'enum', labels: node.enum }
   switch (type) {
@@ -183,7 +185,7 @@ function typeOf(node: Node, schemas: Record<string, Node>): FieldType {
     case 'boolean':
       return { kind: 'boolean' }
     case 'array':
-      return { kind: 'array', of: typeOf(merged(node.items, schemas), schemas) }
+      return { kind: 'array', of: typeOf(merged(node.items, schemas), schemas, depth + 1) }
     default:
       return { kind: 'json' }
   }
