@@ -47,6 +47,16 @@ describe('the mapping store', () => {
     expect(store.fake('d', 'same', unique, (_, attempt) => (attempt === 0 ? 'same' : 'other'))).toBe('other')
   })
 
+  it('passes on why a fake could not be drawn, and stays usable', () => {
+    const store = Store.open(fresh())
+    expect(() =>
+      store.fake('d', 'broken', unique, () => {
+        throw new Error('the draw failed')
+      }),
+    ).toThrow('the draw failed')
+    expect(store.fake('d', 'next', unique, () => 'fine')).toBe('fine')
+  })
+
   it('keeps a value with nothing to fake as it is, without drawing forever', () => {
     const store = Store.open(fresh())
     for (const nothing of ['', '-', '...', 'NaN', 'infinity']) {

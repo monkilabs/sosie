@@ -381,7 +381,7 @@ lists it, for when several Sosies of a kind run; without it, the newest.
 | `query` | Postgres | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice; every value a consistent fake |
 | `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a GET through Sosie, up to 200 items of each list, within 50 s; it reaches the running Sosie only, whatever the path says |
 
-When Sosie is not running, both say so, and how to start it.
+When Sosie is not running, every tool says so, and how to start it.
 
 ## Postgres source
 
