@@ -166,12 +166,16 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
         paging: `${origin}/v1/users?start=7739182046&count=7739182046&offset=7739182046&page=2`,
         nested: `${origin}/v1/quillon/repos`,
         tenant: `${origin}/v1/acme-industries/profile`,
+        surname: `${origin}/v1/jones/profile`,
+        member: `${origin}/v1/users/1/orders`,
         odd: `${origin}/v1/users?quillon=1`,
         outside: `${origin}/static/Vantablack.png`,
       })
     }
     // A tenant's slug, as an app's settings would hold it, in a path of its own.
     if (path === '/acme-industries/profile') return json(200, { self: `${origin}/v1/acme-industries/profile` })
+    // One that looks like a collection's name: a surname, plural in shape.
+    if (path === '/jones/profile') return json(200, { plan: 'team' })
     // A path that redirects within the API, to a record of another kind.
     if (path === '/products/featured') {
       res.writeHead(302, { location: '/v1/users/1' })
@@ -184,6 +188,26 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
       return json(200, { byHandle: { [handle]: { ok: true } }, link: `${origin}/v1/search?${handle}=1` })
     }
     if (path === '/members') return json(200, { quillon: { role: 'owner' }, zephyrine: { role: 'guest' } })
+    // An API that echoes what it was asked within its keys, and a filter in a field the team lets pass.
+    if (path === '/echo-within') {
+      const handle = url.searchParams.get('handle') ?? ''
+      return json(200, { [`${handle}_profile`]: 1, [`${handle}Settings`]: 2, [`by_${handle}`]: 3 })
+    }
+    if (path === '/reports') {
+      const country = url.searchParams.get('country')
+      const q = url.searchParams.get('q')
+      return json(200, { country: country ?? 'Iceland', total: 6, note: q ? `Results for ${q.toUpperCase()}` : 'All' })
+    }
+    // A redirect within the API's origin, out of its base path.
+    if (path === '/out-of-base') {
+      res.writeHead(302, { location: '/admin/secret' })
+      return res.end()
+    }
+    if (path === '/admin/secret') return json(200, { secret: 'Quillon' })
+    if (path === '/odd-type') {
+      res.writeHead(200, { 'content-type': 'application/x-quillon-vantablack' })
+      return res.end('{}')
+    }
     if (path === '/big') {
       const n = Number(url.searchParams.get('n') ?? 10)
       return json(200, Array.from({ length: n }, (_, i) => ({ id: i + 1, email: `person${i + 1}@example.org` })))

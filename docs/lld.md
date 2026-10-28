@@ -288,7 +288,7 @@ Values a query computes fake in `computed:<type>`.
 | `enum` | A label of the same enum, by a fixed shuffle per domain; the shuffle may leave a label in place |
 | `date`, `datetime`, `time` | Shifted by up to a year, the same shift for the same value, in the same format |
 | Any type, a value with no letter or digit (`''`, `-`, `NaN`, `infinity`) | Itself: there is nothing in it to fake |
-| `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked. Anywhere, a key that is a value the request turned back from a fake is faked, however it looks: an answer that holds it is echoing what the client sent |
+| `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked. Anywhere, a key that holds a value the request turned back from a fake (`quillon`, `quillon_profile`, `QuillonSettings`) is faked, however it looks: an answer that holds it is echoing what the client sent |
 | `array` | Each element faked in the field's domain |
 | `ip` | An address from a documentation range |
 | `bytes` | Random bytes of the same length; derived, not stored |
@@ -296,6 +296,11 @@ Values a query computes fake in `computed:<type>`.
 
 Fakes are deterministic: the faker is seeded from the value's keyed hash, so the
 same real value gives the same fake in every session.
+
+A field that passes still never shows a value the request turned back from a
+fake: an answer that holds it, whole or within text and whatever its case, is
+echoing what the client sent, and shows the fake the client sent instead. A
+number counts when it is six digits or more; a shorter one may be any count.
 
 ## Core: store
 
@@ -366,7 +371,7 @@ lists it, for when several Sosies of a kind run; without it, the newest.
 | --- | --- | --- | --- |
 | `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice; every value a consistent fake |
-| `request` | REST | `path` | The status and the JSON body of a GET through Sosie, up to 200 items of each list, within 50 s; a path that names another host is refused |
+| `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a GET through Sosie, up to 200 items of each list, within 50 s; it reaches the running Sosie only, whatever the path says |
 
 When Sosie is not running, both say so, and how to start it.
 
@@ -593,9 +598,13 @@ For the team's own HTTP API, where the database's people come back as JSON.
 A local HTTP address with the API's own paths: `http://localhost:7674/v1/users`
 reads `https://api.internal/v1/users`. Only `GET` and `HEAD` reach the API;
 anything else gets `405` and never leaves Sosie. Requests outside the base path
-get `404`, and a path whose `%` starts no escape `400`. On 127.0.0.1, a request
-whose `Host` is not `localhost`, `127.0.0.1` or `[::1]` gets `403`: a web page
-that rebinds its own name to this machine cannot read the fakes.
+get `404`, and a path whose `%` starts no escape `400`. On this machine's own
+address, a request whose `Host` is not `localhost`, a `127.` address or `[::1]`
+gets `403`: a web page that rebinds its own name to this machine cannot read the
+fakes. So does a browser's request for a page of another site (an `Origin` that
+is not this machine, or `Sec-Fetch-Site: cross-site` without one): a web page
+cannot make Sosie send a `GET` with its credentials. A page of this machine, an
+app on another port, may.
 
 ### Credentials
 
@@ -604,8 +613,8 @@ holds them, one `Name: value` per line (`Authorization: Bearer …`), and a user
 and password in the URL become a Basic header; a query on it (`?api_key=…`) goes
 with every request and is never shown, links included. Headers the client sends,
 `Authorization` included, are not passed on. Redirects are followed inside
-Sosie, within the API's origin only, so credentials never go elsewhere and the
-client never sees a real URL. Each request has the statement timeout (30 s) and
+Sosie, within the API's origin and its base path only, so credentials never go
+elsewhere and the client never sees a real URL. Each request has the statement timeout (30 s) and
 a body cap (20 MB), counted as the body arrives.
 
 ### Schema
@@ -641,9 +650,10 @@ domains, formats by name, `sosie.yml`. Formats are shared with every source, so
 a person's email is the same fake from the database and the API. A key that is
 structure (`city`, `createdAt`) stays; one that is a value (a map keyed by
 email) is faked, each to its own fake. Every key of a map the document declares
-(`additionalProperties` with a schema) is a value, and so is a key that is a
-value the request turned back: an API that answers with what it was asked
-never hands the real value back. A list keeps its first
+(`additionalProperties` with a schema) is a value, and so is a key that holds a
+value the request turned back, whatever its case and separators
+(`quillon_profile`, `quillonSettings` for `quillon`): an API that answers with
+what it was asked never hands the real value back. A list keeps its first
 `--max-rows` items, and the answer's `sosie-notice` header says the rest were
 cut; a large body is faked a slice at a time, so other clients are answered
 meanwhile.
@@ -653,12 +663,14 @@ instead, with nothing real in it, so following it reads the record it names:
 
 - A path segment stays as written when it is a word Sosie knows as a name of
   the API's: a fixed segment of an OpenAPI path, a collection's name
-  (lowercase, plural) a client sent and the API answered, or a word of the
+  (lowercase, plural) a client asked for as the last word of a path and the
+  API answered with a list (`/users`, `/users/87/orders`), or a word of the
   request the answer is for. Another word a client sent (a tenant's slug from
-  an app's settings) is never shown to another request. A value (a number, a UUID, a template's parameter, or
-  what follows a collection's name, as in `/users/jdoe`) is faked as the id of
-  what it follows; any other word is faked in a domain of its own (`$path`),
-  and names no entity, so no domain holds it.
+  an app's settings, `/jones/profile`) is never shown to another request. A
+  value (a number, a UUID, a template's parameter, or what follows a
+  collection's name, as in `/users/jdoe`) is faked as the id of what it
+  follows; any other word is faked in a domain of its own (`$path`), and names
+  no entity, so no domain holds it.
 - Query values are faked by the field they name, so a real value Sosie sent
   upstream comes back as the fake the client sent; a page's number (`page`,
   `limit`, `offset` and the like, up to five digits) stays. A name stays when
@@ -666,8 +678,8 @@ instead, with nothing real in it, so following it reads the record it names:
   body has shown as structure, a reference (`userId`), or one of the request
   the answer is for; any other (`q[Quillon]`, `?jdoe=1`) is faked, and its
   value too, under no field's name. Sosie's own query credentials are left out.
-- A word or a name that is a value the request turned back is faked, however
-  it looks.
+- A word or a name that holds a value the request turned back is faked,
+  however it looks.
 - The fragment is left out. Text that starts with a URL and goes on is text.
 
 Status codes pass; error bodies in JSON are faked like any other; a body that is
@@ -687,7 +699,9 @@ but never a bare number, is looked up anywhere too. A query parameter is looked
 up in the field it names (`?email=` in `user.email`, `?userId=` in `user.id`,
 `?role=` by the document's enum, `?active=false` as the boolean it shows);
 other text anywhere; a number that names no field (`limit=10`, `page=2`) stays
-as written.
+as written. A value compared with a field that passes is real already, and
+stays as written, in a path too: looked up anywhere, a fake of another field
+would turn into that field's real value, which the passing field would show.
 
 ### Limits
 
@@ -704,9 +718,12 @@ as written.
   that word back: they look like structure. Such a key is part of the names of
   the domains below it, which `sosie scan` prints. A link's query name that is
   a lowercase word (`?jdoe=1`) stays for the same reason.
-- A link reads less well than the API's own: a word no client has sent yet, and
-  one that follows a collection's name (`/users/by-email/…`), comes back faked,
-  and so does a query name Sosie cannot tell is structure.
+- A link reads less well than the API's own: a word no client has asked a list
+  of yet, and one that follows a collection's name (`/users/by-email/…`), comes
+  back faked, and so does a query name Sosie cannot tell is structure.
+- Without a document, a tenant's slug that is itself a lowercase plural
+  (`jones`), asked for on its own (`/jones`) and answered with a list, is taken
+  for a collection's name, and links show it.
 - An endpoint the API serves for `GET` that writes is the API's to guard: Sosie
   sends every `GET` on.
 

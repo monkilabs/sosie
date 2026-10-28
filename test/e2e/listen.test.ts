@@ -51,9 +51,9 @@ describe('a port that another program holds on ::1, where localhost goes first',
     }
   })
 
-  it('is busy for a REST Sosie too', async () => {
+  it('is busy for a REST Sosie too', async (ctx) => {
     const held = await heldOnIpv6()
-    if (!held) return
+    if (!held) return ctx.skip('this machine has no IPv6')
     const api = await startApi()
     const connection = await rest.connect(new URL(api.url), { maxRows: 10, statementTimeout: 5000, env: {} })
     try {

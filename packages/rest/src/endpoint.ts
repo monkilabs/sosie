@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { localRequest, pacer, why, type Endpoint, type Faker, type Field, type RequestScope } from '@sosie/core'
-import { fakeBody, queryField, type FakeContext } from './fake.js'
+import { crossSite, localRequest, pacer, why, type Endpoint, type Faker, type Field, type RequestScope } from '@sosie/core'
+import { ENVELOPES, fakeBody, queryField, type FakeContext } from './fake.js'
 import { referenceOf, type Api } from './openapi.js'
 import { PAGING, PATH_WORD, QUERY_NAME, route, singular, valueByHabit, wordName, type Route } from './paths.js'
 import type { RestUpstream } from './upstream.js'
@@ -42,10 +42,11 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
   const operations = ctx.api?.operations ?? []
   /**
    * Words of paths that are the API's own: the OpenAPI document's fixed
-   * segments, and collection names (lowercase, plural) a client sent that the
-   * API answered. A link shows these, and the words of the request it answers;
-   * anything else in it is faked. Another word a client sent (a tenant's slug
-   * from an app's settings) is never shown to another request.
+   * segments, and collection names (lowercase, plural) a client asked for, as
+   * the last word of a path, that the API answered with a list. A link shows
+   * these, and the words of the request it answers; anything else in it is
+   * faked. Another word a client sent (a tenant's slug from an app's settings,
+   * /jones/profile) is never shown to another request.
    */
   const known = new Set(operations.flatMap((op) => op.segments.filter((s) => !s.startsWith('{'))))
   /** Query names a link shows as they are: common ones, the document's fields, and keys bodies have shown as structure. */
@@ -108,6 +109,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     if (!localRequest(req.headers.host, listen.host)) {
       return send(res, 403, { error: 'Sosie answers requests for localhost only.' })
     }
+    if (crossSite(req.headers, listen.host)) {
+      return send(res, 403, { error: 'Sosie answers pages of this machine only, not a page of another site.' })
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       return send(res, 405, { error: 'Sosie is read-only: only GET and HEAD reach the API.' }, { allow: 'GET, HEAD' })
     }
@@ -116,6 +120,13 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const sent = segmentsOf(incoming.pathname.slice(basePath.length))
     if (!sent) return send(res, 400, { error: 'The path has a % that does not start an escape (%20).' })
     const scope = ctx.faker.request(`${sent.join('/')}?${[...incoming.searchParams].flat().join('&')}`)
+    /**
+     * The real value behind a fake: in its field, and text, not a bare number, anywhere too. A value
+     * compared with a field that passes is real already, and stays as written: looked up anywhere, it
+     * could turn into another field's real value, which that field would show as it is.
+     */
+    const lookup = (text: string, field: Field) =>
+      ctx.faker.passes(field) ? undefined : (scope.lookup(text, field) ?? (/^\d+$/.test(text) ? undefined : scope.lookup(text)))
 
     // A word Sosie made up for a link turns back into the API's word; a known word stays.
     const words = sent.map((segment) => (known.has(segment) ? segment : scope.lookup(segment, PATH_WORD)))
@@ -129,16 +140,15 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const real = routed.map((segment, i) => {
       const field = rt.values.get(i)
       // A value is looked up in its field; text, not a bare number, anywhere too: /users/7 never reads another entity's 7.
-      return encodeURIComponent((field && (scope.lookup(segment, field) ?? (/^\d+$/.test(segment) ? undefined : scope.lookup(segment)))) ?? segment)
+      return encodeURIComponent((field && lookup(segment, field)) ?? segment)
     })
     const query = new URLSearchParams()
     const names: string[] = []
     for (const [sentName, value] of incoming.searchParams) {
       const name = wordName(sentName) || known.has(sentName) ? sentName : (scope.lookup(sentName, QUERY_NAME) ?? sentName)
       if (name === sentName) names.push(name)
-      const near = scope.lookup(value, queryField(name, value, rt, { fields, entityFor }, name !== sentName))
       // A number that names no field (limit=10) stays as written; other text is looked up anywhere.
-      query.append(name, near ?? (/^\d+$/.test(value) ? undefined : scope.lookup(value)) ?? value)
+      query.append(name, lookup(value, queryField(name, value, rt, { fields, entityFor }, name !== sentName)) ?? value)
     }
     const target = new URL(`${base.origin}${basePath}/${real.join('/')}`)
     target.search = query.toString()
@@ -148,11 +158,8 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       ctx.log(`The API answered ${answer.status} to ${incoming.pathname}: check SOSIE_UPSTREAM_HEADERS.`)
     }
     const json = /[/+]json\b/i.test(answer.type)
-    // Words the client wrote itself: links in this answer may show them, and collection names the API answered, any link.
+    // Words the client wrote itself: links in this answer may show them.
     const mine = new Set([...sent.filter((segment, i) => !rt.values.has(i) && words[i] === undefined), ...names])
-    if (json && answer.status >= 200 && answer.status < 300 && known.size < MAX_KNOWN) {
-      for (const word of mine) if (COLLECTION.test(word) && !names.includes(word)) known.add(word)
-    }
     // An answer the API redirected to another path is about what that path names.
     const read = answer.url.pathname === target.pathname ? rt : readFinal(answer.url, mine, scope)
     if (req.method === 'HEAD' || !answer.body) {
@@ -165,7 +172,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
         error:
           answer.status >= 400
             ? `The API answered ${answer.status}.`
-            : `The API answered with ${answer.type.split(';')[0] || 'no content type'}; Sosie fakes JSON only, so it does not pass it on.`,
+            : 'The API did not answer with JSON; Sosie fakes JSON only, so it does not pass it on.',
       })
     }
     let body: unknown
@@ -173,6 +180,13 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       body = JSON.parse(answer.body)
     } catch {
       return send(res, 502, { error: 'The API answered with JSON that does not parse.' })
+    }
+    // A collection's name, which any link may show: the path's last word, a name as the client wrote it, answered with a list.
+    const last = sent.length - 1
+    const word = sent[last]
+    const ok = answer.status >= 200 && answer.status < 300
+    if (ok && word !== undefined && !rt.values.has(last) && words[last] === undefined && COLLECTION.test(word) && listOf(body, word)) {
+      if (known.size < MAX_KNOWN) known.add(word)
     }
     const fake: FakeContext = {
       faker: ctx.faker,
@@ -216,6 +230,12 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       )
     },
   }
+}
+
+/** Whether a body is a list: an array, or an object holding one under an envelope's key or the collection's own name. */
+function listOf(body: unknown, collection: string): boolean {
+  if (Array.isArray(body)) return true
+  return !!body && typeof body === 'object' && Object.entries(body).some(([k, v]) => Array.isArray(v) && (ENVELOPES.has(k) || k === collection))
 }
 
 /** The segments of a path, decoded; undefined when a % starts no escape. */

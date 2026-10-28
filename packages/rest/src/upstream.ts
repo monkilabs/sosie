@@ -1,6 +1,6 @@
 import { readCapped } from '@sosie/core'
 
-/** The API upstream: credentials Sosie holds, same-origin redirects only, a timeout and a size cap. */
+/** The API upstream: credentials Sosie holds, redirects within the API only, a timeout and a size cap. */
 export interface UpstreamResponse {
   /** Where the answer came from, after redirects within the API. */
   url: URL
@@ -34,8 +34,12 @@ export class RestUpstream {
       const location = response.headers.get('location')
       if (response.status >= 300 && response.status < 400 && location) {
         const next = new URL(location, current)
-        // Credentials go to the API's own origin only.
+        // Credentials go to the API's own origin only, and within it to the API's own paths, as a client's requests do.
         if (next.origin !== this.base.origin) throw new Error(`The API redirected to ${next.origin}; Sosie follows redirects within ${this.base.origin} only.`)
+        const base = this.base.pathname.replace(/\/$/, '')
+        if (base && next.pathname !== base && !next.pathname.startsWith(`${base}/`)) {
+          throw new Error(`The API redirected outside ${base}; Sosie follows redirects within it only.`)
+        }
         if (hop >= MAX_REDIRECTS) throw new Error('The API redirected too many times.')
         await response.body?.cancel()
         current = next

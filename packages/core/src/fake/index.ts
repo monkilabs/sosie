@@ -20,6 +20,15 @@ export function structuralKey(key: string): boolean {
 /** A word with a digit in it, as Postgres prints some values unquoted: 'date field value out of range: 1988-14-29'. */
 const DIGITS = /[\w.:+-]*\d[\w.:+-]*/g
 
+/** Text lowercased, its letters and digits only: Quill.Vantablack and quill_vantablack are one. */
+const squash = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+/** The words of text, lowercased: split at anything not a letter or digit, and where camelCase starts a word. */
+const wordsOf = (text: string) =>
+  text
+    .split(/[^\p{L}\p{N}]+|(?<=\p{Ll})(?=\p{Lu})/u)
+    .filter(Boolean)
+    .map((word) => word.toLowerCase())
+
 /** Whether text appears in what the client sent as a whole token, not inside a longer word. */
 function appears(sent: string, token: string): boolean {
   const word = /\w/
@@ -144,16 +153,49 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
 
   /** Whether a request turned a fake into this value: as a JSON key, an echo of what the client sent, and never structure. */
   const echoed = (scope: RequestScope | undefined, key: string) => !!scope && turnedBack(scope, key)
-  const turnedBack = (scope: RequestScope, key: string) => {
-    const lower = key.toLowerCase()
-    for (const real of substitutions.get(scope)?.keys() ?? []) if (real.toLowerCase() === lower) return true
+  /**
+   * Whether text holds a value the request turned back, ignoring case and separators: the value
+   * itself, or the value among the text's words (quillon_profile, quillonSettings), or within it
+   * when the value is long enough to be no word's part.
+   */
+  const turnedBack = (scope: RequestScope, text: string) => {
+    const reals = substitutions.get(scope)
+    if (!reals?.size) return false
+    const lower = text.toLowerCase()
+    const squashed = squash(text)
+    const parts = new Set(wordsOf(text))
+    for (const real of reals.keys()) {
+      if (real.toLowerCase() === lower) return true
+      const whole = squash(real)
+      if (whole.length >= 3 && (whole === squashed || parts.has(whole) || (whole.length >= 6 && squashed.includes(whole)))) return true
+    }
     return false
+  }
+
+  /**
+   * A value that passes, with each value the request turned back shown as the fake the client sent, whatever
+   * the case: an answer that holds it is echoing what the client sent, and the field's rule is not about that.
+   */
+  const unechoed = (value: Value, kind: FieldType['kind'], scope: RequestScope | undefined): Value => {
+    const reals = scope && substitutions.get(scope)
+    if (!reals?.size || value === null) return value
+    if (Array.isArray(value)) return value.map((item) => unechoed(item, kind, scope))
+    let out = value
+    for (const [real, fakeValue] of [...reals].sort((a, b) => b[0].length - a[0].length)) {
+      // A short number may be any other number, a passing count or quantity: an echo has a letter, or is long.
+      if (!/\p{L}/u.test(real) && real.length < 6) continue
+      if (out.toLowerCase() === real.toLowerCase()) return fakeValue
+      if (real.length < 3) continue
+      const form = (text: string) => (kind === 'json' ? JSON.stringify(text).slice(1, -1) : text)
+      out = out.replace(new RegExp(form(real).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), () => form(fakeValue))
+    }
+    return out
   }
 
   return {
     value(value, field, scope) {
       const plan = planOf(field)
-      if (plan.domain === null) return value
+      if (plan.domain === null) return unechoed(value, field.type.kind, scope)
       const out = fake(value, plan.type ?? field.type, plan.domain, plan, (k) => (KEY_WORD.test(k) || names.has(k)) && !echoed(scope, k))
       // A domain shared by fields of different lengths may hold a longer fake than this field takes.
       const max = field.type.kind === 'string' ? field.type.maxLength : undefined
