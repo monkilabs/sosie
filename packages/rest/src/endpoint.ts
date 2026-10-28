@@ -18,6 +18,8 @@ export interface RestContext {
 const OTHER_PATH = 'A segment of the path holds a / or \\, or is . or ..: the API could read it as another path, so Sosie does not send it.'
 /** Words Sosie remembers as names of the API's, at most: those a client sent are added as the API answers them. */
 const MAX_KNOWN = 10_000
+/** How an error's body is read: as no entity's, each value faked by where it sits. */
+const NO_ENTITY: Route = { entity: '*', values: new Map() }
 /** A word that looks like a name of the API's: lowercase first, then letters and digits, in kebab, snake or camel case. */
 const NAME = /^[a-z][a-zA-Z0-9]*(?:[-_][a-zA-Z0-9]+)*$/
 /** A word that looks like a collection's name: lowercase, plural. */
@@ -175,8 +177,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const json = /[/+]json\b/i.test(answer.type)
     // Words the client wrote itself: links in this answer may show them.
     const mine = new Set([...sent.filter((segment, i) => !rt.values.has(i) && words[i] === undefined), ...names])
-    // An answer the API redirected to another path is about what that path names.
-    const read = answer.url.pathname === target.pathname ? rt : readFinal(answer.url, mine, scope)
+    // An answer the API redirected to another path is about what that path names; an error is about no
+    // entity, so no field's rule in sosie.yml applies to its body, whatever keys it shares with the record.
+    const read = answer.status >= 300 ? NO_ENTITY : answer.url.pathname === target.pathname ? rt : readFinal(answer.url, mine, scope)
     if (req.method === 'HEAD' || !answer.body) {
       res.writeHead(answer.status, json ? { 'content-type': 'application/json; charset=utf-8' } : {})
       return res.end()

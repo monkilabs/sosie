@@ -419,6 +419,15 @@ describe('the guard and the credentials', () => {
     expect(api.requests.slice(asked)).toEqual([])
   })
 
+  it('applies no field’s rule to an error’s body, whatever keys it shares with the record', async () => {
+    const lenient = await startRest(api, { rules: 'pass:\n  - country.*\n' })
+    const { status, body } = await lenient.get('/countries/missing')
+    expect(status).toBe(404)
+    expect(Object.keys(body)).toEqual(['name', 'error'])
+    expect(JSON.stringify(body)).not.toMatch(/Quillon|Vantablack|no such country/)
+    await lenient.close()
+  })
+
   it('fakes error bodies, and does not pass on what it cannot fake', async () => {
     const missing = await sosie.get('/missing')
     expect(missing.status).toBe(404)
