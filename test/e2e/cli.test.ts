@@ -26,9 +26,16 @@ function run(args: string[], more: Record<string, string | undefined> = {}, cwd?
   return { status: result.status, stdout: result.stdout, stderr: result.stderr }
 }
 
+/** Every Sosie a test started: one that a failing test left running is stopped with the file. */
+const children = new Set<ChildProcess>()
+afterAll(() => {
+  for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+})
+
 /** Start `sosie` and wait for its banner. */
 async function start(more: Record<string, string | undefined>, args: string[] = ['--port', '0']) {
   const child = spawn(process.execPath, [CLI, ...args], { env: env(more), stdio: ['ignore', 'pipe', 'pipe'] })
+  children.add(child)
   let stdout = ''
   let stderr = ''
   child.stdout.on('data', (d) => (stdout += d))
@@ -42,10 +49,10 @@ async function start(more: Record<string, string | undefined>, args: string[] = 
   return { child, address, stdout: () => stdout }
 }
 
-function stop(child: ChildProcess): Promise<number | null> {
+function stop(child: ChildProcess, signal: NodeJS.Signals = 'SIGINT'): Promise<number | null> {
   return new Promise((resolve) => {
     child.once('exit', (code) => resolve(code))
-    child.kill('SIGINT')
+    child.kill(signal)
   })
 }
 
@@ -218,6 +225,13 @@ describe('sosie, when something is wrong', () => {
       await stop(second.child)
       await stop(first.child)
     }
+  })
+
+  it('stops when its terminal closes, and leaves no running file', async () => {
+    const sosie = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home })
+    expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`))).toBe(true)
+    expect(await stop(sosie.child, 'SIGHUP')).toBe(0)
+    expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`))).toBe(false)
   })
 
   it('counts the fields that pass', async () => {

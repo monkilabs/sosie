@@ -219,8 +219,8 @@ it in, `sosie` says to set `SOSIE_UPSTREAM`.
 Each `sosie` writes `$SOSIE_HOME/running/<pid>.json` (default `~/.sosie`) for
 `sosie mcp`: the local address, the source kind, the neutral schema and the
 fields that pass. Nothing real: no upstream, no credentials, no values. It is
-removed on Ctrl+C, and `sosie mcp` skips, and removes, the entry of a process
-that is gone.
+removed on Ctrl+C, a kill, or the terminal closing, and `sosie mcp` skips, and
+removes, the entry of a process that is gone.
 
 ## `sosie.yml`
 

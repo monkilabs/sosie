@@ -35,9 +35,9 @@ async function serve(connection: Connection, port: number) {
 }
 
 describe('a port that another program holds on ::1, where localhost goes first', () => {
-  it('is busy for a Sosie, which never prints an address that reaches that program', async () => {
+  it('is busy for a Sosie, which never prints an address that reaches that program', async (ctx) => {
     const held = await heldOnIpv6()
-    if (!held) return
+    if (!held) return ctx.skip('this machine has no IPv6')
     const connection = await postgres.connect(new URL(inject('upstream')), { maxRows: 10, statementTimeout: 5000 })
     try {
       await expect(serve(connection, held.port)).rejects.toMatchObject({ code: 'EADDRINUSE' })
