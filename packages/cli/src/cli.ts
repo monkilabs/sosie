@@ -152,6 +152,20 @@ async function start(options: {
       throw error
     }
   }
+  // Ctrl+C, a kill, or the terminal closing: each stops Sosie and leaves no running/ file behind, from before
+  // the file is written and the address printed, so a client that starts on the address can stop it too.
+  const stopped = new Promise<void>((done) => {
+    const stop = async () => {
+      clearRunning(home)
+      await endpoint.close()
+      await connection.close()
+      store.close()
+      done()
+    }
+    process.once('SIGINT', stop)
+    process.once('SIGTERM', stop)
+    process.once('SIGHUP', stop)
+  })
   writeRunning(home, { kind: source.kind, address: endpoint.address, schema: connection.schema, passing: [...rules.pass] })
 
   const passing = rules.pass.size
@@ -169,20 +183,7 @@ async function start(options: {
     '',
   ]
   process.stdout.write(lines.join('\n') + '\n')
-
-  await new Promise<void>((done) => {
-    const stop = async () => {
-      clearRunning(home)
-      await endpoint.close()
-      await connection.close()
-      store.close()
-      done()
-    }
-    // Ctrl+C, a kill, or the terminal closing: each leaves no running/ file behind.
-    process.once('SIGINT', stop)
-    process.once('SIGTERM', stop)
-    process.once('SIGHUP', stop)
-  })
+  await stopped
 }
 
 /** SOSIE_UPSTREAM, or a hidden prompt in a terminal. Never an argument, never echoed. */
