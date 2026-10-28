@@ -749,7 +749,9 @@ would turn into that field's real value, which the passing field would show.
 - A word a client typed that looks like a name, a tenant's slug in lowercase
   (`jones`, `acme-industries`), names an entity after it, and the domains of
   that entity's fields, which `sosie scan` prints, are named after it too; a
-  link never shows it.
+  link never shows it. One that starts with a capital (`/Customers`, as OData
+  writes paths) names no entity, so no rule in `sosie.yml` applies under it:
+  every value there is faked.
 - Without a document, the same record read through two kinds of path may be
   two entities, with two fakes of its id: `/users/87` is `user`, while
   `/people/by-email/…` names its entity after the last word it can.
