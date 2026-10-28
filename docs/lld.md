@@ -721,7 +721,8 @@ instead, with nothing real in it, so following it reads the record it names:
   however it looks.
 - The fragment is left out. Text that starts with a URL and goes on is text.
 
-Status codes pass; error bodies in JSON are faked like any other; a body that is
+Status codes pass; error bodies in JSON are faked as no entity's, each value by
+where it sits, so no field's rule in `sosie.yml` applies to them; a body that is
 not JSON is not passed on: an error status passes with Sosie's own message, and
 any other answer is `502`, saying why. An answer the API redirected to another
 path is read by that path, as a link is, so another kind's rule in `sosie.yml`

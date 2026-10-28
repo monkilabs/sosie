@@ -210,6 +210,8 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
       res.writeHead(200, { 'content-type': 'application/json' })
       return res.end(path === '/big-ids' ? `[${record}]` : record)
     }
+    // An error whose body has a key of the record the path names.
+    if (path === '/countries/missing') return json(404, { name: 'Quillon Vantablack', error: 'no such country' })
     // An API that echoes the credentials it was sent, as keys.
     if (path === '/echo-credentials') {
       return json(200, { [String(req.headers['x-lower'] ?? 'none')]: 1, [url.searchParams.get('api_key') ?? 'none']: 2, theme: 3 })
