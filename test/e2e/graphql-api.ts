@@ -31,6 +31,7 @@ type Order implements Node {
   user: User
 }
 type Product { id: ID! name: String sku: String }
+type Report { country: String total: Int note: String }
 input IdComparison { _eq: ID }
 input BooleanComparison { _eq: Boolean }
 input UserFilter { id: IdComparison, active: BooleanComparison }
@@ -47,6 +48,8 @@ type Query {
   motd: String
   usersByHandles(handles: [String!]!): JSON
   filtered(where: UserFilter): [User!]!
+  report(country: String, q: String): Report
+  big(n: Int!): JSON
 }
 type Mutation {
   deleteUser(id: ID!): Boolean
@@ -94,6 +97,9 @@ export async function startGraphql({ introspection = true, elsewhere = 'http://2
     },
     search: () => [user(people[0]!), { __typename: 'Product', id: 'p1', name: 'Plain Widget', sku: 'W-1' }],
     motd: () => 'Hello',
+    // A report that echoes its filters: the country it was asked for, and a search's text, as servers write it back.
+    report: ({ country, q }: { country?: string; q?: string }) => ({ country: country ?? 'Iceland', total: 6, note: q ? `Results for ${q.toUpperCase()}` : 'All' }),
+    big: ({ n }: { n: number }) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${1000 + i}`, `value ${i}`])),
     // A lookup keyed by what it was asked, as JSON: the real handles Sosie sent it.
     usersByHandles: ({ handles }: { handles: string[] }) => Object.fromEntries(handles.map((h) => [h, { found: people.some((p) => p.handle === h) }])),
     filtered: ({ where }: { where?: { id?: { _eq?: string }; active?: { _eq?: boolean } } }) =>
@@ -135,8 +141,20 @@ export async function startGraphql({ introspection = true, elsewhere = 'http://2
             { message: 'Quillon', path: ['users', 7739182046], extensions: { code: 'QUILLON' } },
             { message: 'Quillon', extensions: { code: 'QUILLON_VANTABLACK' } },
             { message: 'nope', extensions: { code: 'ACCESS_DENIED' } },
+            // Codes that say what failed, of words servers use and the schema's own names.
+            { message: 'nope', extensions: { code: 'ORDER_NOT_FOUND' } },
+            { message: 'nope', extensions: { code: 'QUERY_TOO_COMPLEX' } },
+            // Codes that quote data, with words that say what failed around it.
+            { message: 'nope', extensions: { code: 'QUILLON_NOT_FOUND' } },
+            { message: 'nope', extensions: { code: 'USER_7739182046_NOT_FOUND' } },
+            { message: 'nope', extensions: { code: 'TENANT_ZEPHYRINE_LIMIT_EXCEEDED' } },
+            { message: 'nope', extensions: { code: 'SK_LIVE_9QV7XC2LM8RT_INVALID' } },
           ],
         })
+      }
+      if (/\bweird\b/.test(request.query)) {
+        res.writeHead(200, { 'content-type': 'application/x-quillon-vantablack' })
+        return res.end('{}')
       }
       if (!introspection && /__schema/.test(request.query)) return json(200, { errors: [{ message: 'GraphQL introspection is not allowed' }] })
       operations.push(/^\s*mutation/.test(request.query) ? 'mutation' : 'query')

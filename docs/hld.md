@@ -176,8 +176,8 @@ substituted, links an API returns, and transcripts kept afterwards.
 - **An API's own structure and behaviour.** Its paths, its base path (in
   Sosie's address), its OpenAPI document or GraphQL schema with their
   descriptions, and its status codes are visible: they are the API, not values
-  from it. A `GET` that writes
-  is the API's to guard; Sosie sends every `GET` on.
+  from it. A `GET`, or a GraphQL query field, that writes is the API's to
+  guard; Sosie sends every `GET` and every query on.
 - **Fakes crossing sources.** One store serves every source, so a fake from
   the database typed into an API request turns back into its real value, which
   goes to that API. It never reaches the client.

@@ -2,7 +2,7 @@ import { base, en, Faker as FakerJs } from '@faker-js/faker'
 import { planner, type FieldPlan } from '../domains.js'
 import type { Rules } from '../rules.js'
 import type { Store } from '../store.js'
-import type { Faker, Field, FieldType, RequestScope, Schema, Value } from '../source.js'
+import type { Faker, Field, FieldType, Pace, RequestScope, Schema, Value } from '../source.js'
 import { formatByName, PERSONAL, type Format } from './formats.js'
 import { Random, shape } from './random.js'
 import { fakeScalar, type ScalarKind } from './types.js'
@@ -28,6 +28,25 @@ const wordsOf = (text: string) =>
     .split(/[^\p{L}\p{N}]+|(?<=\p{Ll})(?=\p{Lu})/u)
     .filter(Boolean)
     .map((word) => word.toLowerCase())
+
+/** Faking as steps, one per value of a JSON document: run at once, or paced, so other clients are answered between steps. */
+type Steps<T> = Generator<void, T, void>
+
+function run<T>(steps: Steps<T>): T {
+  for (;;) {
+    const step = steps.next()
+    if (step.done) return step.value
+  }
+}
+
+async function runPaced<T>(steps: Steps<T>, pace: Pace): Promise<T> {
+  for (;;) {
+    const step = steps.next()
+    if (step.done) return step.value
+    const pause = pace()
+    if (pause) await pause
+  }
+}
 
 /** Whether text appears in what the client sent as a whole token, not inside a longer word. */
 function appears(sent: string, token: string): boolean {
@@ -88,24 +107,30 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
    * column, structure is a key that looks like a word. In JSON a query builds (json_object_agg,
    * jsonb_build_object, row_to_json), structure is a name in the schema or a key the client wrote.
    */
-  const json = (real: string, domain: string, structure: (key: string) => boolean): string => {
+  function* json(real: string, domain: string, structure: (key: string) => boolean): Steps<string> {
     let doc: unknown
     try {
       doc = JSON.parse(real)
     } catch {
       return scalar(real, { kind: 'string' }, domain, { unique: false })
     }
-    const walk = (node: unknown, path: string, key: string): unknown => {
+    function* walk(node: unknown, path: string, key: string): Steps<unknown> {
       if (node === null) return null
-      if (Array.isArray(node)) return node.map((item) => walk(item, `${path}[]`, key))
-      if (typeof node === 'object') {
-        return Object.fromEntries(
-          Object.entries(node).map(([k, v]) => {
-            if (structure(k)) return [k, walk(v, `${path}.${k}`, k)]
-            return [scalar(k, { kind: 'string' }, `${domain}.$${path}.*key`, { unique: true }), walk(v, `${path}.*`, '')]
-          }),
-        )
+      if (Array.isArray(node)) {
+        const out: unknown[] = []
+        for (const item of node) out.push(yield* walk(item, `${path}[]`, key))
+        return out
       }
+      if (typeof node === 'object') {
+        const out: [string, unknown][] = []
+        for (const [k, v] of Object.entries(node)) {
+          if (structure(k)) out.push([k, yield* walk(v, `${path}.${k}`, k)])
+          else out.push([scalar(k, { kind: 'string' }, `${domain}.$${path}.*key`, { unique: true }), yield* walk(v, `${path}.*`, '')])
+        }
+        return Object.fromEntries(out)
+      }
+      // One value at a time: a caller that paces may let other clients in here.
+      yield
       const format = formatByName({ name: key })
       const leafDomain = format && PERSONAL.has(format) ? `format:${format}` : `${domain}.$${path}`
       if (typeof node === 'string') return scalar(node, { kind: 'string' }, leafDomain, { unique: true, ...(format && { format }) })
@@ -116,20 +141,22 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
       if (typeof node === 'boolean') return flips(leafDomain) ? !node : node
       return null
     }
-    return JSON.stringify(walk(doc, '', ''))
+    return JSON.stringify(yield* walk(doc, '', ''))
   }
 
-  const fake = (
+  function* fake(
     value: Value,
     type: FieldType,
     domain: string,
     plan: Pick<FieldPlan, 'format' | 'unique'>,
     structure: (key: string) => boolean,
-  ): Value => {
+  ): Steps<Value> {
     if (value === null) return null
     if (Array.isArray(value)) {
       const of = type.kind === 'array' ? type.of : type
-      return value.map((item) => fake(item, of, domain, plan, structure))
+      const out: Value[] = []
+      for (const item of value) out.push(yield* fake(item, of, domain, plan, structure))
+      return out
     }
     switch (type.kind) {
       case 'boolean':
@@ -140,7 +167,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
         return at >= 0 ? labels[at]! : new Random(store.seed(domain, value)).pick(labels)
       }
       case 'json':
-        return json(value, domain, structure)
+        return yield* json(value, domain, structure)
       case 'unknown':
         return null
       case 'array':
@@ -192,18 +219,33 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
     return out
   }
 
+  function* ofField(value: Value, field: Field, scope: RequestScope | undefined): Steps<Value> {
+    const plan = planOf(field)
+    if (plan.domain === null) return unechoed(value, field.type.kind, scope)
+    const out = yield* fake(value, plan.type ?? field.type, plan.domain, plan, (k) => (KEY_WORD.test(k) || names.has(k)) && !echoed(scope, k))
+    // A domain shared by fields of different lengths may hold a longer fake than this field takes.
+    const max = field.type.kind === 'string' ? field.type.maxLength : undefined
+    return max && typeof out === 'string' && out.length > max ? out.slice(0, max) : out
+  }
+
+  const ofNoField = (value: Value, type: FieldType, sent: string, scope: RequestScope | undefined) =>
+    fake(value, type, `computed:${type.kind}`, { unique: false }, (k) => (names.has(k) || appears(sent, k)) && !echoed(scope, k))
+
   return {
     value(value, field, scope) {
-      const plan = planOf(field)
-      if (plan.domain === null) return unechoed(value, field.type.kind, scope)
-      const out = fake(value, plan.type ?? field.type, plan.domain, plan, (k) => (KEY_WORD.test(k) || names.has(k)) && !echoed(scope, k))
-      // A domain shared by fields of different lengths may hold a longer fake than this field takes.
-      const max = field.type.kind === 'string' ? field.type.maxLength : undefined
-      return max && typeof out === 'string' && out.length > max ? out.slice(0, max) : out
+      return run(ofField(value, field, scope))
     },
 
     computed(value, type, sent = '', scope) {
-      return fake(value, type, `computed:${type.kind}`, { unique: false }, (k) => (names.has(k) || appears(sent, k)) && !echoed(scope, k))
+      return run(ofNoField(value, type, sent, scope))
+    },
+
+    valuePaced(value, field, scope, pace) {
+      return runPaced(ofField(value, field, scope), pace)
+    },
+
+    computedPaced(value, type, sent, scope, pace) {
+      return runPaced(ofNoField(value, type, sent, scope), pace)
     },
 
     passes(field) {

@@ -121,10 +121,13 @@ async function leaf(value: unknown, field: Field, ctx: FakeContext, state: { cut
   }
   await ctx.pace()
   if (typeof value === 'object') {
-    // An object in a scalar's place: a JSON scalar's by its field, any other custom scalar's (jsonb, Map, Any) as JSON a query built.
-    if (ctx.faker.passes(field)) return value
+    // An object in a scalar's place: a JSON scalar's by its field, any other custom scalar's (jsonb, Map, Any) as JSON a
+    // query built; one that passes, as JSON still, so what it echoes is found. A large one is faked a slice at a time.
     const json = JSON.stringify(value)
-    const fake = field.type.kind === 'json' ? ctx.faker.value(json, field, ctx.scope) : ctx.faker.computed(json, { kind: 'json' }, ctx.sent, ctx.scope)
+    const fake =
+      field.type.kind === 'json' || ctx.faker.passes(field)
+        ? await ctx.faker.valuePaced(json, { ...field, type: { kind: 'json' } }, ctx.scope, ctx.pace)
+        : await ctx.faker.computedPaced(json, { kind: 'json' }, ctx.sent ?? '', ctx.scope, ctx.pace)
     return JSON.parse(fake as string)
   }
   const fake = ctx.faker.value(String(value), field, ctx.scope) as string | null

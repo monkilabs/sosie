@@ -1,13 +1,14 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { localRequest, pacer, singular, why, type Endpoint, type Faker, type Field } from '@sosie/core'
+import { crossSite, localRequest, pacer, singular, why, type Endpoint, type Faker, type Field } from '@sosie/core'
 import {
-  execute,
   getOperationAST,
   getVariableValues,
+  isInputObjectType,
+  isInterfaceType,
+  isObjectType,
   Kind,
   parse,
   print,
-  validate,
   valueFromASTUntyped,
   visit,
   type DocumentNode,
@@ -18,6 +19,7 @@ import {
   type GraphQLSchema,
   type SelectionNode,
 } from 'graphql'
+import { Checker } from './check.js'
 import { fakeData, TYPENAME } from './fake.js'
 import { rewrite } from './rewrite.js'
 import type { GraphqlUpstream } from './upstream.js'
@@ -41,21 +43,54 @@ interface Request {
 }
 
 const MAX_REQUEST = 1024 * 1024
+/** Operations in a batch: each runs in turn, so a client with more sends more requests. */
+const MAX_BATCH = 50
 const RESOLVER_FAILED = 'A resolver failed; Sosie hides its message, which may quote a value from your data.'
 const REFUSED = 'The API refused the query; Sosie hides its message, which may quote a value from your data.'
-/** Error codes as servers write them; a code of another shape could be anything, and is dropped. */
+/** Error codes as servers write them. */
 const CODES = new Set([
   'GRAPHQL_PARSE_FAILED', 'GRAPHQL_VALIDATION_FAILED', 'BAD_USER_INPUT', 'BAD_REQUEST', 'UNAUTHENTICATED', 'UNAUTHORIZED', 'FORBIDDEN',
   'NOT_FOUND', 'CONFLICT', 'TIMEOUT', 'RATE_LIMITED', 'INTERNAL_SERVER_ERROR', 'PERSISTED_QUERY_NOT_FOUND', 'PERSISTED_QUERY_NOT_SUPPORTED',
+  'OPERATION_RESOLUTION_FAILURE', 'THROTTLED', 'MAX_COST_EXCEEDED', 'SHOP_INACTIVE',
   'validation-failed', 'access-denied', 'permission-error', 'constraint-violation', 'data-exception', 'not-exists', 'already-exists',
   'not-supported', 'parse-failed', 'invalid-jwt', 'invalid-headers', 'postgres-error', 'unexpected',
 ])
-/** A code of words joined by _, one of which says what went wrong: ACCESS_DENIED, QUERY_TOO_COMPLEX. */
-const CODE_WORDS = /(^|_)(ERROR|FAILED|FAILURE|INVALID|DENIED|FORBIDDEN|NOT|BAD|UNAUTHENTICATED|UNAUTHORIZED|LIMIT|EXCEEDED|TIMEOUT|MISSING|REQUIRED|CONFLICT|UNAVAILABLE|UNSUPPORTED|VIOLATION|EXPIRED|TOO)(_|$)/
-const errorCode = (code: unknown): code is string =>
-  typeof code === 'string' && (CODES.has(code) || (/^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/.test(code) && CODE_WORDS.test(code)))
-/** Tokens a query may have: parsing and checking a larger one would keep other clients waiting. */
+/** Words that say what went wrong: a code of words joined by _ has one. */
+const FAILURES = new Set([
+  'ABORTED', 'ALREADY', 'BAD', 'BLOCKED', 'CANCELED', 'CANCELLED', 'CONFLICT', 'DENIED', 'DISABLED', 'DUPLICATE', 'ERROR', 'EXCEEDED',
+  'EXHAUSTED', 'EXPIRED', 'FAILED', 'FAILURE', 'FORBIDDEN', 'INACTIVE', 'INVALID', 'LIMIT', 'LIMITED', 'LOCKED', 'MALFORMED', 'MISSING',
+  'NOT', 'OVERLOADED', 'REJECTED', 'REQUIRED', 'SUSPENDED', 'THROTTLED', 'TIMEOUT', 'TOO', 'UNAUTHENTICATED', 'UNAUTHORIZED',
+  'UNAVAILABLE', 'UNEXPECTED', 'UNIMPLEMENTED', 'UNKNOWN', 'UNSUPPORTED', 'VIOLATION',
+])
+/** Words that say what it was about, or how. */
+const SUBJECTS = new Set([
+  'ACCESS', 'ACCOUNT', 'ALLOWED', 'API', 'ARGUMENT', 'ARGUMENTS', 'AUTH', 'AUTHENTICATION', 'AUTHORIZATION', 'AVAILABLE', 'CAPACITY',
+  'COMPLEX', 'COMPLEXITY', 'CONNECTION', 'CONSTRAINT', 'COST', 'CREDENTIALS', 'CURSOR', 'DATA', 'DATABASE', 'DEADLINE', 'DEPTH',
+  'DIRECTIVE', 'DOWNSTREAM', 'ENTITY', 'EXIST', 'EXISTS', 'FEATURE', 'FIELD', 'FIELDS', 'FOUND', 'GRAPHQL', 'ID', 'INPUT', 'INTEGRITY',
+  'INTERNAL', 'KEY', 'LARGE', 'LONG', 'MANY', 'METHOD', 'NETWORK', 'NO', 'NODE', 'NODES', 'OBJECT', 'OF', 'OPERATION', 'OUT', 'PAGE',
+  'PARSE', 'PERMISSION', 'PERMISSIONS', 'PERMITTED', 'PERSISTED', 'PRECONDITION', 'QUERY', 'QUOTA', 'RANGE', 'RATE', 'RECORD', 'REQUEST',
+  'REQUESTS', 'RESOURCE', 'RESPONSE', 'SCHEMA', 'SCOPE', 'SERVER', 'SERVICE', 'SESSION', 'STATE', 'SUPPORTED', 'SYNTAX', 'TIMED',
+  'TOKEN', 'TYPE', 'UPSTREAM', 'USER', 'VALIDATION', 'VALUE', 'VARIABLE', 'VARIABLES', 'VERSION',
+])
+/**
+ * A code that says only what failed: one servers use, or words joined by _ that say what went wrong and what
+ * about, the schema's own names among them (USER_NOT_FOUND). A code with a digit, or any other word, could be
+ * quoting data (USER_7739182046_NOT_FOUND, QUILLON_FORBIDDEN), and is dropped.
+ */
+const errorCode = (code: unknown, names: Set<string>): code is string => {
+  if (typeof code !== 'string') return false
+  if (CODES.has(code)) return true
+  if (!/^[A-Z]+(_[A-Z]+)*$/.test(code)) return false
+  const words = code.split('_')
+  return words.every((w) => FAILURES.has(w) || SUBJECTS.has(w) || names.has(w)) && words.some((w) => FAILURES.has(w))
+}
+/** Tokens a query may have: parsing a larger one would keep other clients waiting. Checking it runs on threads of its own. */
 const MAX_TOKENS = 10_000
+
+/** JSON already written, by the thread that answered introspection: sent as it is, never parsed again. */
+class Written {
+  constructor(readonly text: string) {}
+}
 
 /**
  * The local GraphQL address, at the API's own path. Each operation is parsed
@@ -66,7 +101,9 @@ const MAX_TOKENS = 10_000
 export async function startEndpoint(listen: { host: string; port: number }, ctx: GraphqlContext): Promise<Endpoint> {
   const path = ctx.upstream.url.pathname
   const byWord = new Map([...new Set([...ctx.fields.keys()].map((id) => id.slice(0, id.indexOf('.'))))].map((name) => [singular(name.toLowerCase()), name]))
-  const names = { fields: ctx.fields, entityFor: (word: string) => byWord.get(singular(word.toLowerCase())) }
+  const names = { fields: ctx.fields, entityFor: (word: string) => byWord.get(singular(word.toLowerCase())), passes: (field: Field) => ctx.faker.passes(field) }
+  const codeWords = schemaWords(ctx.schema)
+  const checker = new Checker(ctx.schema, MAX_TOKENS)
 
   const one = async (request: unknown): Promise<{ status: number; body: unknown }> => {
     if (!request || typeof request !== 'object' || Array.isArray(request)) return failed(400, 'A request is a JSON object with a query.')
@@ -86,8 +123,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       return failed(400, (error as Error).message)
     }
     // Errors of the request against the schema hold only what the client wrote, and the schema.
-    const invalid = validate(ctx.schema, document)
-    if (invalid.length) return { status: 400, body: { errors: invalid.map(clientError) } }
+    const valid = await checker.validate(query)
+    if ('refused' in valid) return failed(400, valid.refused, 'SOSIE_TOO_COSTLY')
+    if ('errors' in valid && valid.errors.length) return { status: 400, body: { errors: valid.errors } }
     const operation = getOperationAST(document, operationName ?? undefined)
     if (!operation) return failed(400, 'Name the operation to run: the document has several.')
     if (operation.operation !== 'query') {
@@ -105,7 +143,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     // Introspection is answered from the schema Sosie holds, with what the client sent: the API never sees it.
     const roots = rootFields(operation.selectionSet.selections, fragments)
     if (roots.every((f) => f.name.value.startsWith('__'))) {
-      return { status: 200, body: await execute({ schema: ctx.schema, document, operationName: operationName ?? undefined, variableValues: given }) }
+      const answer = await checker.introspect(query, operationName ?? undefined, given)
+      if ('refused' in answer) return failed(400, answer.refused, 'SOSIE_TOO_COSTLY')
+      return { status: 200, body: new Written('text' in answer ? answer.text : '{}') }
     }
     if (roots.some((f) => f.name.value === '__schema' || f.name.value === '__type')) {
       return failed(400, 'Ask for __schema and __type in a query of their own: Sosie answers them from the schema, without the API.')
@@ -127,7 +167,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       ...(operationName && { operationName }),
     })
     if (answer.status === 401 || answer.status === 403) ctx.log(`The API answered ${answer.status}: check SOSIE_UPSTREAM_HEADERS.`)
-    if (!/json/i.test(answer.type)) return failed(502, `The API answered with ${answer.type.split(';')[0] || 'no content type'}; Sosie fakes JSON only.`)
+    if (!/json/i.test(answer.type)) return failed(502, 'The API did not answer with JSON; Sosie fakes JSON only.')
     let body: { data?: unknown; errors?: unknown }
     try {
       body = JSON.parse(answer.body)
@@ -159,7 +199,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
           errors: errors.map((e) => ({
             message: executed ? RESOLVER_FAILED : REFUSED,
             ...(validPath(e?.path, keys, ctx.maxItems) && { path: e.path }),
-            ...(errorCode(e?.extensions?.code) && { extensions: { code: e.extensions.code } }),
+            ...(errorCode(e?.extensions?.code, codeWords) && { extensions: { code: e.extensions.code } }),
           })),
         }),
         ...(faked.cut && {
@@ -173,6 +213,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     if (!localRequest(req.headers.host, listen.host)) return send(res, 403, { errors: [{ message: 'Sosie answers requests for localhost only.' }] })
+    if (crossSite(req.headers, listen.host)) {
+      return send(res, 403, { errors: [{ message: 'Sosie answers pages of this machine only, not a page of another site.' }] })
+    }
     const url = new URL(req.url ?? '/', 'http://sosie.local')
     if (url.pathname.replace(/\/$/, '') !== path.replace(/\/$/, '')) return send(res, 404, { errors: [{ message: `Sosie serves the GraphQL API at ${path}.` }] })
     let request: unknown
@@ -195,6 +238,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
         return send(res, 415, { errors: [{ message: 'Sosie takes a POST as application/json, or application/graphql.' }] })
       }
       const text = await read(req)
+      if (text === undefined) {
+        return send(res, 413, { errors: [{ message: `Sosie takes a request of up to ${MAX_REQUEST / 1024 / 1024} MB.` }] }, { connection: 'close' })
+      }
       try {
         request = type === 'application/graphql' ? { query: text } : JSON.parse(text)
       } catch {
@@ -204,6 +250,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       return send(res, 405, { errors: [{ message: 'Sosie takes GraphQL requests by GET and POST.' }] }, { allow: 'GET, POST' })
     }
     if (Array.isArray(request)) {
+      if (request.length > MAX_BATCH) return send(res, 400, { errors: [{ message: `A batch has at most ${MAX_BATCH} operations.` }] })
       const answers = []
       for (const r of request) answers.push((await one(r)).body)
       return send(res, 200, answers)
@@ -226,6 +273,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
   return {
     address: `http://${host.includes(':') ? `[${host}]` : host}:${port}${path}`,
     close: async () => {
+      await checker.close()
       await Promise.all(
         servers.map(
           (server) =>
@@ -257,6 +305,20 @@ function rootFields(selections: readonly SelectionNode[], fragments: Record<stri
     seen.add(s.name.value)
     return rootFields(fragments[s.name.value]!.selectionSet.selections, fragments, seen)
   })
+}
+
+/** The words of the schema's type and field names, upper case, as a code writes them: introspection shows them anyway. */
+function schemaWords(schema: GraphQLSchema): Set<string> {
+  const words = new Set<string>()
+  const add = (name: string) => {
+    for (const word of name.split(/_|(?<=[a-z0-9])(?=[A-Z])/)) if (word) words.add(word.toUpperCase())
+  }
+  for (const type of Object.values(schema.getTypeMap())) {
+    if (type.name.startsWith('__')) continue
+    add(type.name)
+    if (isObjectType(type) || isInterfaceType(type) || isInputObjectType(type)) for (const name of Object.keys(type.getFields())) add(name)
+  }
+  return words
 }
 
 /** Every response key a document asks for: its fields' names and aliases. */
@@ -301,14 +363,16 @@ function usesName(document: DocumentNode, name: string): boolean {
   return found
 }
 
-function read(req: IncomingMessage): Promise<string> {
+/** A request's body as text; undefined once it passes the cap, and the rest is read and dropped. */
+function read(req: IncomingMessage): Promise<string | undefined> {
   return new Promise((resolve, reject) => {
     let size = 0
     const chunks: Buffer[] = []
     req.on('data', (chunk: Buffer) => {
       size += chunk.length
-      if (size > MAX_REQUEST) req.destroy(new Error('The request is too large.'))
-      else chunks.push(chunk)
+      if (size <= MAX_REQUEST) return void chunks.push(chunk)
+      chunks.length = 0
+      resolve(undefined)
     })
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
     req.on('error', reject)
@@ -317,7 +381,14 @@ function read(req: IncomingMessage): Promise<string> {
 
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', ...headers })
-  res.end(JSON.stringify(body))
+  res.end(json(body))
+}
+
+/** A body as JSON, with what is written already as it is: a batch may hold introspection's answer. */
+function json(body: unknown): string {
+  if (body instanceof Written) return body.text
+  if (Array.isArray(body) && body.some((b) => b instanceof Written)) return `[${body.map(json).join(',')}]`
+  return JSON.stringify(body)
 }
 
 /**

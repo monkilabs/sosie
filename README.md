@@ -112,7 +112,8 @@ collection's name or a lowercase query name, stays as written.
 A GraphQL API works the same way: point `SOSIE_UPSTREAM` at its endpoint
 (`https://api.internal/graphql`). Sosie reads the schema by introspection, or
 from `SOSIE_GRAPHQL_SCHEMA`, answers the client's introspection from it, and
-sends only queries on, never mutations.
+sends only queries on, never mutations. A query field that writes, like a `GET`
+that writes, is the API's to guard.
 
 Postgres, REST and GraphQL are the first sources. More databases come next, each
 a package behind the same interface.

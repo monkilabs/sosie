@@ -762,23 +762,29 @@ not valid GraphQL stops Sosie at start, saying why.
 
 ### Endpoint and guard
 
-The API's own path on a local address, by `GET` and `POST`, batches included.
-A `POST` is JSON or `application/graphql`; any other type, as a web page's form
-or `text/plain` would send, gets `415`. On 127.0.0.1, a `Host` other than
-localhost gets `403`, as for REST. Each operation is parsed and checked against
-the schema, and its variables against their types, so the API is never asked
-about a value Sosie turned back: what fails there gets `400`, quoting only what
-the client sent. A query of more than 10,000 tokens is refused before it is
-checked, so one client cannot keep the others waiting. Only queries reach the
-API, and only the operation to run with the fragments it uses: a mutation or a
-subscription is answered with an error, and its text never leaves Sosie. A persisted query without its text is
-refused. POSTs are not redirected: the body and the credentials stay with the
-API.
+The API's own path on a local address, by `GET` and `POST`, batches of up to 50
+operations included. A `POST` is JSON or `application/graphql`, of up to 1 MB
+(`413` above it); any other type, as a web page's form or `text/plain` would
+send, gets `415`. On this machine's own address, a `Host` other than localhost,
+or a page of another site, gets `403`, as for REST. Each operation is parsed and
+checked against the schema, and its variables against their types, so the API
+is never asked about a value Sosie turned back: what fails there gets `400`,
+quoting only what the client sent. A query of more than 10,000 tokens is
+refused before it is parsed. Checking runs on two threads of Sosie's own, each
+query within 2 seconds and 256 MB: graphql-js can take minutes over a small
+query that repeats a field, so one that needs more is refused
+(`SOSIE_TOO_COSTLY`), and the other thread answers everyone else meanwhile.
+Only queries reach the API, and only the operation to run with the fragments
+it uses: a mutation or a subscription is answered with an error, and its text
+never leaves Sosie. A persisted query without its text is refused. POSTs are
+not redirected: the body and the credentials stay with the API.
 
 Introspection is answered from the schema Sosie holds, with what the client
 sent, and never reaches the API; so clients introspect an API that has
-introspection off. `__schema` and `__type` beside data fields are refused: ask
-for them in a query of their own.
+introspection off. It runs on the same threads, within the same limits and an
+answer of up to 20 MB, since aliases and fragments can ask for the schema many
+times over in a few lines. `__schema` and `__type` beside data fields are
+refused: ask for them in a query of their own.
 
 ### Faking
 
@@ -793,16 +799,20 @@ say, or names a type it cannot be, comes back `null`. So a `User` under
 `node(id:)` fakes its id as `User.id`, and a union member never passes by
 another type's rule. `__typename` comes back as the schema names it. A list
 keeps its first `--max-rows` items, and the response's `extensions.sosie` says
-the rest were cut; a large answer is faked a slice at a time.
+the rest were cut; a large answer is faked a slice at a time, a large JSON
+value in it too.
 
 Errors: since Sosie checked the query and its variables itself, anything the API
 says beyond that may quote data, whether it ran the query (`data` is there) or
 not. Every message is replaced by Sosie's; an error's `path` comes back when it
 is made of the query's own keys and positions in a list Sosie would show, its
 `extensions.code` when it is a code servers use (`FORBIDDEN`,
-`validation-failed`) or words that say what failed (`ACCESS_DENIED`); nothing
-else does. A `401` or `403` from the API tells the terminal to check
-`SOSIE_UPSTREAM_HEADERS`.
+`validation-failed`), or made only of words that say what failed and what
+about, the schema's own names among them (`ACCESS_DENIED`, `ORDER_NOT_FOUND`);
+nothing else does, so a code with a digit or a word of data
+(`USER_7739182046_NOT_FOUND`, `QUILLON_FORBIDDEN`) is dropped. An answer that
+is not JSON is `502`, without its content type. A `401` or `403` from the API
+tells the terminal to check `SOSIE_UPSTREAM_HEADERS`.
 
 ### Query by what you saw
 
@@ -816,7 +826,8 @@ and in a variable's default. On an interface or a union, in
 that field of each type it may be, when they agree: `node(id:)` in `User.id`,
 `Order.id` and the rest. Text it names no field for is looked up anywhere; a
 number that names no field (`first: 10`) stays as written; a directive's
-argument (`@include(if:)`) is left alone.
+argument (`@include(if:)`) is left alone. A value compared with a field that
+passes is real already, and stays as written, as for REST.
 
 ### Limits
 
@@ -824,6 +835,8 @@ argument (`@include(if:)`) is left alone.
   column's do, unless the request turned that word back.
 - The schema, its descriptions included, is visible: it is the API, not its
   data.
+- A query field that writes is the API's to guard: Sosie sends every query on,
+  as REST sends every `GET`.
 
 ## Adding a source after v0.1
 

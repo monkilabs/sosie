@@ -2,6 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { createFaker, loadRules, Store, storeDir, type Running } from '@sosie/core'
 import { graphql } from '@sosie/graphql'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -49,6 +50,18 @@ async function startGraphqlSosie(
   }
 }
 
+/** What `work` gives, and the longest Sosie's event loop, in this process, stood still meanwhile: every other client waits that long. */
+async function stillest<T>(work: Promise<T>): Promise<{ result: T; ms: number }> {
+  const loop = monitorEventLoopDelay({ resolution: 10 })
+  loop.enable()
+  try {
+    const result = await work
+    return { result, ms: loop.max / 1e6 }
+  } finally {
+    loop.disable()
+  }
+}
+
 let api: FakeGraphql
 let sosie: Awaited<ReturnType<typeof startGraphqlSosie>>
 
@@ -67,7 +80,7 @@ describe('a GraphQL API', () => {
   it('is read by introspection, and its types become entities', () => {
     expect(graphql.matches(new URL(api.url))).toBe(true)
     expect(graphql.matches(new URL('https://api.internal/v1/users'))).toBe(false)
-    expect(sosie.connection.summary).toBe('6 types, 11 queries')
+    expect(sosie.connection.summary).toBe('7 types, 13 queries')
     const user = sosie.connection.schema.entities.find((e) => e.id === 'User')!
     expect(user.fields.find((f) => f.name === 'email')).toMatchObject({ format: 'email' })
     expect(sosie.connection.schema.entities.find((e) => e.id === 'Order')!.fields.find((f) => f.name === 'userId')!.references).toBe('User.id')
@@ -159,6 +172,48 @@ describe('a GraphQL API', () => {
     expect(body.errors[0].message).toMatch(/more than 10000 tokens/)
   })
 
+  it('refuses a query too costly to check or to answer, and answers other clients meanwhile', async () => {
+    // The same field a thousand times: graphql-js compares each pair. Introspection that multiplies its answer by aliases.
+    const costly = `{ ${Array(1100).fill('user(id: 1) { id }').join(' ')} }`
+    const w = Array.from({ length: 20 }, (_, i) => i)
+    const fan =
+      `{ __schema { ${w.map((i) => `t${i}: types { ...A }`).join(' ')} } } fragment A on __Type { ${w.map((i) => `a${i}: fields { ...B }`).join(' ')} } ` +
+      `fragment B on __Field { ${w.map((i) => `b${i}: type { ...C }`).join(' ')} } fragment C on __Type { ${w.map((i) => `c${i}: name`).join(' ')} }`
+    for (const query of [costly, fan]) {
+      const meanwhile: number[] = []
+      const heavy = sosie.ask(query)
+      const others = (async () => {
+        for (let i = 0; i < 5; i++) meanwhile.push((await sosie.ask('{ motd }')).status)
+      })()
+      const { result, ms } = await stillest(heavy)
+      await others
+      expect(result).toMatchObject({ status: 400, body: { errors: [{ extensions: { code: 'SOSIE_TOO_COSTLY' } }] } })
+      expect(meanwhile).toEqual([200, 200, 200, 200, 200])
+      expect(ms).toBeLessThan(500)
+    }
+    // A thread that was stopped is replaced: introspection is answered again.
+    expect((await sosie.ask('{ __schema { queryType { name } } }')).body).toEqual({ data: { __schema: { queryType: { name: 'Query' } } } })
+  })
+
+  it('fakes a large JSON value a slice at a time, and answers other clients meanwhile', async () => {
+    const { result, ms } = await stillest(sosie.ask('{ big(n: 20000) }'))
+    expect(Object.keys(result.body.data.big)).toHaveLength(20000)
+    expect(ms).toBeLessThan(500)
+  })
+
+  it('sends a value compared with a field that passes as written, so no other field’s real value comes back in it', async () => {
+    const lenient = await startGraphqlSosie(api, { rules: 'pass:\n  - Report.country\n  - Report.note\n' })
+    const [quill] = (await lenient.ask('{ users { name email } }')).body.data.users
+    const { body } = await lenient.ask(`{ report(country: ${JSON.stringify(quill.name)}) { country } }`)
+    expect(api.received.at(-1)!.query).toContain(JSON.stringify(quill.name))
+    expect(body.data.report.country).toBe(quill.name)
+    // Text that names no field is looked up anywhere; a field that passes and echoes it shows the fake the client sent.
+    const echo = (await lenient.ask(`{ report(q: ${JSON.stringify(quill.email)}) { note } }`)).body
+    expect(api.received.at(-1)!.query).toContain('"quill.vantablack@canary-mail.test"')
+    expect(echo.data.report.note).toBe(`Results for ${quill.email}`)
+    await lenient.close()
+  })
+
   it('lets sosie.yml name a scalar of the query type', async () => {
     expect((await sosie.ask('{ motd }')).body.data.motd).not.toBe('Hello')
     const lenient = await startGraphqlSosie(api, { rules: 'pass:\n  - Query.motd\n' })
@@ -221,7 +276,13 @@ describe('a GraphQL API', () => {
       await fetch(sosie.address, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify([{ query: '{ users { id } }' }, { query: '{ orders { id } }' }]) })
     ).json()) as Json
     expect(batch.map((b: Json) => Object.keys(b.data))).toEqual([['users'], ['orders']])
-    seen.push(get, batch)
+    // A batch may hold introspection, answered by another thread, as JSON written there.
+    const mixed = (await (
+      await fetch(sosie.address, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify([{ query: '{ __typename }' }, { query: '{ motd }' }]) })
+    ).json()) as Json
+    expect(mixed[0]).toEqual({ data: { __typename: 'Query' } })
+    expect(Object.keys(mixed[1].data)).toEqual(['motd'])
+    seen.push(get, batch, mixed)
   })
 })
 
@@ -246,8 +307,13 @@ describe('the guard', () => {
         { message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.' },
         { message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.' },
         { message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.', extensions: { code: 'ACCESS_DENIED' } },
+        { message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.', extensions: { code: 'ORDER_NOT_FOUND' } },
+        { message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.', extensions: { code: 'QUERY_TOO_COMPLEX' } },
+        ...Array(4).fill({ message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.' }),
       ],
     })
+    // Nor what the API says its answer is.
+    expect(await sosie.ask('{ weird: motd }')).toEqual({ status: 502, body: { errors: [{ message: 'The API did not answer with JSON; Sosie fakes JSON only.' }] } })
   })
 
   it('never follows a redirect: the query and the credentials stay with the API', async () => {
@@ -280,6 +346,32 @@ describe('the guard', () => {
     expect((await post('null', 'application/json')).status).toBe(400)
     expect(await (await post('[null]', 'application/json')).json()).toEqual([{ errors: [{ message: 'A request is a JSON object with a query.' }] }])
     expect((await fetch(`${sosie.address}?query=${encodeURIComponent('{ users { id } }')}&variables=notjson`)).status).toBe(400)
+    // Too large to read, or a batch of too many: refused, saying so.
+    const large = await post(JSON.stringify({ query: '{ motd }', variables: { pad: 'x'.repeat(1024 * 1024) } }), 'application/json')
+    expect(large.status).toBe(413)
+    expect(await large.json()).toEqual({ errors: [{ message: 'Sosie takes a request of up to 1 MB.' }] })
+    const many = await post(JSON.stringify(Array(51).fill({ query: '{ motd }' })), 'application/json')
+    expect(many.status).toBe(400)
+    expect(await many.json()).toEqual({ errors: [{ message: 'A batch has at most 50 operations.' }] })
+  })
+
+  it('answers no page of another site, so a web page cannot make it send a query', async () => {
+    const { port } = new URL(sosie.address)
+    const status = (headers: Record<string, string>) =>
+      new Promise<number>((resolve, reject) => {
+        const path = `/api/graphql?query=${encodeURIComponent('{ users { id } }')}`
+        httpRequest({ host: '127.0.0.1', port, path, headers: { host: `localhost:${port}`, ...headers } }, (res) => {
+          res.resume()
+          resolve(res.statusCode!)
+        })
+          .on('error', reject)
+          .end()
+      })
+    const before = api.received.length
+    expect(await status({ origin: 'https://attacker.example' })).toBe(403)
+    expect(await status({ 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'no-cors' })).toBe(403)
+    expect(api.received.length).toBe(before)
+    expect(await status({ origin: 'http://127.0.0.1:5173', 'sec-fetch-site': 'cross-site' })).toBe(200)
   })
 
   it('cuts a list at --max-rows, and says so', async () => {

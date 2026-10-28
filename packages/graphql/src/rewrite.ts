@@ -28,6 +28,8 @@ export interface Names {
   fields: Map<string, Field>
   /** An entity's name from a word: 'user' to 'User'. */
   entityFor: (word: string) => string | undefined
+  /** Whether a field's values pass, by sosie.yml. */
+  passes: (field: Field) => boolean
 }
 
 /** `sosieTypename_: __typename`, asked of every object of an interface or a union, so Sosie knows how to fake it. */
@@ -38,8 +40,9 @@ const ASK_TYPENAME: FieldNode = { kind: Kind.FIELD, alias: { kind: Kind.NAME, va
  * values. An argument is looked up in the field it names on the type its
  * field returns: user(id:) in User.id, users(email:) in User.email,
  * orders(userId:) in User.id, node(id:) in the id of each type it may be;
- * text it names no field for, anywhere. Each object of an interface or a
- * union is asked its type.
+ * text it names no field for, anywhere. A value compared with a field that
+ * passes is real already, and stays as written. Each object of an interface
+ * or a union is asked its type.
  */
 export function rewrite(
   schema: GraphQLSchema,
@@ -66,8 +69,13 @@ export function rewrite(
 
   const within = (key: string, outer: string, type: GraphQLNamedType | undefined) => (near(key, type).length ? key : outer)
 
-  /** The real value behind a fake: in the fields it may name, when they agree; text, but no bare number, anywhere when none does. */
+  /**
+   * The real value behind a fake: in the fields it may name, when they agree; text, but no bare number, anywhere
+   * when none does. Compared with a field that passes, it stays: looked up anywhere, a fake of another field would
+   * turn into that field's real value, which the passing field would show.
+   */
   const lookup = (text: string, fields: Field[], anywhere = true): string | undefined => {
+    if (fields.some(names.passes)) return undefined
     const reals = new Set(fields.map((f) => scope.lookup(text, f)).filter((r) => r !== undefined))
     if (reals.size) return reals.size === 1 ? [...reals][0] : undefined
     return anywhere && !/^\d+$/.test(text) ? scope.lookup(text) : undefined

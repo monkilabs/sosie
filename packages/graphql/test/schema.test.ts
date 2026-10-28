@@ -49,7 +49,7 @@ describe('a GraphQL schema', () => {
 describe('rewriting a request', () => {
   const neutral = readSchema(schema)
   const fields = new Map<string, Field>(neutral.entities.flatMap((e) => e.fields.map((f) => [f.id, f] as const)))
-  const names = { fields, entityFor: (w: string) => ({ user: 'User', post: 'Post' })[w] }
+  const names = { fields, entityFor: (w: string) => ({ user: 'User', post: 'Post' })[w], passes: () => false }
   /** A scope that knows fakes by the field they are compared with. */
   const seen: [string, string | undefined][] = []
   const scope: RequestScope = {
