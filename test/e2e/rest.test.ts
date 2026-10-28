@@ -155,6 +155,34 @@ describe('an API without an OpenAPI document', () => {
     expect(body.odd).not.toContain('quillon')
   })
 
+  it('never shows a tenant’s slug that looks like a collection’s name to another request', async () => {
+    const fresh = await startRest(api)
+    // The app, with the real slug from its settings.
+    expect((await fresh.get('/jones/profile')).status).toBe(200)
+    const before = (await fresh.get('/links')).body
+    expect(before.surname).not.toContain('jones')
+    expect(before.member).not.toMatch(/\/orders$/)
+    // A collection's name the API answered with a list is shown in any link.
+    await fresh.get('/users')
+    await fresh.get('/orders')
+    expect((await fresh.get('/links')).body.member).toMatch(new RegExp(`^${fresh.address}/users/\\d+/orders$`))
+    expect((await fresh.get('/links')).body.surname).not.toContain('jones')
+    await fresh.close()
+  })
+
+  it('sends a value compared with a field that passes as written, so no other field’s real value comes back in it', async () => {
+    const lenient = await startRest(api, { rules: 'pass:\n  - report.country\n  - report.note\n' })
+    const [quill] = (await lenient.get('/users')).body.data
+    const { body } = await lenient.get(`/reports?country=${encodeURIComponent(quill.email)}`)
+    expect(api.requests.at(-1)!.path).toBe(`/v1/reports?${new URLSearchParams({ country: quill.email })}`)
+    expect(body.country).toBe(quill.email)
+    // Text under a name that passes nowhere is looked up anywhere; a field that passes and echoes it shows the fake sent.
+    const echo = (await lenient.get(`/reports?q=${encodeURIComponent(quill.email)}`)).body
+    expect(api.requests.at(-1)!.path).toBe('/v1/reports?q=quill.vantablack%40canary-mail.test')
+    expect(echo.note).toBe(`Results for ${quill.email}`)
+    await lenient.close()
+  })
+
   it('reads an answer the API redirected by where it ended, so another kind’s rule does not apply', async () => {
     const lenient = await startRest(api, { rules: 'pass:\n  - product.*\n' })
     const { body } = await lenient.get('/products/featured')
@@ -170,6 +198,14 @@ describe('an API without an OpenAPI document', () => {
     expect(Object.keys(body.byHandle)).toHaveLength(1)
     expect(Object.keys(body.byHandle)[0]).not.toBe('quillon')
     expect(body.link).not.toContain('quillon')
+  })
+
+  it('fakes a key that holds a value it turned back, within other words too', async () => {
+    const [{ handle }] = (await sosie.get('/handles')).body
+    const { body } = await sosie.get(`/echo-within?handle=${handle}`)
+    expect(api.requests.at(-1)!.path).toBe('/v1/echo-within?handle=quillon')
+    expect(Object.keys(body)).toHaveLength(3)
+    expect(Object.keys(body).join(' ')).not.toMatch(/quillon/i)
   })
 
   it('fakes again in a link the real value it turned a fake into', async () => {
@@ -265,6 +301,9 @@ describe('the guard and the credentials', () => {
     expect((await s.get('/elsewhere')).status).toBe(502)
     expect((await s.get('/elsewhere-relative')).status).toBe(502)
     expect(recorder.requests).toEqual([])
+    // Nor to the API's origin outside its base path, where a client's own request gets 404.
+    expect((await s.get('/out-of-base')).status).toBe(502)
+    expect(redirecting.requests.map((r) => r.path)).not.toContain('/admin/secret')
     // Within the API's origin, Sosie follows it.
     expect((await s.get('/moved')).body.email).toMatch(/@example\.(com|net|org)$/)
     await s.close()
@@ -288,6 +327,27 @@ describe('the guard and the credentials', () => {
     expect(await status(`127.0.0.1:${port}`)).toBe(200)
   })
 
+  it('answers no page of another site, so a web page cannot make it send a request', async () => {
+    const { port } = new URL(sosie.address)
+    const status = (headers: Record<string, string>) =>
+      new Promise<number>((resolve, reject) => {
+        httpRequest({ host: '127.0.0.1', port, path: '/v1/users', headers: { host: `localhost:${port}`, ...headers } }, (res) => {
+          res.resume()
+          resolve(res.statusCode!)
+        })
+          .on('error', reject)
+          .end()
+      })
+    const before = api.requests.length
+    expect(await status({ origin: 'https://attacker.example' })).toBe(403)
+    expect(await status({ origin: 'null' })).toBe(403)
+    expect(await status({ 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'no-cors' })).toBe(403)
+    expect(api.requests.length).toBe(before)
+    // A page of this machine, an app on another port, may.
+    expect(await status({ origin: 'http://127.0.0.1:5173', 'sec-fetch-site': 'cross-site' })).toBe(200)
+    expect(await status({ origin: 'http://localhost:3000', 'sec-fetch-site': 'same-site' })).toBe(200)
+  })
+
   it('refuses a path it cannot decode, instead of failing', async () => {
     expect(await sosie.get('/users/%zz')).toMatchObject({ status: 400, body: { error: 'The path has a % that does not start an escape (%20).' } })
   })
@@ -296,10 +356,10 @@ describe('the guard and the credentials', () => {
     const missing = await sosie.get('/missing')
     expect(missing.status).toBe(404)
     expect(missing.body.error).not.toMatch(/canary/)
-    expect(await sosie.get('/avatar')).toMatchObject({
-      status: 502,
-      body: { error: 'The API answered with image/png; Sosie fakes JSON only, so it does not pass it on.' },
-    })
+    const notJson = { status: 502, body: { error: 'The API did not answer with JSON; Sosie fakes JSON only, so it does not pass it on.' } }
+    expect(await sosie.get('/avatar')).toMatchObject(notJson)
+    // The API's content type is its own text, and is not shown either.
+    expect(await sosie.get('/odd-type')).toMatchObject(notJson)
   })
 })
 
@@ -365,6 +425,17 @@ describe('the MCP tool', () => {
     expect(result.status).toBe(200)
     expect(result.body.data).toHaveLength(3)
     seen.push(result)
+  })
+
+  it('follows a link Sosie returned', async () => {
+    const running: Running = { kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
+    const { href } = (await sosie.get('/self')).body
+    expect(href.startsWith(`${new URL(sosie.address).origin}/v1/`)).toBe(true)
+    const result = (await rest.tools![0]!.run({ path: href }, running)) as Json
+    expect(result.status).toBe(200)
+    expect(api.requests.at(-1)!.path).toBe('/v1/users/1')
+    seen.push(result)
+    await expect(rest.tools![0]!.run({ path: 'http://attacker.example/v1/users' }, running)).rejects.toThrow('The path must be a path of the API')
   })
 
   it('reaches Sosie only, whatever the path says', async () => {

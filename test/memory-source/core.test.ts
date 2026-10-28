@@ -202,6 +202,38 @@ describe('fakes by type', async () => {
     expect(echoed[1]).toBe('theme')
   })
 
+  it('a JSON key that holds a value the request turned back is faked', async () => {
+    const { faker } = await serve()
+    const name = faker.value('Quillon Vantablack', { id: 'users.name', name: 'name', type: { kind: 'string' } }) as string
+    const city = faker.value('vantaville', { id: 'users.city', name: 'city', type: { kind: 'string' } }) as string
+    const scope = faker.request(`SELECT 1 FROM users WHERE name = '${name}' AND city = '${city}'`)
+    expect(scope.lookup(name)).toBe('Quillon Vantablack')
+    expect(scope.lookup(city)).toBe('vantaville')
+    for (const key of ['vantaville_weather', 'byVantaville', 'quillonvantablack', 'QUILLON-VANTABLACK', 'teamQuillonVantablack', 'xvantavillex']) {
+      expect(scope.turnedBack(key), key).toBe(true)
+    }
+    // A word of a value is no echo of it: it may be any key's (by-email turned back leaves email a key).
+    for (const key of ['theme', 'quill', 'vantablack', 'profile_id']) expect(scope.turnedBack(key), key).toBe(false)
+  })
+
+  it('a field that passes shows the fake the client sent, not a value the request turned back', async () => {
+    const { faker } = await serve('pass:\n  - users.city\n  - users.account\n  - users.score\n')
+    const email = faker.value('quill.vantablack@canary-mail.test', { id: 'users.email', name: 'email', type: { kind: 'string' } }) as string
+    const city = { id: 'users.city', name: 'city', type: { kind: 'string' } } as const
+    const scope = faker.request(`SELECT city FROM users WHERE email = '${email}'`)
+    expect(scope.lookup(email)).toBe('quill.vantablack@canary-mail.test')
+    expect(faker.value('QUILL.VANTABLACK@canary-mail.test', city, scope)).toBe(email)
+    expect(faker.value('Results for quill.vantablack@canary-mail.test.', { ...city, id: 'users.account' }, scope)).toBe(`Results for ${email}.`)
+    // Anything else in a field that passes stays, and so does a short number, which may be any count.
+    expect(faker.value('Reykjavik', city, scope)).toBe('Reykjavik')
+    const id = faker.value('7', { id: 'users.id', name: 'id', type: { kind: 'integer' } }) as string
+    const byId = faker.request(`SELECT score FROM users WHERE id = ${id}`)
+    byId.lookup(id, { id: 'users.id', name: 'id', type: { kind: 'integer' } })
+    expect(faker.value('7', { id: 'users.score', name: 'score', type: { kind: 'decimal' } }, byId)).toBe('7')
+    // Without a request, as in a session's own reads, nothing changes.
+    expect(faker.value('quill.vantablack@canary-mail.test', city)).toBe('quill.vantablack@canary-mail.test')
+  })
+
   it('a value of another form than its type, as an API may send, is faked whole', async () => {
     const { faker } = await serve()
     // An "e" in text is no exponent, and a "/" no prefix length: nothing of either value stays.

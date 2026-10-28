@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { localRequest, readCapped, why } from '../src/http.js'
+import { crossSite, localRequest, readCapped, why } from '../src/http.js'
 import { capLists } from '../src/mcp.js'
 
 /** A body sent in chunks, with no content-length, as a chunked answer is. */
@@ -45,6 +45,20 @@ describe('HTTP sources', () => {
       expect(localRequest(host, '127.0.0.1')).toBe(false)
     }
     expect(localRequest('dev-box.internal:7674', '0.0.0.0')).toBe(true)
+    // Any 127. address is this machine's own, and as guarded as 127.0.0.1.
+    expect(localRequest('rebound.attacker.test', '127.0.0.2')).toBe(false)
+    expect(localRequest('127.0.0.2:7674', '127.0.0.2')).toBe(true)
+  })
+
+  it('tell a page of another site from a page of this machine, and from a client that is no browser', () => {
+    expect(crossSite({ origin: 'https://attacker.example' }, '127.0.0.1')).toBe(true)
+    expect(crossSite({ origin: 'null' }, '127.0.0.1')).toBe(true)
+    expect(crossSite({ 'sec-fetch-site': 'cross-site' }, '127.0.0.1')).toBe(true)
+    expect(crossSite({ origin: 'http://127.0.0.1:5173', 'sec-fetch-site': 'cross-site' }, '127.0.0.1')).toBe(false)
+    expect(crossSite({ origin: 'http://localhost:3000', 'sec-fetch-site': 'same-site' }, '127.0.0.1')).toBe(false)
+    expect(crossSite({ origin: 'http://[::1]:3000' }, '::1')).toBe(false)
+    expect(crossSite({}, '127.0.0.1')).toBe(false)
+    expect(crossSite({ origin: 'https://attacker.example' }, '0.0.0.0')).toBe(false)
   })
 
   it('cut every list of a body for an agent, nested ones too', () => {

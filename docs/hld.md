@@ -169,7 +169,8 @@ substituted, links an API returns, and transcripts kept afterwards.
   visible.
 - **Who can reach the endpoint.** It has no password. On 127.0.0.1, only this
   machine can, and an HTTP endpoint answers only requests addressed to
-  localhost, so a web page cannot rebind its name to it; on another `--host`,
+  localhost, and from no page of another site, so a web page can neither
+  rebind its name to it nor make it send a request; on another `--host`,
   anyone who reaches that address can query the fakes and filter on the real
   values.
 - **An API's own structure and behaviour.** Its paths, its base path (in

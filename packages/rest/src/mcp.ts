@@ -10,11 +10,17 @@ export const requestTool: McpTool = {
   description:
     'Send a GET request to the API through Sosie and get its JSON back. Every value is a consistent fake: ' +
     'the same real value is always the same fake, so an id you saw finds its record again in a path or query.',
-  input: { path: { description: 'The path and query, such as /users?limit=10.' } },
+  input: { path: { description: 'The path and query, such as /users?limit=10, or a link Sosie returned.' } },
   async run(input, running) {
     const base = new URL(running.address)
     const basePath = base.pathname.replace(/\/$/, '')
     let path = input.path ?? '/'
+    // A link Sosie gave is a URL of its own: its path and query are the request.
+    if (/^https?:\/\//i.test(path)) {
+      const given = new URL(path)
+      if (given.origin !== base.origin) throw new Error('The path must be a path of the API, such as /users?limit=10.')
+      path = `${given.pathname}${given.search}`
+    }
     if (!path.startsWith('/')) path = `/${path}`
     if (basePath && path !== basePath && !path.startsWith(`${basePath}/`) && !path.startsWith(`${basePath}?`)) path = `${basePath}${path}`
     const url = new URL(path, base.origin)

@@ -3,7 +3,7 @@ import { merged, refName, refOf, referenceOf, type Api, type Node } from './open
 import { idField, wordName, type Route } from './paths.js'
 
 /** Keys of a response's root that wrap its rows: { data: [...] }. A field below one is named as if it were not there. */
-const ENVELOPES = new Set(['data', 'items', 'results', 'records', 'rows', 'content', 'values', 'entries', 'hits', 'nodes', 'list'])
+export const ENVELOPES = new Set(['data', 'items', 'results', 'records', 'rows', 'content', 'values', 'entries', 'hits', 'nodes', 'list'])
 
 /** Keys that are values fake in a domain of their own, each to one fake. */
 const MAP_KEY: Field = { id: '$key', name: 'key', type: { kind: 'string' } }
