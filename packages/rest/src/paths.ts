@@ -12,6 +12,23 @@ export function singular(word: string): string {
 /** A path segment that is a value, not a name: a number or a UUID. */
 export const VALUE_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
 
+/**
+ * Whether a decoded segment is one segment to any server: no / or \ in it, and not . or ..; an
+ * API, or a proxy before it, that decodes %2F and resolves .. would read another path than Sosie.
+ */
+export function oneSegment(segment: string): boolean {
+  return !/[/\\]/.test(segment) && segment !== '.' && segment !== '..'
+}
+
+/** The segments of a path, decoded; undefined when a % starts no escape. */
+export function segmentsOf(path: string): string[] | undefined {
+  try {
+    return path.split('/').filter(Boolean).map(decodeURIComponent)
+  } catch {
+    return undefined
+  }
+}
+
 /** What a request path names. */
 export interface Route {
   /** The entity its response is about. */

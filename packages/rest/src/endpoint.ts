@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { crossSite, localRequest, pacer, why, type Endpoint, type Faker, type Field, type RequestScope } from '@sosie/core'
 import { ENVELOPES, fakeBody, queryField, type FakeContext } from './fake.js'
 import { referenceOf, type Api } from './openapi.js'
-import { PAGING, PATH_WORD, QUERY_NAME, route, singular, valueByHabit, wordName, type Route } from './paths.js'
+import { oneSegment, PAGING, PATH_WORD, QUERY_NAME, route, segmentsOf, singular, valueByHabit, wordName, type Route } from './paths.js'
 import type { RestUpstream } from './upstream.js'
 
 export interface RestContext {
@@ -14,6 +14,8 @@ export interface RestContext {
   log: (line: string) => void
 }
 
+/** A segment, as sent or as Sosie turns it back, that the API could read as more than one, or as a step up. */
+const OTHER_PATH = 'A segment of the path holds a / or \\, or is . or ..: the API could read it as another path, so Sosie does not send it.'
 /** Words Sosie remembers as names of the API's, at most: those a client sent are added as the API answers them. */
 const MAX_KNOWN = 10_000
 /** A word that looks like a collection's name: lowercase, plural. */
@@ -119,6 +121,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     if (basePath && !under(incoming.pathname)) return send(res, 404, { error: `Sosie serves the API under ${basePath}.` })
     const sent = segmentsOf(incoming.pathname.slice(basePath.length))
     if (!sent) return send(res, 400, { error: 'The path has a % that does not start an escape (%20).' })
+    if (!sent.every(oneSegment)) return send(res, 400, { error: OTHER_PATH })
     const scope = ctx.faker.request(`${sent.join('/')}?${[...incoming.searchParams].flat().join('&')}`)
     /**
      * The real value behind a fake: in its field, and text, not a bare number, anywhere too. A value
@@ -137,11 +140,14 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const rt = route(routed, operations, (word) => (unseen.has(word) && !documented(word) ? '*' : entityFor(word)), (segment, i, afterName) =>
       words[i] === undefined && (valueByHabit(segment, afterName, known) || scope.lookup(segment) !== undefined),
     )
-    const real = routed.map((segment, i) => {
+    const turned = routed.map((segment, i) => {
       const field = rt.values.get(i)
       // A value is looked up in its field; text, not a bare number, anywhere too: /users/7 never reads another entity's 7.
-      return encodeURIComponent((field && lookup(segment, field)) ?? segment)
+      return (field && lookup(segment, field)) ?? segment
     })
+    // A value the API holds may be a path too; sent in one segment, it could name another.
+    if (!turned.every(oneSegment)) return send(res, 400, { error: OTHER_PATH })
+    const real = turned.map(encodeURIComponent)
     const query = new URLSearchParams()
     const names: string[] = []
     for (const [sentName, value] of incoming.searchParams) {
@@ -206,7 +212,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
 
   const accept = (req: IncomingMessage, res: ServerResponse) => {
     handle(req, res).catch((error: Error) => {
-      ctx.log(`Cannot read the API: ${why(error)}`)
+      // Sosie's own credentials in the API's query (?api_key=) stay out of the terminal too.
+      const said = [...ctx.upstream.params.values()].filter(Boolean).reduce((text, value) => text.split(value).join('…').split(encodeURIComponent(value)).join('…'), why(error))
+      ctx.log(`Cannot read the API: ${said}`)
       if (!res.headersSent) send(res, 502, { error: 'Sosie cannot reach the API. The terminal running Sosie says why.' })
       else res.end()
     })
@@ -236,15 +244,6 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
 function listOf(body: unknown, collection: string): boolean {
   if (Array.isArray(body)) return true
   return !!body && typeof body === 'object' && Object.entries(body).some(([k, v]) => Array.isArray(v) && (ENVELOPES.has(k) || k === collection))
-}
-
-/** The segments of a path, decoded; undefined when a % starts no escape. */
-function segmentsOf(path: string): string[] | undefined {
-  try {
-    return path.split('/').filter(Boolean).map(decodeURIComponent)
-  } catch {
-    return undefined
-  }
 }
 
 /**

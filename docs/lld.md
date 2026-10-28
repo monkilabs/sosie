@@ -299,8 +299,16 @@ same real value gives the same fake in every session.
 
 A field that passes still never shows a value the request turned back from a
 fake: an answer that holds it, whole or within text and whatever its case, is
-echoing what the client sent, and shows the fake the client sent instead. A
-number counts when it is six digits or more; a shorter one may be any count.
+echoing what the client sent, and shows the fake the client sent instead. One
+that holds it in another form, escaped as a URL or a form escapes it (`%40`,
+`+`) or with other separators (`quillon-vantablack`), is faked whole, as a
+computed value is. What an answer makes of it beyond that, a part of it (an
+email's local part) or it encoded (base64) or reversed, is not caught: a field
+passes because the team chose to show it. A number counts when it is six
+digits or more; a shorter one may be any count. The values a request turned
+back are indexed once, so each value is checked against all of them in time of
+its own length: a query by a thousand fakes that returns a thousand rows takes
+no longer to check than it takes to fake.
 
 ## Core: store
 
@@ -598,7 +606,11 @@ For the team's own HTTP API, where the database's people come back as JSON.
 A local HTTP address with the API's own paths: `http://localhost:7674/v1/users`
 reads `https://api.internal/v1/users`. Only `GET` and `HEAD` reach the API;
 anything else gets `405` and never leaves Sosie. Requests outside the base path
-get `404`, and a path whose `%` starts no escape `400`. On this machine's own
+get `404`, and a path whose `%` starts no escape `400`. So does a segment that
+decodes to one with a `/` or `\` in it, or to `.` or `..`, and a fake in a
+segment that stands for such a value: an API, or a proxy before it, that
+decodes `%2F` and resolves `..` would read another path than Sosie does, one
+outside the base or of another kind. On this machine's own
 address, a request whose `Host` is not `localhost`, a `127.` address or `[::1]`
 gets `403`: a web page that rebinds its own name to this machine cannot read the
 fakes. So does a browser's request for a page of another site (an `Origin` that
@@ -613,8 +625,10 @@ holds them, one `Name: value` per line (`Authorization: Bearer …`), and a user
 and password in the URL become a Basic header; a query on it (`?api_key=…`) goes
 with every request and is never shown, links included. Headers the client sends,
 `Authorization` included, are not passed on. Redirects are followed inside
-Sosie, within the API's origin and its base path only, so credentials never go
-elsewhere and the client never sees a real URL. Each request has the statement timeout (30 s) and
+Sosie, within the API's origin and its base path only, never to an address with
+a user name in it nor through a segment that decodes to a `/` or `..`, so
+credentials never go elsewhere and the client never sees a real URL. What the
+terminal says when the API cannot be read leaves the query credentials out. Each request has the statement timeout (30 s) and
 a body cap (20 MB), counted as the body arrives.
 
 ### Schema
@@ -726,6 +740,8 @@ would turn into that field's real value, which the passing field would show.
   for a collection's name, and links show it.
 - An endpoint the API serves for `GET` that writes is the API's to guard: Sosie
   sends every `GET` on.
+- An id with a `/` in it (`group%2Fproject`, as GitLab names projects) cannot
+  be asked for by path; the API's other id for it can.
 
 ## Adding a source after v0.1
 

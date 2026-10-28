@@ -291,6 +291,17 @@ describe('the guard and the credentials', () => {
     expect(api.requests.at(-1)!.path).toBe('/v1/users?api_key=k-live-8842')
     expect(body.next).toBe(`${keyed.address}/users?page=2`)
     expect(keyed.address).not.toContain('k-live')
+    // Nor in the terminal: a redirect with a user and password in it is refused, and why is said without the query.
+    const said: string[] = []
+    const write = process.stderr.write.bind(process.stderr)
+    process.stderr.write = ((line: string) => said.push(String(line)) > 0) as typeof process.stderr.write
+    try {
+      expect((await keyed.get('/userinfo')).status).toBe(502)
+    } finally {
+      process.stderr.write = write
+    }
+    expect(said.join('')).toMatch(/Cannot read the API: The API redirected to an address with a user name in it/)
+    expect(said.join('')).not.toMatch(/k-live|pass@/)
     await keyed.close()
   })
 
@@ -304,6 +315,9 @@ describe('the guard and the credentials', () => {
     // Nor to the API's origin outside its base path, where a client's own request gets 404.
     expect((await s.get('/out-of-base')).status).toBe(502)
     expect(redirecting.requests.map((r) => r.path)).not.toContain('/admin/secret')
+    // Nor by a segment that leaves it at an API that decodes %2F.
+    expect((await s.get('/sneaky')).status).toBe(502)
+    expect(redirecting.requests.map((r) => r.path)).not.toContain('/v1/..%2F..%2Fadmin%2Fsecret')
     // Within the API's origin, Sosie follows it.
     expect((await s.get('/moved')).body.email).toMatch(/@example\.(com|net|org)$/)
     await s.close()
@@ -350,6 +364,22 @@ describe('the guard and the credentials', () => {
 
   it('refuses a path it cannot decode, instead of failing', async () => {
     expect(await sosie.get('/users/%zz')).toMatchObject({ status: 400, body: { error: 'The path has a % that does not start an escape (%20).' } })
+  })
+
+  it('refuses a segment the API could read as another path: an escaped / or \\, or . or ..', async () => {
+    const before = api.requests.length
+    // At an API, or a proxy before it, that decodes %2F and resolves .., these leave the base or name another kind.
+    for (const path of ['/x%2F..%2F..%2Fadmin%2Fsecret', '/countries/x%2Fusers%2F1', '/users/..%5C..%5Cadmin', '/users/%2E%2E%2F']) {
+      expect(await sosie.get(path), path).toMatchObject({ status: 400, body: { error: expect.stringMatching(/another path/) } })
+    }
+    expect(api.requests.slice(before)).toEqual([])
+    // Nor does a value the API holds go in one segment when it is a path itself.
+    const [note] = (await sosie.get('/notes')).body
+    // The fake is one segment; only the value it stands for is not.
+    expect(note.login).not.toMatch(/admin|[/\\]/)
+    const asked = api.requests.length
+    expect(await sosie.get(`/notes/${encodeURIComponent(note.login)}`)).toMatchObject({ status: 400, body: { error: expect.stringMatching(/another path/) } })
+    expect(api.requests.slice(asked)).toEqual([])
   })
 
   it('fakes error bodies, and does not pass on what it cannot fake', async () => {

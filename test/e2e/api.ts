@@ -204,6 +204,18 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
       return res.end()
     }
     if (path === '/admin/secret') return json(200, { secret: 'Quillon' })
+    // A redirect that stays under the base as written, and leaves it at an API that decodes %2F and resolves ..
+    if (path === '/sneaky') {
+      res.writeHead(302, { location: '/v1/..%2F..%2Fadmin%2Fsecret' })
+      return res.end()
+    }
+    // A redirect with a user and password in it: fetch refuses it, and says so with the whole URL.
+    if (path === '/userinfo') {
+      res.writeHead(302, { location: `${origin.replace('//', '//user:pass@')}/v1/users/1` })
+      return res.end()
+    }
+    // A login someone chose that is a path: a client's fake of it, turned back, would be one in a segment.
+    if (path === '/notes') return json(200, [{ id: 1, login: '../../admin/secret' }])
     if (path === '/odd-type') {
       res.writeHead(200, { 'content-type': 'application/x-quillon-vantablack' })
       return res.end('{}')
