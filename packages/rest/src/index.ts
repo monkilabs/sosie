@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { upstreamHeaders, type Connection, type Source } from '@sosie/core'
+import { upstreamHeaders, why, type Connection, type Source } from '@sosie/core'
 import { startEndpoint } from './endpoint.js'
 import { requestTool } from './mcp.js'
 import { parseDocument, readApi, type Api } from './openapi.js'
@@ -39,21 +39,31 @@ export const rest: Source = {
     } else {
       let reached = false
       let reason = ''
+      let unreadable = ''
       for (const path of DISCOVER) {
+        let found
         try {
           const answer = await api.get(new URL(path, base))
           reached = true
           if (answer.status !== 200) continue
-          doc = readApi(parseDocument(answer.body))
+          found = parseDocument(answer.body)
+        } catch (error) {
+          if (!reached) reason = why(error)
+          continue
+        }
+        try {
+          doc = readApi(found)
           break
         } catch (error) {
-          if (!reached) reason = (error as Error).message
+          unreadable ||= `${path} (${(error as Error).message})`
         }
       }
       if (!reached) throw new Error(`Cannot reach ${label}: ${reason}`)
       if (!doc) {
         warnings.push(
-          'No OpenAPI document found: fields are named by where values sit (user.email). Set SOSIE_OPENAPI to a file or URL to name them from one.',
+          unreadable
+            ? `The OpenAPI document at ${unreadable} cannot be read: fields are named by where values sit (user.email).`
+            : 'No OpenAPI document found: fields are named by where values sit (user.email). Set SOSIE_OPENAPI to a file or URL to name them from one.',
         )
       }
     }

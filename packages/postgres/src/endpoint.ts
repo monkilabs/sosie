@@ -22,11 +22,9 @@ export async function startEndpoint(
     void session.run().finally(() => sessions.delete(session))
   }
 
-  const servers = [await listenOn(listen.host, listen.port, accept)]
+  const servers = await listenLocal(listen, accept)
   const bound = servers[0]!.address()
   const port = bound && typeof bound === 'object' ? bound.port : listen.port
-  // The address says localhost, which many systems resolve to ::1 first: answer there too.
-  if (listen.host === '127.0.0.1') await listenOn('::1', port, accept).then((s) => servers.push(s), () => {})
   const host = listen.host === '127.0.0.1' || listen.host === '::1' ? 'localhost' : listen.host
   return {
     address: `postgres://${host.includes(':') ? `[${host}]` : host}:${port}/${encodeURIComponent(database)}`,
@@ -35,6 +33,27 @@ export async function startEndpoint(
       for (const socket of sockets) socket.destroy()
       await Promise.all(closed)
     },
+  }
+}
+
+/**
+ * Listen where the address will say. It says localhost, which many systems resolve to ::1 first, so on
+ * 127.0.0.1 Sosie answers on ::1 too; another program on that port's ::1 would get localhost's clients,
+ * so the port counts as busy, and a port Sosie picks itself (0) is picked again.
+ */
+async function listenLocal(listen: { host: string; port: number }, accept: (socket: Socket) => void): Promise<Server[]> {
+  for (let tries = 0; ; tries++) {
+    const first = await listenOn(listen.host, listen.port, accept)
+    const bound = first.address()
+    if (listen.host !== '127.0.0.1' || !bound || typeof bound !== 'object') return [first]
+    try {
+      return [first, await listenOn('::1', bound.port, accept)]
+    } catch (error) {
+      // No IPv6 here: localhost is 127.0.0.1.
+      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') return [first]
+      await new Promise<void>((resolve) => first.close(() => resolve()))
+      if (listen.port !== 0 || tries >= 10) throw error
+    }
   }
 }
 

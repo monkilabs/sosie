@@ -27,7 +27,10 @@ export function linkByName(entities: Entity[]): void {
     for (const field of entity.fields) {
       if (field.references) continue
       const target = referenceOf(field.name, (name) => byName.get(name))
-      if (target && target.id !== entity.id && target.fields.some((f) => f.id === `${target.id}.id`)) field.references = `${target.id}.id`
+      if (target && target.id !== entity.id && target.fields.some((f) => f.id === `${target.id}.id`)) {
+        field.references = `${target.id}.id`
+        field.guessed = true
+      }
     }
   }
 }

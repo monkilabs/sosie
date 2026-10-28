@@ -218,14 +218,24 @@ describe('sosie, when something is wrong', () => {
   it('starts a second Sosie on the next free port, and MCP serves both', async () => {
     const shared = mkdtempSync(join(tmpdir(), 'sosie-two-'))
     const first = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: shared }, [])
-    const second = await start({ SOSIE_UPSTREAM: inject('admin'), SOSIE_HOME: shared }, [])
-    expect(Number(new URL(second.address).port)).toBeGreaterThan(Number(new URL(first.address).port))
-    const mcp = await mcpClient(shared)
-    const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'countries' } })))
-    expect(all.sources.map((s: { address: string }) => s.address)).toEqual([second.address, first.address])
-    await mcp.close()
-    await stop(second.child)
-    await stop(first.child)
+    const second = await start({ SOSIE_UPSTREAM: inject('admin'), SOSIE_HOME: shared }, []).catch(async (error) => {
+      await stop(first.child)
+      throw error
+    })
+    try {
+      // Other programs may hold and free ports meanwhile: the second only needs one of its own.
+      expect(new URL(second.address).port).not.toBe(new URL(first.address).port)
+      const mcp = await mcpClient(shared)
+      try {
+        const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'countries' } })))
+        expect(all.sources.map((s: { address: string }) => s.address)).toEqual([second.address, first.address])
+      } finally {
+        await mcp.close()
+      }
+    } finally {
+      await stop(second.child)
+      await stop(first.child)
+    }
   })
 
   it('counts the fields that pass', async () => {

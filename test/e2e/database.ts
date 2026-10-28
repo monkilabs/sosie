@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import EmbeddedPostgres from 'embedded-postgres'
+import type EmbeddedPostgres from 'embedded-postgres'
 import pg from 'pg'
 import type { TestProject } from 'vitest/node'
 
@@ -23,8 +23,17 @@ export default async function setup(project: TestProject) {
   let server = process.env.SOSIE_TEST_DATABASE_URL
   let embedded: EmbeddedPostgres | undefined
   if (!server) {
+    // embedded-postgres hooks the process's exit when imported, and its beforeExit hook exits with 0,
+    // which would turn a failed run green: import it only when it is needed, and take its exit hooks
+    // off. The teardown below stops the server; its hooks on signals stay, for Ctrl+C.
+    const events = ['beforeExit', 'exit'] as const
+    const hooked = events.map((event) => process.listeners(event))
+    const { default: Embedded } = await import('embedded-postgres')
+    events.forEach((event, i) => {
+      for (const listener of process.listeners(event)) if (!hooked[i]!.includes(listener)) process.off(event, listener)
+    })
     const port = await freePort()
-    embedded = new EmbeddedPostgres({
+    embedded = new Embedded({
       databaseDir: mkdtempSync(join(tmpdir(), 'sosie-pg-')),
       port,
       user: 'postgres',

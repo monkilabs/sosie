@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { localRequest, readCapped } from '../src/http.js'
+import { localRequest, readCapped, why } from '../src/http.js'
 import { capLists } from '../src/mcp.js'
 
 /** A body sent in chunks, with no content-length, as a chunked answer is. */
@@ -30,6 +30,13 @@ describe('HTTP sources', () => {
     expect(pulled).toBeLessThan(20)
     const declared = new Response('x', { headers: { 'content-length': '999999' } })
     await expect(readCapped(declared, 1000)).rejects.toThrow('The API answered with 999999 bytes; Sosie fakes up to 1000.')
+  })
+
+  it('say why a request failed, with the cause fetch keeps', () => {
+    expect(why(new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:9'), { code: 'ECONNREFUSED' }) }))).toBe(
+      'fetch failed: connect ECONNREFUSED 127.0.0.1:9',
+    )
+    expect(why(new Error('The API redirected too many times.'))).toBe('The API redirected too many times.')
   })
 
   it('answer requests for this machine only, when listening on it', () => {

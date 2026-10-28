@@ -1,6 +1,8 @@
 import { capLists, type McpTool } from '@sosie/core'
 
 const MAX_ITEMS = 200
+/** How long the tool waits for Sosie: less than MCP clients wait for a tool. */
+const TIMEOUT = 50_000
 
 /** The REST source's MCP tool: a GET through the running endpoint, never to the API itself. */
 export const requestTool: McpTool = {
@@ -18,7 +20,9 @@ export const requestTool: McpTool = {
     const url = new URL(path, base.origin)
     // A path such as //host/x names another host: the tool reaches Sosie only.
     if (url.origin !== base.origin) throw new Error('The path must be a path of the API, such as /users?limit=10.')
-    const response = await fetch(url)
+    const response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT) }).catch((error: Error) => {
+      throw new Error(error.name === 'TimeoutError' ? `Sosie did not answer at ${running.address} in ${TIMEOUT / 1000} s.` : `Cannot reach Sosie at ${running.address}.`)
+    })
     const text = await response.text()
     let body: unknown = text
     try {

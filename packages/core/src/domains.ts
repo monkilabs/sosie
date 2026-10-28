@@ -42,6 +42,8 @@ export function planner(schema: Schema, rules: Rules): (field: Field) => FieldPl
         : passes(field.references)
           ? PASS
           : { domain: field.references, unique: true }
+      // A guess from a name may be wrong: it never lets a value pass.
+      if (field.guessed && plan.domain === null) plan = { domain: field.references, unique: true }
     } else {
       const given = field.format && (FORMATS as readonly string[]).includes(field.format) ? (field.format as Format) : undefined
       const format = rules.format.get(field.id) ?? given ?? (field.type.kind === 'string' ? formatByName(field, entity) : undefined)

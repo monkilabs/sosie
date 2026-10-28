@@ -99,6 +99,27 @@ describe('an OpenAPI document', () => {
     expect(api.schema.entities.find((e) => e.id === 'Order')!.fields.find((f) => f.name === 'user_id')!.references).toBe('User.id')
   })
 
+  it('reads a schema that refers to itself, as a nullable reference does', () => {
+    const api = readApi({
+      openapi: '3.0.3',
+      paths: {},
+      components: {
+        schemas: {
+          Employee: {
+            type: 'object',
+            properties: {
+              id: { type: 'integer' },
+              email: { type: 'string' },
+              manager: { allOf: [{ $ref: '#/components/schemas/Employee' }], nullable: true },
+              reports: { type: 'array', items: { allOf: [{ $ref: '#/components/schemas/Employee' }] } },
+            },
+          },
+        },
+      },
+    })
+    expect(api.schema.entities[0]!.fields.map((f) => f.name)).toEqual(['id', 'email'])
+  })
+
   it('reads the GET operations, the most specific first', () => {
     expect(api.operations.map((o) => [o.template, o.entity])).toEqual([
       ['/users/me', 'User'],
