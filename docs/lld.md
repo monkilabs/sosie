@@ -358,7 +358,7 @@ lists it, for when several Sosies of a kind run; without it, the newest.
 | `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice; every value a consistent fake |
 
-When Sosie is not running, both say so, and how to start it.
+When Sosie is not running, every tool says so, and how to start it.
 
 ## Postgres source
 
