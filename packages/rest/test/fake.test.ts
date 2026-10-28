@@ -11,7 +11,7 @@ describe('faking a body', () => {
     const store = Store.open(join(mkdtempSync(join(tmpdir(), 'sosie-rest-fake-')), 'store'))
     const schema = { entities: [] }
     const faker = createFaker({ schema, rules: loadRules('', schema, 'sosie.yml', { learns: true }), store })
-    const ctx: FakeContext = { faker, api: undefined, fields: new Map(), entityFor: (w) => w, url: () => undefined, maxItems: 10_000, pace: pacer(100) }
+    const ctx: FakeContext = { faker, api: undefined, fields: new Map(), entityFor: (w) => w, url: () => undefined, maxItems: 10_000, pace: pacer(0) }
     let done = false
     const faking = fakeBody(
       Array.from({ length: 2000 }, (_, i) => ({ id: i + 1 })),
