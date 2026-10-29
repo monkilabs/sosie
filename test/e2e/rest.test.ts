@@ -341,12 +341,14 @@ describe('the guard and the credentials', () => {
       query: '?api_key=opensesame',
       userinfo: 'robot:sunshine99@',
       rules: 'pass:\n  - echo-credential.note\n',
-      env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Lower: sesamesecretword` },
+      // A Rails-style header writes its token in quotes; a header that is no credential (X-Tenant) holds none.
+      env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Api-Key: Token token="sesamesecretword"\nX-Tenant: production` },
     })
     const { body } = await s.get('/echo-credentials')
     expect(api.requests.at(-1)!.path).toBe('/v1/echo-credentials?api_key=opensesame')
-    expect(Object.keys(body)).toHaveLength(5)
+    expect(Object.keys(body)).toHaveLength(6)
     expect(body.theme).toBeDefined()
+    expect(body.production).toBeDefined()
     expect(JSON.stringify(body)).not.toMatch(/sesamesecretword|opensesame|sunshine99/)
     await s.close()
   })
@@ -451,6 +453,34 @@ describe('the guard and the credentials', () => {
 
   it('keeps a key __proto__ as the API’s data, not the object’s prototype', async () => {
     expect(Object.keys((await sosie.get('/proto')).body)).toEqual(['__proto__', 'constructor', 'x'])
+  })
+
+  it('applies no entity’s rule to an answer a word in a value’s place may have made another kind’s', async () => {
+    // Without a document: /products/reviews reads as a product by REST's habit, but holds reviews.
+    const lenient = await startRest(api, { rules: 'pass:\n  - product.*\n' })
+    expect((await lenient.get('/products')).body).toEqual([{ id: 1, name: 'Plain Widget' }])
+    const reviews = await lenient.get('/products/reviews')
+    expect(reviews.status).toBe(200)
+    expect(canariesIn(JSON.stringify(reviews.body))).toEqual([])
+    await lenient.close()
+    // With one: /users/reviews matches /users/{id}, but holds reviews, and not a User's shape either.
+    const documented = await startApi({ withOpenapi: true })
+    const s = await startRest(documented, { rules: 'pass:\n  - User.name\n  - User.email\n' })
+    const listed = await s.get('/users/reviews')
+    expect(listed.status).toBe(200)
+    expect(canariesIn(JSON.stringify(listed.body))).toEqual([])
+    await s.close()
+    await documented.close()
+  })
+
+  it('sends no method override, which asks a framework to write', async () => {
+    const before = api.requests.length
+    for (const name of ['_method', 'X-HTTP-Method-Override']) expect((await sosie.get(`/users/1?${name}=DELETE`)).status, name).toBe(400)
+    expect(api.requests.length).toBe(before)
+  })
+
+  it('says so when the API’s JSON is nested too deep to read', async () => {
+    expect(await sosie.get('/deep')).toMatchObject({ status: 502, body: { error: 'The API answered with JSON nested too deep for Sosie to read.' } })
   })
 
   it('applies no field’s rule to an error’s body, whatever keys it shares with the record', async () => {

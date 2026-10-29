@@ -24,7 +24,7 @@ export const rest: Source = {
     base.username = base.password = base.search = base.hash = ''
     base.pathname = base.pathname.replace(/\/?$/, '/')
     const api = new RestUpstream(base, headers, options.statementTimeout, params)
-    const secrets = secretParts([...Object.values(headers), ...params.values(), user, password])
+    const secrets = secretParts(headers, [...params.values(), user, password])
     const label = `${base.host}${base.pathname.replace(/\/$/, '')}`
 
     const warnings: string[] = []

@@ -259,6 +259,10 @@ so a typo never passes data silently. Every problem is listed at once:
 A field that shares another's values cannot pass alone:
 `sosie.yml: orders.user_id passes but users.id, whose values it shares, does not. List both or neither.`
 
+Nor can what names no entity, as an API's error body (`*.error`), or Sosie's own
+words for an API's (`$path`, `$query.value`): a source that learns its fields
+keeps a rule it has not met yet, but never one of these.
+
 ## Start-up
 
 1. Read the upstream; pick the source that matches it.
@@ -380,7 +384,8 @@ paths and query names are structure, and not looked for. A real value that is
 a common word held as text rather than an enum (a role `admin`, a status
 `paid`) is looked for like any other, so a transcript that uses the word is a
 finding: such a field belongs under `pass` in `sosie.yml`, and a field that
-passes is neither stored nor looked for. It never prints the real value, and
+passes is neither stored nor looked for. A finding from a domain of no entity
+(`*.error`, an error's body) cannot pass: it may be any value an API quotes. It never prints the real value, and
 exits 1 if it finds one, so CI can run it.
 
 ```
@@ -632,7 +637,9 @@ get `404`, and a path whose `%` starts no escape `400`. So does a segment that
 decodes to one with a `/` or `\` in it, or to `.` or `..`, and a fake in a
 segment that stands for such a value: an API, or a proxy before it, that
 decodes `%2F` and resolves `..` would read another path than Sosie does, one
-outside the base or of another kind. On this machine's own
+outside the base or of another kind. A method override in the query
+(`?_method=DELETE`), which some frameworks run instead of `GET`, gets `400`. On
+this machine's own
 address, a request whose `Host` is not `localhost`, a `127.` address or `[::1]`
 gets `403`: a web page that rebinds its own name to this machine cannot read the
 fakes. So does a browser's request for a page of another site (an `Origin` that
@@ -693,9 +700,13 @@ email) is faked, each to its own fake. Every key of a map the document declares
 value the request turned back, whatever its case and separators
 (`quillon_profile`, `quillonSettings` for `quillon`): an API that answers with
 what it was asked never hands the real value back. So is a key that holds one
-of Sosie's own credentials: a part of six characters or more of a header value
-(the scheme's name, `Bearer`, aside), a query credential, or the user or the
-password in the URL. An integer beyond 2^53 (a 64-bit id) is read and
+of Sosie's own credentials, each part of it six characters or more, between
+spaces, quotes, colons and separators: of a credential header's value
+(`Authorization`, `Cookie`, `X-Api-Key` and the like; of `name=value` pairs,
+such as `Token token="…"` or a cookie, the value; a `Basic` one's user and
+password; the scheme's name, `Bearer`, aside), of a query credential, and of
+the user and the password in the URL. A header that carries no credential
+(`X-Tenant`) holds none, so its words stay where they are structure. An integer beyond 2^53 (a 64-bit id) is read and
 written as its digits, never rounded, so its fake leads back to its record. A
 list keeps its first
 `--max-rows` items, and the answer's `sosie-notice` header says the rest were
@@ -741,9 +752,17 @@ instead, with nothing real in it, so following it reads the record it names:
 Status codes pass; error bodies in JSON are faked as no entity's, each value by
 where it sits, so no field's rule in `sosie.yml` applies to them; a body that is
 not JSON is not passed on: an error status passes with Sosie's own message, and
-any other answer is `502`, saying why. An answer the API redirected to another
-path is read by that path, as a link is, so another kind's rule in `sosie.yml`
-never applies to it.
+any other answer is `502`, saying why, JSON nested too deep to read included.
+An answer the API redirected to another path is read by that path, as a link
+is, so another kind's rule in `sosie.yml` never applies to it.
+
+An answer is read as an entity's only when Sosie can tell its path names one:
+every value in it is a number, a UUID or a fake Sosie gave. A word the client
+typed where a value goes (`/products/reviews` without a document, or matching
+`/products/{id}` with one; a login an app knows) may name another kind of
+record, so the answer is no entity's: its values are faked by where they sit,
+and no rule passes them. So is a redirect to such a path, and a body that does
+not have the shape its document gives it (a list where it says an object).
 
 ### Query by what you saw
 

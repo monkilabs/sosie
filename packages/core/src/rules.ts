@@ -43,7 +43,7 @@ export function loadRules(text: string, schema: Schema, file = 'sosie.yml', { le
   const entities = new Map(schema.entities.map((e) => [e.id, e]))
 
   const unknownField = (id: string) => {
-    const entityId = id.slice(0, id.lastIndexOf('.'))
+    const entityId = id.includes('.') ? id.slice(0, id.lastIndexOf('.')) : id
     if (!id.includes('.') || !entities.has(entityId)) {
       const hint = suggest(entityId || id, [...entities.keys()])
       return `${file}: ${entityId || id} is not a table.${hint ? ` Did you mean ${hint}?` : ''}`
@@ -54,6 +54,8 @@ export function loadRules(text: string, schema: Schema, file = 'sosie.yml', { le
 
   const rules: Rules = { pass: new Set(), format: new Map(), warnings: [] }
   const unknown = (id: string, keep: () => void) => {
+    // Values that name no entity, and Sosie's own words for the API's ($path, $query), are no rule's to pass.
+    if (id.startsWith('*.') || id.startsWith('$')) return problems.push(`${file}: ${id} names no entity; a rule names an entity's field, such as orders.status.`)
     if (!learns) return problems.push(unknownField(id))
     keep()
     rules.warnings.push(`${unknownField(id).replace(/ is not a (table|field)\./, ' is not known yet:')} it applies once Sosie meets it.`)

@@ -277,13 +277,31 @@ describe('fakes by type', async () => {
   it('fakes a key or a value that passes when it holds Sosie’s own credentials', async () => {
     const { faker } = await serve('pass:\n  - users.city\n')
     const city = { id: 'users.city', name: 'city', type: { kind: 'string' } } as const
-    const scope = faker.request('', undefined, secretParts(['Bearer sesamesecretword', 'sunshine99']))
+    const scope = faker.request('', undefined, secretParts({ authorization: 'Bearer sesamesecretword' }, ['sunshine99']))
     expect(scope.turnedBack('sesamesecretword')).toBe(true)
     expect(scope.turnedBack('Bearer')).toBe(false)
     for (const echo of ['token sesamesecretword', 'pw=sunshine%39%39', 'SUNSHINE99']) expect(faker.value(echo, city, scope) as string, echo).not.toMatch(/sesame|sunshine/i)
     expect(faker.value('Reykjavik', city, scope)).toBe('Reykjavik')
     // A scope that carries another's over keeps its credentials.
     expect(faker.request('', scope).turnedBack('sesamesecretword')).toBe(true)
+  })
+
+  it('takes the parts of credentials as headers write them', () => {
+    const basic = `Basic ${Buffer.from('robot:sunshine99').toString('base64')}`
+    expect(secretParts({ authorization: 'Token token="sesamesecretword"' })).toEqual(['sesamesecretword'])
+    expect(secretParts({ authorization: basic })).toEqual(expect.arrayContaining(['sunshine99']))
+    expect(secretParts({ authorization: 'Bearer abc123def456==' })).toEqual(['abc123def456=='])
+    // A cookie's names, and a header that carries no credential, are no secrets.
+    expect(secretParts({ cookie: 'session=k9q2x8w7; theme=darkmode', 'x-tenant': 'production' })).toEqual(['k9q2x8w7', 'darkmode'])
+  })
+
+  it('turns a boolean written as 1 or 0 back as 1 or 0', async () => {
+    const { faker } = await serve()
+    // Whether a boolean flips is decided once per domain: find a field where it does.
+    const flags = Array.from({ length: 20 }, (_, i): Field => ({ id: `users.flag${i}`, name: `flag${i}`, type: { kind: 'boolean' } }))
+    const flag = flags.find((f) => faker.value('true', f) === 'false')!
+    expect(faker.request().lookup('1', flag)).toBe('0')
+    expect(faker.request().lookup('0', flag)).toBe('1')
   })
 
   it('checks a field that passes for every value the request turned back at once, not one by one', async () => {
