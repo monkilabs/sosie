@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createFaker, loadRules, Store, storeDir, type Connection } from '@sosie/core'
 import { postgres } from '@sosie/postgres'
+import { graphql } from '@sosie/graphql'
 import { rest } from '@sosie/rest'
-import { startApi } from './api.js'
+import { startApi, TOKEN } from './api.js'
+import { startGraphql } from './graphql-api.js'
 import { describe, expect, inject, it } from 'vitest'
 
 /** A port free on 127.0.0.1 that another program holds on ::1; undefined where this machine has no IPv6. */
@@ -48,6 +50,23 @@ describe('a port that another program holds on ::1, where localhost goes first',
     } finally {
       await connection.close()
       await held.close()
+    }
+  })
+
+  it('is busy for a GraphQL Sosie too', async (ctx) => {
+    const held = await heldOnIpv6()
+    if (!held) return ctx.skip('this machine has no IPv6')
+    const api = await startGraphql()
+    const connection = await graphql.connect(new URL(api.url), {
+      maxRows: 10,
+      statementTimeout: 5000,
+      env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}` },
+    })
+    try {
+      await expect(serve(connection, held.port)).rejects.toMatchObject({ code: 'EADDRINUSE' })
+    } finally {
+      await held.close()
+      await api.close()
     }
   })
 

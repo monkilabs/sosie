@@ -53,13 +53,3 @@ export class RestUpstream {
     }
   }
 }
-
-/** SOSIE_UPSTREAM_HEADERS: one `Name: value` per line, for the credentials the API wants. */
-export function parseHeaders(text: string | undefined): Record<string, string> {
-  const headers: Record<string, string> = {}
-  for (const line of (text ?? '').split(/\r?\n|\\n/)) {
-    const at = line.indexOf(':')
-    if (at > 0) headers[line.slice(0, at).trim().toLowerCase()] = line.slice(at + 1).trim()
-  }
-  return headers
-}

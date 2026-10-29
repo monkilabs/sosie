@@ -4,7 +4,7 @@ Sosie is a read-only endpoint in front of a data source that fakes every value
 on the way out. An AI agent, the developer's app and their tools connect to it
 as they would to the real source, and get the real shape with fake contents.
 Postgres was its first source, in v0.1, the [MVP](mvp.md); the team's own REST
-API is the next. More are packages behind the same interface. The
+and GraphQL APIs are the next. More are packages behind the same interface. The
 [low-level design](lld.md) has the details.
 
 ## Goals
@@ -25,7 +25,7 @@ API is the next. More are packages behind the same interface. The
 
 ## Non-goals
 
-Writes, databases other than Postgres, GraphQL and third-party APIs (for now),
+Writes, databases other than Postgres, third-party APIs (for now),
 shell-output filtering, team-shared mappings, and defending against an agent
 that deliberately hunts for secrets on the machine Sosie runs on (see
 [Threat model](#threat-model)).
@@ -46,7 +46,7 @@ that deliberately hunts for secrets on the machine Sosie runs on (see
 
 Sosie is a **core** that knows nothing about any database or API, and
 **sources** that each know one kind of upstream: Postgres, and the team's REST
-API. A source speaks its upstream's protocol to clients and reports which
+and GraphQL APIs. A source speaks its upstream's protocol to clients and reports which
 field each value came from; the core decides every fake.
 
 ```mermaid
@@ -71,7 +71,7 @@ flowchart LR
       results --> faker
       rewrite -. lookup .-> faker
       faker --> endpoint
-      later["Later sources:<br/>REST, GraphQL, MySQL"] -.-> faker
+      later["Other sources:<br/>REST, GraphQL; later MySQL"] -.-> faker
     end
   end
   upstream -->|read-only login| db[("Your database")]
@@ -94,6 +94,9 @@ flowchart LR
 | REST | Endpoint and guard | The API's paths on a local HTTP address; `GET` and `HEAD` only, with Sosie's credentials |
 | REST | Fields | Names each value's field from the OpenAPI document, or from where it sits |
 | REST | Links | Points the API's links at Sosie, with nothing real in them, and reads them back |
+| GraphQL | Endpoint and guard | The API's path on a local HTTP address; queries only, checked with their variables against the schema |
+| GraphQL | Introspection | Answered from the schema Sosie holds; it never reaches the API |
+| GraphQL | Fields | Names each value's field from the schema, through aliases, fragments, interfaces and unions |
 
 ## How Sosie grows
 
@@ -105,8 +108,7 @@ same for every source.
 | Order | Source | Why then |
 | --- | --- | --- |
 | v0.1 | Postgres | Most personal data lives in databases, and teams least dare give an agent access to them |
-| v0.2 | REST, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
-| Next | GraphQL | The same data again, through one endpoint and its schema |
+| v0.2 | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
 | Later | MySQL and other databases; third-party APIs | On demand; many third-party APIs already offer a test mode |
 
 The core is tested through an in-memory test source, without Postgres, so
@@ -172,14 +174,15 @@ substituted, links an API returns, and transcripts kept afterwards.
   anyone who reaches that address can query the fakes and filter on the real
   values.
 - **An API's own structure and behaviour.** Its paths, its base path (in
-  Sosie's address), its OpenAPI document with its descriptions, and its status
-  codes are visible: they are the API, not values from it. A `GET` that writes
-  is the API's to guard; Sosie sends every `GET` on.
+  Sosie's address), its OpenAPI document or GraphQL schema with their
+  descriptions, and its status codes are visible: they are the API, not values
+  from it. A `GET`, or a GraphQL query field, that writes is the API's to
+  guard; Sosie sends every `GET` and every query on.
 - **What the team lets pass, and keys that look like structure.** A field
   listed under `pass` shows its own values: Sosie hides in it only what the
   request turned back and its own credentials. Without an API's document, a
   map keyed by lowercase words (`{ "jdoe": … }`) keeps its keys, as a json
-  column's do. The LLD's limits list each such case.
+  column's or a JSON scalar's do. The LLD's limits list each such case.
 - **Fakes crossing sources.** One store serves every source, so a fake from
   the database typed into an API request turns back into its real value, which
   goes to that API. It never reaches the client.

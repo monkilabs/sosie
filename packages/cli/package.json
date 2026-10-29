@@ -24,6 +24,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@sosie/core": "^0.1.0",
+    "@sosie/graphql": "^0.1.0",
     "@sosie/postgres": "^0.1.0",
     "@sosie/rest": "^0.1.0"
   }

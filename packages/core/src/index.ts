@@ -10,3 +10,4 @@ export { crossSite, readCapped, localRequest, pacer, secretParts, why } from './
 export { exactInteger, integerOf, parseJson } from './json.js'
 export { readRunning, writeRunning, clearRunning } from './running.js'
 export { normalize, tokens, distinctive } from './text.js'
+export { singular, referenceOf, linkByName, upstreamHeaders } from './naming.js'

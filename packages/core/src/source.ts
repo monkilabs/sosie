@@ -8,6 +8,9 @@
 /** A value as a source hands it over: text, null, or a list of values. */
 export type Value = string | null | Value[]
 
+/** Called once per value faked: now and then it returns a pause, which lets other clients in. */
+export type Pace = () => Promise<void> | undefined
+
 export interface Schema {
   entities: Entity[]
 }
@@ -54,7 +57,8 @@ export type FieldType =
 export interface Faker {
   /**
    * The fake of a value read from a field. Null stays null; a field that passes returns the value unchanged.
-   * With the request's scope, a JSON key that is a value the request turned back is faked, however it looks.
+   * With the request's scope, a JSON key that holds a value the request turned back is faked, however it
+   * looks, and a field that passes shows the fake the client sent in place of such a value.
    */
   value(value: Value, field: Field, scope?: RequestScope): Value
   /**
@@ -62,6 +66,10 @@ export interface Faker {
    * `sent` is what the client sent: a JSON key it wrote is structure, not a value.
    */
   computed(value: Value, type: FieldType, sent?: string, scope?: RequestScope): Value
+  /** `value`, with a large JSON value faked a slice at a time: `pace` lets other clients in between. */
+  valuePaced(value: Value, field: Field, scope: RequestScope | undefined, pace: Pace): Promise<Value>
+  /** `computed`, a slice at a time. */
+  computedPaced(value: Value, type: FieldType, sent: string, scope: RequestScope | undefined, pace: Pace): Promise<Value>
   /** Whether a field's values pass unchanged. */
   passes(field: Field): boolean
   /**

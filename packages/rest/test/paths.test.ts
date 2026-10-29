@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Operation } from '../src/openapi.js'
 import { route, singular, valueByHabit, wordName } from '../src/paths.js'
-import { parseHeaders } from '../src/upstream.js'
+import { upstreamHeaders as parseHeaders } from '@sosie/core'
 
 const entityFor = (word: string) => singular(word.toLowerCase())
 const numbers = (s: string) => /^\d+$/.test(s)
@@ -65,5 +65,9 @@ describe('upstream headers', () => {
     expect(parseHeaders('Authorization: Bearer a:b\nX-Team: core')).toEqual({ authorization: 'Bearer a:b', 'x-team': 'core' })
     expect(parseHeaders('Authorization: Bearer x\\nX-Team: core')).toEqual({ authorization: 'Bearer x', 'x-team': 'core' })
     expect(parseHeaders(undefined)).toEqual({})
+    // A line that is no header is named by its number, never quoted: it may hold the secret.
+    for (const bad of ['Authorization Bearer sk_live_1', 'X Team: core', 'Authorization: Bearer a\rb']) {
+      expect(() => parseHeaders(`Accept: */*\n${bad}`)).toThrow('SOSIE_UPSTREAM_HEADERS: line 2 is not a header. Write one Name: value per line.')
+    }
   })
 })

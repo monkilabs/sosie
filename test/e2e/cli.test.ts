@@ -10,6 +10,7 @@ import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { startApi, TOKEN } from './api.js'
 import { canariesIn } from './canaries.js'
+import { startGraphql } from './graphql-api.js'
 
 const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url))
 if (!existsSync(CLI)) throw new Error('Build the packages first: npm run build')
@@ -101,7 +102,7 @@ describe('sosie', () => {
 
   it('serves describe and query over MCP', async () => {
     const mcp = await mcpClient(home)
-    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'request'])
+    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'graphql', 'request'])
     const users = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
     expect(users.entities[0].fields).toContainEqual({ field: 'email', type: 'string', key: 'unique' })
     const result = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT * FROM users u JOIN orders o ON o.user_id = u.id' } })
@@ -157,12 +158,29 @@ describe('sosie, in front of an API', () => {
     const users = (await (await fetch(`${sosie.address}/users`)).json()) as { data: unknown[] }
     expect(users.data).toHaveLength(3)
     const mcp = await mcpClient(home)
-    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'request'])
+    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'graphql', 'request'])
     const result = JSON.parse(text(await mcp.callTool({ name: 'request', arguments: { path: '/users' } })))
     expect(result.body.data).toHaveLength(3)
     expect(canariesIn(JSON.stringify([users, result]))).toEqual([])
     const query = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT 1' } })
     expect(text(query)).toBe('Sosie serves rest here, not postgres: query is for postgres.')
+    await mcp.close()
+    expect(await stop(sosie.child)).toBe(0)
+    await api.close()
+  })
+})
+
+describe('sosie, in front of a GraphQL API', () => {
+  it('starts on its path, and serves GraphQL clients and MCP', async () => {
+    const api = await startGraphql()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-gql-'))
+    const sosie = await start({ SOSIE_UPSTREAM: api.url, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home }, ['--port', '0'])
+    expect(sosie.stdout()).toMatch(/✓ 127\.0\.0\.1:\d+\/api\/graphql, read-only: 8 types, 17 queries/)
+    expect(sosie.address).toMatch(/^http:\/\/localhost:\d+\/api\/graphql$/)
+    const mcp = await mcpClient(home)
+    const result = JSON.parse(text(await mcp.callTool({ name: 'graphql', arguments: { query: '{ users { email } }' } })))
+    expect(result.data.users).toHaveLength(3)
+    expect(canariesIn(JSON.stringify(result))).toEqual([])
     await mcp.close()
     expect(await stop(sosie.child)).toBe(0)
     await api.close()

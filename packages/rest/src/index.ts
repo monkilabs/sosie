@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
-import { secretParts, why, type Connection, type Source } from '@sosie/core'
+import { secretParts, upstreamHeaders, why, type Connection, type Source } from '@sosie/core'
 import { startEndpoint } from './endpoint.js'
 import { requestTool } from './mcp.js'
 import { parseDocument, readApi, type Api } from './openapi.js'
-import { parseHeaders, RestUpstream } from './upstream.js'
+import { RestUpstream } from './upstream.js'
 
 /** Where an API usually serves its OpenAPI document, relative to its base. */
 const DISCOVER = ['openapi.json', 'openapi.yaml', 'swagger.json', 'v3/api-docs', 'api-docs', 'docs/openapi.json']
@@ -14,7 +14,7 @@ export const rest: Source = {
   matches: (url) => url.protocol === 'http:' || url.protocol === 'https:',
   async connect(upstream, options): Promise<Connection> {
     const env = options.env ?? {}
-    const headers = parseHeaders(env.SOSIE_UPSTREAM_HEADERS)
+    const headers = upstreamHeaders(env.SOSIE_UPSTREAM_HEADERS)
     const user = decodeURIComponent(upstream.username)
     const password = decodeURIComponent(upstream.password)
     if (user) headers.authorization ??= `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
@@ -92,4 +92,3 @@ async function readDocument(location: string, api: RestUpstream): Promise<string
 
 export { parseDocument, readApi } from './openapi.js'
 export { route, singular } from './paths.js'
-export { parseHeaders } from './upstream.js'
