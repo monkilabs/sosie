@@ -78,9 +78,15 @@ afterAll(async () => {
 })
 
 describe('a GraphQL API', () => {
+  it('is the source for a path with graphql in it, or for any path with a schema in SOSIE_GRAPHQL_SCHEMA', () => {
+    for (const path of ['/graphql', '/api/graphql/', '/v1/graphql', '/graphql/v1', '/admin/api/2025-07/graphql.json'])
+      expect(graphql.matches(new URL(`https://api.internal${path}`)), path).toBe(true)
+    for (const path of ['/v1/users', '/graphqlish', '/query']) expect(graphql.matches(new URL(`https://api.internal${path}`)), path).toBe(false)
+    expect(graphql.matches(new URL('https://api.internal/query'), { SOSIE_GRAPHQL_SCHEMA: 'schema.graphql' })).toBe(true)
+    expect(graphql.matches(new URL('postgres://db.internal/app'), { SOSIE_GRAPHQL_SCHEMA: 'schema.graphql' })).toBe(false)
+  })
+
   it('is read by introspection, and its types become entities', () => {
-    expect(graphql.matches(new URL(api.url))).toBe(true)
-    expect(graphql.matches(new URL('https://api.internal/v1/users'))).toBe(false)
     expect(sosie.connection.summary).toBe('8 types, 17 queries')
     const user = sosie.connection.schema.entities.find((e) => e.id === 'User')!
     expect(user.fields.find((f) => f.name === 'email')).toMatchObject({ format: 'email' })

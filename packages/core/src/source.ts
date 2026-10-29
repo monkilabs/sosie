@@ -108,8 +108,8 @@ export interface SourceOptions {
 export interface Source {
   /** 'postgres' now; 'rest', 'graphql', 'mysql' later. */
   readonly kind: string
-  /** Whether this source handles this upstream, or this endpoint address. */
-  matches(url: URL): boolean
+  /** Whether this source handles this upstream, or this endpoint address; `env` can say so where the URL cannot. */
+  matches(url: URL, env?: Record<string, string | undefined>): boolean
   /** Connect read-only and describe the upstream in neutral terms. */
   connect(upstream: URL, options: SourceOptions): Promise<Connection>
   /** MCP tools this source adds beside the core's describe: Postgres adds query. They talk to the running endpoint, never to the upstream. */
