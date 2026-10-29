@@ -9,8 +9,10 @@ import { GraphqlUpstream } from './upstream.js'
 /** The GraphQL source: a local GraphQL endpoint in front of the team's own API, queries only, every value faked. */
 export const graphql: Source = {
   kind: 'graphql',
-  // An http(s) URL whose path ends in graphql: /graphql, /api/graphql. Any other is REST's.
-  matches: (url) => (url.protocol === 'http:' || url.protocol === 'https:') && /graphql\/?$/i.test(url.pathname),
+  // An http(s) URL with graphql in its path: /graphql, /v1/graphql, /graphql/v1 (Supabase), /graphql.json
+  // (Shopify). At another path (gqlgen's /query), a schema in SOSIE_GRAPHQL_SCHEMA says it is GraphQL. Any other is REST's.
+  matches: (url, env) =>
+    (url.protocol === 'http:' || url.protocol === 'https:') && (/\/graphql(\.json)?(\/|$)/i.test(url.pathname) || !!env?.SOSIE_GRAPHQL_SCHEMA),
   async connect(upstream, options): Promise<Connection> {
     const env = options.env ?? {}
     const headers = upstreamHeaders(env.SOSIE_UPSTREAM_HEADERS)

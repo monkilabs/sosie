@@ -190,7 +190,7 @@ export type FieldType =
 ```
 
 **Choosing a source:** the CLI asks each source it knows whether it `matches`
-the upstream URL, in order: Postgres, then GraphQL for an http(s) URL whose path ends in `graphql`, then REST for any other. Sources from other packages, listed
+the upstream URL, in order: Postgres, then GraphQL for an http(s) URL with `graphql` in its path, or any when `SOSIE_GRAPHQL_SCHEMA` is set, then REST for any other. Sources from other packages, listed
 in `sosie.yml`, come after v0.1, when the interface is settled; until 1.0 it may
 change between minor versions.
 
@@ -843,9 +843,11 @@ would turn into that field's real value, which the passing field would show.
 
 ## GraphQL source
 
-For the team's own GraphQL API. `SOSIE_UPSTREAM` is its endpoint, whose path
-ends in `graphql` (`https://api.internal/graphql`); any other http(s) URL is
-the REST source's. Credentials as for REST: `SOSIE_UPSTREAM_HEADERS`, a user
+For the team's own GraphQL API. `SOSIE_UPSTREAM` is its endpoint, with
+`graphql` in its path (`https://api.internal/graphql`, Supabase's
+`/graphql/v1`, Shopify's `/graphql.json`). An endpoint at another path, such as
+gqlgen's `/query`, is GraphQL when `SOSIE_GRAPHQL_SCHEMA` gives its schema;
+without it, the URL is the REST source's. Credentials as for REST: `SOSIE_UPSTREAM_HEADERS`, a user
 and password in the URL, or a query on it, never shown; the client's are never
 passed on. As for REST, a JSON key, or a value that passes, that holds a part
 of them is faked.

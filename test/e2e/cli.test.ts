@@ -10,7 +10,7 @@ import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { startApi, TOKEN } from './api.js'
 import { canariesIn } from './canaries.js'
-import { startGraphql } from './graphql-api.js'
+import { SDL, startGraphql } from './graphql-api.js'
 
 const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url))
 if (!existsSync(CLI)) throw new Error('Build the packages first: npm run build')
@@ -183,6 +183,25 @@ describe('sosie, in front of a GraphQL API', () => {
     expect(canariesIn(JSON.stringify(result))).toEqual([])
     await mcp.close()
     expect(await stop(sosie.child)).toBe(0)
+    await api.close()
+  })
+
+  it("starts at a path such as Supabase's /graphql/v1, or at any path with SOSIE_GRAPHQL_SCHEMA", async () => {
+    const api = await startGraphql()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-gql-'))
+    const schema = join(home, 'schema.graphql')
+    writeFileSync(schema, SDL)
+    for (const [path, more] of [['/graphql/v1', {}], ['/query', { SOSIE_GRAPHQL_SCHEMA: schema }]] as const) {
+      const upstream = api.url.replace('/api/graphql', path)
+      const sosie = await start({ SOSIE_UPSTREAM: upstream, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home, ...more })
+      expect(sosie.stdout()).toMatch(/read-only: 8 types, 17 queries/)
+      expect(sosie.address).toMatch(new RegExp(`^http://localhost:\\d+${path}$`))
+      const answer = await fetch(sosie.address, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: '{ users { email } }' }) })
+      const body = (await answer.json()) as { data: { users: unknown[] } }
+      expect(body.data.users).toHaveLength(3)
+      expect(canariesIn(JSON.stringify(body))).toEqual([])
+      expect(await stop(sosie.child)).toBe(0)
+    }
     await api.close()
   })
 })

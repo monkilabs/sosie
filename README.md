@@ -110,7 +110,7 @@ one reads the record it names; a word that is the API's own, a collection's
 name or a query name its document or its answers show, stays as written.
 
 A GraphQL API works the same way: point `SOSIE_UPSTREAM` at its endpoint
-(`https://api.internal/graphql`). Sosie reads the schema by introspection, or
+(`https://api.internal/graphql`, or Supabase's `/graphql/v1`). Sosie reads the schema by introspection, or
 from `SOSIE_GRAPHQL_SCHEMA`, answers the client's introspection from it, and
 sends only queries on, never mutations. A query field that writes, like a `GET`
 that writes, is the API's to guard.

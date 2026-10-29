@@ -44,8 +44,9 @@ Environment:
                           per line, such as 'Authorization: Bearer ...'
   SOSIE_OPENAPI           For a REST API: its OpenAPI document, a file or URL
                           (otherwise Sosie looks for one at the usual paths)
-  SOSIE_GRAPHQL_SCHEMA    For a GraphQL API without introspection: its SDL file,
-                          or a file of its introspection result as JSON
+  SOSIE_GRAPHQL_SCHEMA    For a GraphQL API without introspection, or at a path
+                          without graphql in it: its SDL file, or a file of its
+                          introspection result as JSON
   SOSIE_HOME              Where Sosie keeps its store (~/.sosie)
 
 The upstream and its credentials are never arguments: arguments show in shell
@@ -121,7 +122,7 @@ async function start(options: {
   maxRows: number
 }): Promise<void> {
   const upstream = await readUpstream()
-  const source = sources.find((s) => s.matches(upstream))
+  const source = sources.find((s) => s.matches(upstream, process.env))
   if (!source) {
     throw new Exit(2, fail(`Sosie reads postgres:// databases and http:// or https:// APIs for now, not ${upstream.protocol}//.`))
   }
