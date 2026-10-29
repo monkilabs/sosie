@@ -98,6 +98,8 @@ class Echoes {
   /** Values that may be echoed, of three characters or more, lowercased as written and as a JSON string holds them, with their fakes. */
   readonly #plain = new Starts()
   readonly #json = new Starts()
+  /** Sosie's own credentials squashed, of six characters or more. */
+  readonly #squashedSecrets: string[]
 
   /**
    * `labels` are enum labels and booleans the request turned back, lowercased, with their fakes: an echo
@@ -125,6 +127,7 @@ class Echoes {
     this.#long.sorted()
     this.#plain.sorted()
     this.#json.sorted()
+    this.#squashedSecrets = secrets.map(squash).filter((secret) => secret.length >= 6)
   }
 
   /**
@@ -170,7 +173,10 @@ class Echoes {
   }
 
   #secret(lower: string): boolean {
-    return this.secrets.some((secret) => lower.includes(secret))
+    if (this.secrets.some((secret) => lower.includes(secret))) return true
+    // With other separators, or none (zq_secret_token for zq-secret-token): squashed, as echoes are.
+    const squashed = squash(lower)
+    return this.#squashedSecrets.some((secret) => squashed.includes(secret))
   }
 
   #squashed(text: string, words: Set<string>): boolean {

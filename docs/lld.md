@@ -314,7 +314,8 @@ computed value is. An enum label or a boolean the request turned back is an
 echo as a word of text (`active=true`, `{"role":"admin"}`), and shows the fake
 the client sent; a field of its own kind keeps its value, which is its own.
 Sosie's own credentials for the upstream count as well: a key, or a value that
-passes, that holds one, escaped or not, is faked. What an answer makes of an
+passes, that holds one, as written, escaped, or with other separators or
+none (`zq_secret_token` for `zq-secret-token`), is faked. What an answer makes of an
 echo beyond that, a part of it (an
 email's local part) or it encoded (base64) or reversed, is not caught: a field
 passes because the team chose to show it. A number counts when it is six
