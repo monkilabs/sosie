@@ -1,0 +1,17 @@
+---
+import Base from '../layouts/Base.astro';
+import Logo from '../components/Logo.astro';
+import { url } from '../url';
+---
+
+<Base title="Not found · Sosie" description="This page does not exist." path="" noindex>
+  <main class="wrap missing">
+    <Logo size={56} />
+    <h1>Nothing here, not even a double.</h1>
+    <p>This page does not exist, or it moved.</p>
+    <div class="hero__actions">
+      <a class="btn btn--primary" href={url()}>Home</a>
+      <a class="btn" href={url('docs/')}>Docs</a>
+    </div>
+  </main>
+</Base>

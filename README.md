@@ -11,6 +11,8 @@ credentials and hostnames stay on your side.
 > *Sosie* is French for a lookalike, after the servant in Molière's
 > *Amphitryon* whose exact double the god Mercury becomes.
 
+**[Docs and the full story: monkilabs.github.io/sosie](https://monkilabs.github.io/sosie/)**
+
 ## Status
 
 Sosie works end to end in front of PostgreSQL 15 to 18, REST APIs and GraphQL

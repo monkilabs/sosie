@@ -1,0 +1,321 @@
+---
+import Base from '../layouts/Base.astro';
+import { REPO, url } from '../url';
+
+// One query, as the database holds it and as the agent sees it through Sosie.
+// The real side is invented for this page; the fakes are the kind Sosie gives.
+const real = [
+  ['Kim Lindqvist', 'kim@lindqvist.se', 'paid', '749.20'],
+  ['Kim Lindqvist', 'kim@lindqvist.se', 'shipped', '3.38'],
+  ['Amara Okafor', 'amara.okafor@hey.com', 'shipped', '8274.94'],
+];
+const fake = [
+  ['Janick Dach', 'van29@example.com', 'paid', '512.87'],
+  ['Janick Dach', 'van29@example.com', 'shipped', '7.06'],
+  ['Cristian Kuhlman', 'lora44@example.net', 'shipped', '3916.25'],
+];
+const columns = ['full_name', 'email', 'status', 'total'];
+---
+
+<Base
+  title="Sosie: your AI agent sees a double of your data"
+  description="Sosie sits between your data and your AI agent. The agent, your app and its tests query it as they would your Postgres database or your API, and every value comes back as a realistic, consistent fake."
+  path=""
+>
+  <main>
+    <section class="hero">
+      <div class="wrap">
+        <span class="badge">Open source · MIT · Runs on your machine</span>
+        <h1 class="hero__title">
+          Your AI agent sees a double of your data.<br />
+          <span class="gradient">Never the real thing.</span>
+        </h1>
+        <p class="hero__lead">
+          Sosie sits between your data and your AI agent. The agent, your app and its tests query it as they would your
+          Postgres database or your API, and every value comes back as a realistic fake. The same real value is always the
+          same fake, so joins hold and code written against the fakes runs on the real data.
+        </p>
+        <div class="hero__actions">
+          <div class="install">
+            <span class="install__prompt">$</span>
+            <code class="install__cmd">npx @sosie/cli</code>
+            <button class="copy" type="button" data-copy="npx @sosie/cli">Copy</button>
+          </div>
+          <a class="btn btn--primary" href={url('docs/')}>Get started</a>
+          <a class="btn" href={REPO} rel="noopener">GitHub</a>
+        </div>
+        <p class="hero__note">Node 24 or 26 · PostgreSQL 15 to 18 · your team's REST and GraphQL APIs</p>
+
+        <div class="double">
+          <div class="double__side double__side--real">
+            <div class="double__label"><span>In your database</span><span>stays there</span></div>
+            <div class="double__scroll">
+              <table class="double__table">
+                <thead><tr>{columns.map((c) => <th>{c}</th>)}</tr></thead>
+                <tbody>{real.map((row) => <tr>{row.map((v) => <td>{v}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          </div>
+          <div class="double__via" aria-hidden="true">
+            <svg width="40" height="24" viewBox="0 0 40 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h34M28 4l8 8-8 8"></path></svg>
+            Sosie
+          </div>
+          <div class="double__side double__side--fake">
+            <div class="double__label"><span>What your agent sees</span><span>the same query</span></div>
+            <div class="double__scroll">
+              <table class="double__table">
+                <thead><tr>{columns.map((c) => <th>{c}</th>)}</tr></thead>
+                <tbody>{fake.map((row) => <tr>{row.map((v, i) => <td class={i === 2 ? 'same' : undefined}>{v}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <p class="double__caption">
+          Kim is Janick in every row, every table and every session, so the join holds. Totals keep their digits and
+          scale. <code>orders.status</code> shows as it is, because the team's <code>sosie.yml</code> lets it pass.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" id="why">
+      <div class="wrap">
+        <span class="section__label">Why Sosie</span>
+        <h2 class="section__title">Give your agent the real database. Keep the real data.</h2>
+        <p class="section__lead">
+          Agents write better code against real schemas, real relationships and real edge cases. Sosie gives them all of
+          that, and keeps every name, email, key and number on your side.
+        </p>
+        <div class="grid">
+          <div class="card">
+            <div class="card__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="12" r="6"></circle><circle cx="15" cy="12" r="6" stroke-dasharray="3 3"></circle></svg></div>
+            <h3>Fake by default</h3>
+            <p>Every value is faked by its field's type and format. A value passes unchanged only when <code>sosie.yml</code> lists its field.</p>
+          </div>
+          <div class="card">
+            <div class="card__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"></path><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"></path></svg></div>
+            <h3>Consistent</h3>
+            <p>The same real value is always the same fake: across rows, tables and sessions, and from the database to the API. Foreign keys share fakes, so joins hold.</p>
+          </div>
+          <div class="card">
+            <div class="card__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg></div>
+            <h3>Query by what you saw</h3>
+            <p>A fake the agent copies into a query, an id or an email, turns back into the real value before the query runs. Lookups and filters just work.</p>
+          </div>
+          <div class="card">
+            <div class="card__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></div>
+            <h3>Read-only</h3>
+            <p>Writes are refused, and the session upstream is read-only too. That promise is what makes it safe to point at production.</p>
+          </div>
+          <div class="card">
+            <div class="card__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 17 6-6-6-6"></path><path d="M12 19h8"></path></svg></div>
+            <h3>Nothing to change in the client</h3>
+            <p><code>psql</code>, node-postgres, Prisma, Drizzle, any Postgres MCP server, <code>curl</code> and GraphQL clients connect to Sosie as to the real thing.</p>
+          </div>
+          <div class="card">
+            <div class="card__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg></div>
+            <h3>Runs where your data lives</h3>
+            <p>On your machine, or a host your team chooses. Never a hosted service: your data goes to nobody, us included.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="how">
+      <div class="wrap">
+        <span class="section__label">How it works</span>
+        <h2 class="section__title">One local address in front of your data.</h2>
+        <p class="section__lead">
+          A core that knows no database decides every fake; each source speaks its upstream's own protocol. One store,
+          keyed and sealed on your machine, keeps each fake consistent and lets a query by a fake find the real row.
+        </p>
+        <div class="flow">
+          <div class="flow__box">
+            <h3>Your side</h3>
+            <ul class="flow__items">
+              <li>AI agent<small>SQL, HTTP or MCP</small></li>
+              <li>Your app and its tests</li>
+              <li><code>psql</code>, <code>curl</code>, GraphQL clients</li>
+            </ul>
+          </div>
+          <div class="flow__box flow__box--sosie">
+            <h3>Sosie, on 127.0.0.1</h3>
+            <ul class="flow__items flow__steps">
+              <li>Guard<small>Reads only. A write is refused before it leaves Sosie.</small></li>
+              <li>Turn back<small>A fake in the query becomes the real value it stands for.</small></li>
+              <li>Read<small>Upstream with a read-only login, a timeout and a row cap.</small></li>
+              <li>Fake<small>Every value by its field: the same real value, the same fake.</small></li>
+            </ul>
+          </div>
+          <div class="flow__box">
+            <h3>Your data</h3>
+            <ul class="flow__items">
+              <li>PostgreSQL<small>15 to 18</small></li>
+              <li>Your REST API<small>with or without OpenAPI</small></li>
+              <li>Your GraphQL API<small>by introspection or a schema file</small></li>
+            </ul>
+          </div>
+        </div>
+        <p class="section__lead"><a href={url('docs/how-it-works/')}>How faking works, in detail →</a></p>
+      </div>
+    </section>
+
+    <section class="section" id="sources">
+      <div class="wrap">
+        <span class="section__label">Sources</span>
+        <h2 class="section__title">Your database and your APIs, one person, one fake.</h2>
+        <p class="section__lead">
+          Run one Sosie per upstream. They share one store, so a person's email is the same fake from the database and
+          from the API, and <code>sosie mcp</code> serves them all.
+        </p>
+        <div class="sources">
+          <div class="source">
+            <div class="source__text">
+              <h3>Postgres</h3>
+              <p>The Postgres wire protocol, simple and extended. <code>psql</code>, node-postgres, postgres.js, Drizzle and Prisma 7 work unchanged.</p>
+              <a class="source__link" href={url('docs/postgres/')}>Postgres docs →</a>
+            </div>
+            <div class="term">
+              <div class="term__bar"><i></i><i></i><i></i><span>your terminal</span></div>
+              <pre><span class="cmd">export SOSIE_UPSTREAM='postgres://readonly:…@db.internal/app'</span>
+<span class="cmd">npx @sosie/cli</span>
+  <span class="ok">✓</span> db.internal:5432/app, read-only: 42 tables, 3 views
+  <span class="ok">✓</span> Every value is faked; 3 fields pass (sosie.yml)
+
+  Your agent, app and psql:  postgres://localhost:7674/app</pre>
+            </div>
+          </div>
+          <div class="source">
+            <div class="source__text">
+              <h3>REST</h3>
+              <p><code>GET</code> and <code>HEAD</code> only, with Sosie's credentials, never the agent's. Fields come from the OpenAPI document, or from where values sit.</p>
+              <a class="source__link" href={url('docs/rest/')}>REST docs →</a>
+            </div>
+            <div class="term">
+              <div class="term__bar"><i></i><i></i><i></i><span>your terminal</span></div>
+              <pre><span class="cmd">export SOSIE_UPSTREAM='https://api.internal/v1'</span>
+<span class="cmd">export SOSIE_UPSTREAM_HEADERS="$(cat ~/.config/api.headers)"</span>
+<span class="cmd">npx @sosie/cli</span>
+  <span class="ok">✓</span> api.internal/v1, read-only: OpenAPI 3.1, 24 schemas, 41 GET paths
+  <span class="ok">✓</span> Every value is faked
+
+  Your agent, app and curl:  http://localhost:7675/v1</pre>
+            </div>
+          </div>
+          <div class="source">
+            <div class="source__text">
+              <h3>GraphQL</h3>
+              <p>Queries only, checked against the schema. Introspection is answered from the schema Sosie holds and never reaches the API.</p>
+              <a class="source__link" href={url('docs/graphql/')}>GraphQL docs →</a>
+            </div>
+            <div class="term">
+              <div class="term__bar"><i></i><i></i><i></i><span>your terminal</span></div>
+              <pre><span class="cmd">export SOSIE_UPSTREAM='https://api.internal/graphql'</span>
+<span class="cmd">export SOSIE_UPSTREAM_HEADERS="$(cat ~/.config/api.headers)"</span>
+<span class="cmd">npx @sosie/cli</span>
+  <span class="ok">✓</span> api.internal/graphql, read-only: 31 types, 12 queries
+  <span class="ok">✓</span> Every value is faked
+
+  Your agent, app and curl:  http://localhost:7676/graphql</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="proof">
+      <div class="wrap">
+        <span class="section__label">Proof, not trust</span>
+        <h2 class="section__title">Check that nothing real reached a transcript.</h2>
+        <div class="split">
+          <div>
+            <p class="section__lead" style="margin-top:0">
+              <code>sosie scan</code> reads transcripts and logs and compares every run of words, by keyed hash, with the
+              real values Sosie has seen. It never prints a real value, and exits 1 when it finds one, so CI can run it.
+            </p>
+            <ul class="checks" style="margin-top:24px">
+              <li><strong>Nothing to set up.</strong> It reads the same store Sosie keeps, on the same machine.</li>
+              <li><strong>Only distinctive values.</strong> Years, ports and line numbers are not findings.</li>
+              <li><strong>What the agent was shown is not a finding.</strong> A fake is what it should see.</li>
+            </ul>
+          </div>
+          <div class="term">
+            <div class="term__bar"><i></i><i></i><i></i><span>your terminal</span></div>
+            <pre><span class="cmd">npx @sosie/cli scan ~/.claude/projects</span>
+  <span class="ok">✓</span> No real values found in 412 files.
+
+<span class="cmd">npx @sosie/cli scan logs/</span>
+  <span class="bad">✗</span> logs/agent.jsonl:1203  a real value from users.email
+  1 real value found in 38 files.</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="rules">
+      <div class="wrap">
+        <span class="section__label">sosie.yml</span>
+        <h2 class="section__title">No config to start. Rules your team reviews like code.</h2>
+        <div class="split">
+          <div>
+            <p class="section__lead" style="margin-top:0">
+              When a fake breaks your app's logic, a status that must be a real one, list that field. The file is committed
+              with the code and checked against the schema at start-up: a typo is an error that names it, never a value
+              passing silently.
+            </p>
+            <p class="section__lead"><a href={url('docs/configuration/')}>Every rule and format →</a></p>
+          </div>
+          <div class="term">
+            <div class="term__bar"><i></i><i></i><i></i><span>sosie.yml</span></div>
+            <pre><span class="dim"># Fields whose values pass unchanged.</span>
+pass:
+  - orders.status
+  - countries.*
+
+<span class="dim"># Formats for fields Sosie cannot tell from their names.</span>
+format:
+  users.handle: username
+  accounts.iban: iban</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="limits">
+      <div class="wrap">
+        <span class="section__label">Plainly</span>
+        <h2 class="section__title">What Sosie is not.</h2>
+        <div class="split">
+          <ul class="checks checks--not">
+            <li><strong>Not a service.</strong> It runs on your machine, or a host you choose. There is no account and nothing to send us.</li>
+            <li><strong>Not a writer.</strong> It never changes your database, and sends an API only <code>GET</code>, <code>HEAD</code> and GraphQL queries.</li>
+            <li><strong>Not a wall against an agent hunting for secrets</strong> on the machine Sosie runs on. For that, run Sosie on another host and give the agent only its address.</li>
+          </ul>
+          <ul class="checks checks--not">
+            <li><strong>Not a filter on the agent's shell output.</strong> Sosie fakes what passes through it; <code>sosie scan</code> proves what reached the transcript.</li>
+            <li><strong>Not blind to shape.</strong> Row counts, nulls, the rough size of values and the order of real values are visible.</li>
+            <li><strong>Not a guess.</strong> The schema says what each value is. Automatic detection never decides that a value is safe.</li>
+          </ul>
+        </div>
+        <p class="section__lead"><a href={url('docs/security/')}>The threat model →</a></p>
+      </div>
+    </section>
+
+    <section class="section cta" id="start">
+      <div class="wrap">
+        <span class="section__label">Get started</span>
+        <h2 class="section__title">Three commands. No config file.</h2>
+        <p class="section__lead">In your own terminal, not the agent's, with the connection string in <code>SOSIE_UPSTREAM</code> or typed at a hidden prompt.</p>
+        <div class="cta__steps">
+          <div class="cta__step"><code>npx @sosie/cli</code><span>Start Sosie. It prints one local address for your agent, your app and psql.</span></div>
+          <div class="cta__step"><code>claude mcp add sosie -- npx @sosie/cli mcp</code><span>Or connect any MCP client, or point psql, your app or curl at the address.</span></div>
+          <div class="cta__step"><code>npx @sosie/cli scan ~/.claude/projects</code><span>Check that nothing real reached a transcript.</span></div>
+        </div>
+        <div class="hero__actions">
+          <a class="btn btn--primary" href={url('docs/')}>Read the docs</a>
+          <a class="btn" href={REPO} rel="noopener">Star it on GitHub</a>
+        </div>
+        <p class="aside"><em>Sosie</em> is French for a lookalike, after the servant in Molière's <em>Amphitryon</em> whose exact double the god Mercury becomes.</p>
+      </div>
+    </section>
+  </main>
+</Base>

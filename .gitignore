@@ -4,3 +4,4 @@ dist/
 .env.*
 *.log
 test/e2e/prisma/generated/
+.astro/

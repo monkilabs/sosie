@@ -1,0 +1,82 @@
+---
+/** A docs page written in Markdown: the sidebar of pages, the page, what is on it, and the next page. */
+import Base from './Base.astro';
+import DocsList from '../components/DocsList.astro';
+import { DOCS } from '../docs';
+import { REPO, url } from '../url';
+
+interface Props {
+  frontmatter: { title: string; description: string; lead?: string };
+  headings: { depth: number; slug: string; text: string }[];
+}
+
+const { frontmatter, headings } = Astro.props;
+const base = url();
+const path = decodeURI(Astro.url.pathname).slice(base.length).replace(/\/?$/, '/');
+const pages = DOCS.flatMap((g) => g.pages);
+const at = pages.findIndex((p) => p.path === path);
+const page = pages[at];
+const prev = at > 0 ? pages[at - 1] : undefined;
+const next = at >= 0 && at < pages.length - 1 ? pages[at + 1] : undefined;
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+---
+
+<Base title={`${frontmatter.title} · Sosie`} description={frontmatter.description} path={path} crumb={{ label: 'Docs', href: url('docs/') }}>
+  <div class="wrap docs">
+    <aside class="docs__nav" aria-label="Docs">
+      <DocsList path={path} />
+    </aside>
+
+    <main class="docs__main">
+      <details class="docs__menu">
+        <summary>Docs: {page?.title ?? frontmatter.title}</summary>
+        <nav aria-label="Docs"><DocsList path={path} /></nav>
+      </details>
+
+      <article class="prose">
+        <h1>{frontmatter.title}</h1>
+        {frontmatter.lead && <p class="lead">{frontmatter.lead}</p>}
+        <slot />
+      </article>
+
+      <nav class="docs__pager" aria-label="Next and previous">
+        {prev && <a class="prev" href={url(prev.path)}><small>Previous</small>{prev.title}</a>}
+        {next && <a class="next" href={url(next.path)}><small>Next</small>{next.title}</a>}
+      </nav>
+      {page && (
+        <p class="docs__edit">
+          <a href={`${REPO}/edit/main/website/src/pages/docs/${page.file}.md`} rel="noopener">Edit this page on GitHub</a>
+        </p>
+      )}
+    </main>
+
+    <aside class="docs__toc" aria-label="On this page">
+      {toc.length > 0 && (
+        <Fragment>
+          <p>On this page</p>
+          <ul>
+            {toc.map((h) => (
+              <li><a class={`depth-${h.depth}`} href={`#${h.slug}`}>{h.text}</a></li>
+            ))}
+          </ul>
+        </Fragment>
+      )}
+    </aside>
+  </div>
+
+  <script>
+    // Marks the heading being read in "On this page".
+    const links = [...document.querySelectorAll<HTMLAnchorElement>('.docs__toc a')];
+    const targets = links.map((a) => document.getElementById(decodeURIComponent(a.hash.slice(1)))).filter((t) => t !== null);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          for (const a of links) a.classList.toggle('active', a.hash === `#${entry.target.id}`);
+        }
+      },
+      { rootMargin: '-80px 0px -70% 0px' },
+    );
+    for (const t of targets) observer.observe(t);
+  </script>
+</Base>

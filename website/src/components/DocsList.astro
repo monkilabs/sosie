@@ -1,0 +1,23 @@
+---
+/** The docs' pages by group, the current one marked: the sidebar, and the menu on small screens. */
+import { DOCS } from '../docs';
+import { url } from '../url';
+
+interface Props {
+  path: string;
+}
+const { path } = Astro.props;
+---
+
+<div class="docs__list">
+  {DOCS.map((g) => (
+    <Fragment>
+      <p class="docs__group">{g.group}</p>
+      <ul>
+        {g.pages.map((p) => (
+          <li><a href={url(p.path)} aria-current={p.path === path ? 'page' : undefined}>{p.title}</a></li>
+        ))}
+      </ul>
+    </Fragment>
+  ))}
+</div>
