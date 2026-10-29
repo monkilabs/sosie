@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0
+## 0.1.0, 29 October 2026
 
 The first release: an AI agent works against a real Postgres database and the
 team's own REST and GraphQL APIs, and the model never sees a real value.
