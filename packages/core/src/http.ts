@@ -27,6 +27,18 @@ export async function readCapped(response: Response, max: number): Promise<strin
   return Buffer.concat(chunks).toString('utf8')
 }
 
+/** Names of auth schemes, written before the credential in a header: words, not secrets. */
+const SCHEMES = /^(bearer|basic|digest|negotiate)$/i
+
+/**
+ * The parts of Sosie's own credentials for an upstream worth hiding wherever it echoes them: each
+ * run of six characters or more of a header value, a query credential, a user or a password, lowercased.
+ */
+export function secretParts(values: Iterable<string>): string[] {
+  const parts = [...values].flatMap((value) => value.split(/[\s,;=]+/)).filter((part) => part.length >= 6 && !SCHEMES.test(part))
+  return [...new Set(parts.map((part) => part.toLowerCase()))]
+}
+
 /** Why a request failed, with the cause fetch keeps behind "fetch failed": a refused connection, a TLS error, a name not found. */
 export function why(error: unknown): string {
   const { message, cause } = error as Error & { cause?: { message?: string; code?: string } }

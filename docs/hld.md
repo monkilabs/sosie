@@ -175,6 +175,11 @@ substituted, links an API returns, and transcripts kept afterwards.
   Sosie's address), its OpenAPI document with its descriptions, and its status
   codes are visible: they are the API, not values from it. A `GET` that writes
   is the API's to guard; Sosie sends every `GET` on.
+- **What the team lets pass, and keys that look like structure.** A field
+  listed under `pass` shows its own values: Sosie hides in it only what the
+  request turned back and its own credentials. Without an API's document, a
+  map keyed by lowercase words (`{ "jdoe": … }`) keeps its keys, as a json
+  column's do. The LLD's limits list each such case.
 - **Fakes crossing sources.** One store serves every source, so a fake from
   the database typed into an API request turns back into its real value, which
   goes to that API. It never reaches the client.

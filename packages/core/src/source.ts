@@ -68,8 +68,10 @@ export interface Faker {
    * A scope per request, so its errors can be scrubbed of what it substituted.
    * `sent` is what the client sent; `from` is an earlier scope of the same
    * request, such as a prepared statement's, whose substitutions carry over.
+   * `secrets` are Sosie's own credentials for the upstream, as `secretParts`
+   * gives them: a key, or a value that passes, that holds one is faked.
    */
-  request(sent?: string, from?: RequestScope): RequestScope
+  request(sent?: string, from?: RequestScope, secrets?: readonly string[]): RequestScope
 }
 
 export interface RequestScope {

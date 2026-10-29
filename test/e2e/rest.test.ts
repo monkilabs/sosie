@@ -3,7 +3,7 @@ import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
-import { createFaker, loadRules, Store, storeDir, type Running } from '@sosie/core'
+import { createFaker, loadRules, normalize, Store, storeDir, type Running } from '@sosie/core'
 import { rest } from '@sosie/rest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startApi, startRecorder, TOKEN, type FakeApi } from './api.js'
@@ -18,9 +18,9 @@ const seen: unknown[] = []
 
 async function startRest(
   api: FakeApi,
-  { home = mkdtempSync(join(tmpdir(), 'sosie-rest-')), rules = '', env = {} as Record<string, string>, maxRows = 1000, query = '' } = {},
+  { home = mkdtempSync(join(tmpdir(), 'sosie-rest-')), rules = '', env = {} as Record<string, string>, maxRows = 1000, query = '', userinfo = '' } = {},
 ) {
-  const connection = await rest.connect(new URL(`${api.url}${query}`), {
+  const connection = await rest.connect(new URL(`${api.url.replace('//', `//${userinfo}`)}${query}`), {
     maxRows,
     statementTimeout: 5000,
     env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, ...env },
@@ -46,6 +46,8 @@ async function startRest(
       (new DatabaseSync(join(storeDir(home), 'store.db'), { readOnly: true }).prepare('SELECT DISTINCT domain FROM value').all() as { domain: string }[]).map(
         (r) => r.domain,
       ),
+    /** The domain whose real value `sosie scan` would report for this text; undefined when it looks for none. */
+    finds: (text: string) => store.scanIndex().find(normalize(text)),
     /** How many values a domain holds, and how many of them `sosie scan` looks for. */
     scanned: (domain: string) =>
       new DatabaseSync(join(storeDir(home), 'store.db'), { readOnly: true })
@@ -152,6 +154,8 @@ describe('an API without an OpenAPI document', () => {
     // The API's words are faked, but they are its structure: `sosie scan` does not look for them in transcripts.
     for (const words of ['$path', '$query']) expect(sosie.scanned(words), words).toMatchObject({ held: expect.any(Number), looked: 0 })
     expect(sosie.scanned('$path').held).toBeGreaterThan(0)
+    // Nor for one that follows a word that names no entity (/quillon/repos): it is a word, not that word's id.
+    for (const word of ['repos', 'profile']) expect(sosie.finds(word), word).toBeUndefined()
   })
 
   it('names no entity after a word a client typed that is no name, so no domain holds it', async () => {
@@ -267,7 +271,7 @@ describe('an API without an OpenAPI document', () => {
 
   it('applies sosie.yml to fields not met yet, and warns that they are', async () => {
     const lenient = await startRest(api, { rules: 'pass:\n  - order.status\n' })
-    expect(lenient.rules.warnings).toEqual(['sosie.yml: order is not known yet; It applies once Sosie meets it.'])
+    expect(lenient.rules.warnings).toEqual(['sosie.yml: order is not known yet: it applies once Sosie meets it.'])
     const orders = (await lenient.get('/orders')).body
     expect(orders.map((o: Json) => o.status)).toEqual(['paid', 'new', 'shipped'])
     await lenient.close()
@@ -332,13 +336,18 @@ describe('the guard and the credentials', () => {
     expect(JSON.stringify(result)).toMatch(new RegExp(`"id":${id}\\b`))
   })
 
-  it('fakes a key that holds its own credentials, even one that looks like a word', async () => {
-    const s = await startRest(api, { query: '?api_key=opensesame', env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Lower: sesamesecretword` } })
+  it('fakes a key, or a value that passes, that holds its own credentials, even one that looks like a word', async () => {
+    const s = await startRest(api, {
+      query: '?api_key=opensesame',
+      userinfo: 'robot:sunshine99@',
+      rules: 'pass:\n  - echo-credential.note\n',
+      env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Lower: sesamesecretword` },
+    })
     const { body } = await s.get('/echo-credentials')
     expect(api.requests.at(-1)!.path).toBe('/v1/echo-credentials?api_key=opensesame')
-    expect(Object.keys(body)).toHaveLength(3)
+    expect(Object.keys(body)).toHaveLength(5)
     expect(body.theme).toBeDefined()
-    expect(JSON.stringify(body)).not.toMatch(/sesamesecretword|opensesame/)
+    expect(JSON.stringify(body)).not.toMatch(/sesamesecretword|opensesame|sunshine99/)
     await s.close()
   })
 
@@ -417,6 +426,31 @@ describe('the guard and the credentials', () => {
     const asked = api.requests.length
     expect(await sosie.get(`/notes/${encodeURIComponent(note.login)}`)).toMatchObject({ status: 400, body: { error: expect.stringMatching(/another path/) } })
     expect(api.requests.slice(asked)).toEqual([])
+  })
+
+  it('shows the fake the client sent in a link’s field that passes, never the value it turned back', async () => {
+    const lenient = await startRest(api, { rules: 'pass:\n  - user.id\n  - country.*\n' })
+    const [quill] = (await lenient.get('/users')).body.data
+    const { body } = await lenient.get(`/lookup?email=${encodeURIComponent(quill.email)}`)
+    expect(api.requests.at(-1)!.path).toBe('/v1/lookup?email=quill.vantablack%40canary-mail.test')
+    expect(body.self).toBe(`${lenient.address}/users/${encodeURIComponent(quill.email)}`)
+    expect(body.list).toBe(`${lenient.address}/users?id=${encodeURIComponent(quill.email)}`)
+    // A reference guessed from a name (countryId) never passes because what it names does, in a link as in a body.
+    expect(body.near).not.toMatch(/Vantablack/)
+    await lenient.close()
+  })
+
+  it('passes no hidden query name’s value under a wildcard rule', async () => {
+    const lenient = await startRest(api, { rules: 'pass:\n  - country.*\n' })
+    expect((await lenient.get('/countries')).body).toEqual([{ id: 1, name: 'Iceland' }])
+    const { body } = await lenient.get('/country-links')
+    expect(body.next).toMatch(new RegExp(`^${lenient.address}/countries\\?`))
+    expect(decodeURIComponent(body.next)).not.toMatch(/quillon|vantablack|zephyrine|orrowmoor/i)
+    await lenient.close()
+  })
+
+  it('keeps a key __proto__ as the API’s data, not the object’s prototype', async () => {
+    expect(Object.keys((await sosie.get('/proto')).body)).toEqual(['__proto__', 'constructor', 'x'])
   })
 
   it('applies no field’s rule to an error’s body, whatever keys it shares with the record', async () => {

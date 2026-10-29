@@ -56,7 +56,7 @@ export function loadRules(text: string, schema: Schema, file = 'sosie.yml', { le
   const unknown = (id: string, keep: () => void) => {
     if (!learns) return problems.push(unknownField(id))
     keep()
-    rules.warnings.push(`${unknownField(id).replace(/ is not a (table|field)\./, ' is not known yet;')} It applies once Sosie meets it.`)
+    rules.warnings.push(`${unknownField(id).replace(/ is not a (table|field)\./, ' is not known yet:')} it applies once Sosie meets it.`)
   }
   for (const [key, value] of Object.entries(doc)) {
     if (key === 'pass') {

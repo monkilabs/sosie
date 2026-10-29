@@ -64,6 +64,9 @@ class Starts {
   }
 }
 
+/** A word of text, as a label is written: letters, digits, _ and -. */
+const WORD = /[\p{L}\p{N}_-]+/gu
+
 /** Whether a value a request turned back may be echoed: it has a letter, or is long. A short number may be any count. */
 const counts = (real: string) => /\p{L}/u.test(real) || real.length >= 6
 
@@ -96,7 +99,16 @@ class Echoes {
   readonly #plain = new Starts()
   readonly #json = new Starts()
 
-  constructor(reals: Map<string, string>) {
+  /**
+   * `labels` are enum labels and booleans the request turned back, lowercased, with their fakes: an echo
+   * only as a word of text, since a field of their kind may hold the same label as its own value.
+   * `secrets` are Sosie's own credentials, lowercased: never shown, in any form Sosie can tell.
+   */
+  constructor(
+    reals: Map<string, string>,
+    readonly labels: Map<string, string> = new Map(),
+    readonly secrets: readonly string[] = [],
+  ) {
     for (const [real, fakeValue] of reals) {
       const lower = real.toLowerCase()
       const whole = squash(real)
@@ -121,7 +133,8 @@ class Echoes {
    * to be no word's part.
    */
   holds(text: string): boolean {
-    return this.#keys.has(text.toLowerCase()) || this.#squashed(text, this.#words)
+    const lower = text.toLowerCase()
+    return this.#keys.has(lower) || this.labels.has(lower) || this.#secret(lower) || this.#squashed(text, this.#words)
   }
 
   /**
@@ -130,6 +143,7 @@ class Echoes {
    */
   shown(text: string, kind: FieldType['kind']): string | undefined {
     const lower = text.toLowerCase()
+    if (this.#secret(lower) || this.#secret(unescaped(lower))) return undefined
     const whole = this.#values.get(lower)
     if (whole !== undefined) return whole
     let out = text
@@ -150,7 +164,13 @@ class Echoes {
       }
       out += text.slice(from)
     }
+    // A label or a boolean, as a word of text (active=true, {"role":"admin"}): a field of its own kind keeps its value.
+    if (this.labels.size && kind !== 'boolean' && kind !== 'enum') out = out.replace(WORD, (word) => this.labels.get(word.toLowerCase()) ?? word)
     return this.#squashed(out, this.#counted) || this.#squashed(unescaped(out), this.#counted) ? undefined : out
+  }
+
+  #secret(lower: string): boolean {
+    return this.secrets.some((secret) => lower.includes(secret))
   }
 
   #squashed(text: string, words: Set<string>): boolean {
@@ -175,6 +195,10 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
     return /^[A-Za-z_]\w*\.[A-Za-z_]\w*$/.test(text) && names.has(column!) && new RegExp(`\\b${alias}\\b`).test(sent)
   }
   const substitutions = new WeakMap<RequestScope, Map<string, string>>()
+  /** Enum labels and booleans each request turned back, lowercased, with the fakes the client sent. */
+  const labelled = new WeakMap<RequestScope, Map<string, string>>()
+  /** Sosie's own credentials for the upstream, as each request was given them. */
+  const hidden = new WeakMap<RequestScope, readonly string[]>()
   const fakerJs = new FakerJs({ locale: [en, base] })
 
   /** Booleans flip or not, once per domain, by the key. */
@@ -281,10 +305,12 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
   /** The values a request turned back, indexed when first asked for and again after the request turns back another. */
   const echoes = new WeakMap<RequestScope, Echoes>()
   const echoesOf = (scope: RequestScope) => {
-    const reals = substitutions.get(scope)
-    if (!reals?.size) return undefined
+    const reals = substitutions.get(scope) ?? new Map<string, string>()
+    const labels = labelled.get(scope) ?? new Map<string, string>()
+    const secrets = hidden.get(scope) ?? []
+    if (!reals.size && !labels.size && !secrets.length) return undefined
     let index = echoes.get(scope)
-    if (!index) echoes.set(scope, (index = new Echoes(reals)))
+    if (!index) echoes.set(scope, (index = new Echoes(reals, labels, secrets)))
     return index
   }
 
@@ -323,8 +349,9 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
       return planOf(field).domain === null
     },
 
-    request(sent = '', from) {
+    request(sent = '', from, secrets) {
       const substituted = new Map<string, string>(from ? substitutions.get(from) : undefined)
+      const labels = new Map<string, string>(from ? labelled.get(from) : undefined)
 
       const lookup = (fakeValue: string, near?: Field): string | undefined => {
         if (!near) {
@@ -336,10 +363,10 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
         const type = near.type.kind === 'array' ? near.type.of : near.type
         switch (type.kind) {
           case 'boolean':
-            return flip(fakeValue, plan.domain)
+            return label(flip(fakeValue, plan.domain), fakeValue)
           case 'enum': {
             const at = shuffled(plan.domain, type.labels).indexOf(fakeValue)
-            return at >= 0 ? type.labels[at] : undefined
+            return at >= 0 ? label(type.labels[at]!, fakeValue) : undefined
           }
           case 'json':
           case 'bytes':
@@ -350,6 +377,14 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
             return reals.length === 1 ? record(reals[0]!, fakeValue) : undefined
           }
         }
+      }
+
+      const label = (real: string, fakeValue: string) => {
+        if (real !== fakeValue && labels.get(real.toLowerCase()) !== fakeValue) {
+          labels.set(real.toLowerCase(), fakeValue)
+          echoes.delete(scope)
+        }
+        return real
       }
 
       const record = (real: string, fakeValue: string) => {
@@ -380,6 +415,9 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
         },
       }
       substitutions.set(scope, substituted)
+      labelled.set(scope, labels)
+      const kept = secrets ?? (from ? hidden.get(from) : undefined)
+      if (kept?.length) hidden.set(scope, kept)
       return scope
     },
   }
