@@ -2,6 +2,17 @@
   "name": "@sosie/core",
   "version": "0.1.0",
   "description": "The core of Sosie: rules, fakes, the mapping store, scan and MCP. It knows no source.",
+  "keywords": [
+    "ai",
+    "llm",
+    "privacy",
+    "fake-data",
+    "anonymization"
+  ],
+  "homepage": "https://github.com/monkilabs/sosie#readme",
+  "bugs": {
+    "url": "https://github.com/monkilabs/sosie/issues"
+  },
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -21,8 +32,12 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@faker-js/faker": "^10.6.0",

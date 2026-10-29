@@ -3,8 +3,8 @@
 Sosie is a read-only endpoint in front of a data source that fakes every value
 on the way out. An AI agent, the developer's app and their tools connect to it
 as they would to the real source, and get the real shape with fake contents.
-Postgres was its first source, in v0.1, the [MVP](mvp.md); the team's own REST
-and GraphQL APIs are the next. More are packages behind the same interface. The
+Postgres was its first source, the [MVP](mvp.md); the team's own REST and
+GraphQL APIs came next, and v0.1, the first release, has all three. More are packages behind the same interface. The
 [low-level design](lld.md) has the details.
 
 ## Goals
@@ -107,8 +107,8 @@ same for every source.
 
 | Order | Source | Why then |
 | --- | --- | --- |
-| v0.1 | Postgres | Most personal data lives in databases, and teams least dare give an agent access to them |
-| v0.2 | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
+| First, the MVP | Postgres | Most personal data lives in databases, and teams least dare give an agent access to them |
+| Next, also in v0.1 | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
 | Later | MySQL and other databases; third-party APIs | On demand; many third-party APIs already offer a test mode |
 
 The core is tested through an in-memory test source, without Postgres, so

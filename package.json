@@ -16,7 +16,8 @@
     "build": "npm run build --workspaces",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && vitest run",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "release": "npm run check && npm publish --workspaces"
   },
   "devDependencies": {
     "@prisma/adapter-pg": "^7.10.1",

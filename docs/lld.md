@@ -963,7 +963,7 @@ uses, count; only the variables it declares are sent.
   rounded: a 64-bit id goes as a string (`"id": "4809558151065630052"`), or
   written in the query.
 
-## Adding a source after v0.1
+## Adding a source
 
 A new source is a package that exports a `Source`. It decides how clients talk
 to it and how its upstream is read; it calls the core for every value it
