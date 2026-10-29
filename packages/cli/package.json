@@ -8,6 +8,9 @@
     "llm",
     "mcp",
     "postgres",
+    "rest",
+    "openapi",
+    "graphql",
     "privacy",
     "fake-data",
     "anonymization"

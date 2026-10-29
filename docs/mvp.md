@@ -33,11 +33,11 @@ a developer has to learn before the first query.
 
 ## Out of scope, and why
 
-| Not in v0.1 | Why |
+| Not in the MVP | Why |
 | --- | --- |
 | Writes | Read-only is the promise that makes Sosie safe to point at production |
 | MySQL, SQLite, MongoDB | Postgres first; each is a later source package |
-| REST and GraphQL APIs | Next, as source packages, faked consistently with the database (see the HLD) |
+| REST and GraphQL APIs | Built next, as source packages faked consistently with the database ([HLD](hld.md#how-sosie-grows)), and released with it in v0.1 |
 | Filtering the agent's shell output | `sosie scan` proves the result; a hook per assistant comes later |
 | Mappings shared across a team | Each developer's fakes are their own; nothing leaves the machine |
 | TLS and passwords on the local endpoint | It listens on 127.0.0.1 by default; another `--host` gets a warning |
