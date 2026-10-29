@@ -8,7 +8,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
+import { startApi, TOKEN } from './api.js'
 import { canariesIn } from './canaries.js'
+import { startGraphql } from './graphql-api.js'
 
 const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url))
 if (!existsSync(CLI)) throw new Error('Build the packages first: npm run build')
@@ -25,9 +27,16 @@ function run(args: string[], more: Record<string, string | undefined> = {}, cwd?
   return { status: result.status, stdout: result.stdout, stderr: result.stderr }
 }
 
+/** Every Sosie a test started: one that a failing test left running is stopped with the file. */
+const children = new Set<ChildProcess>()
+afterAll(() => {
+  for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+})
+
 /** Start `sosie` and wait for its banner. */
 async function start(more: Record<string, string | undefined>, args: string[] = ['--port', '0']) {
   const child = spawn(process.execPath, [CLI, ...args], { env: env(more), stdio: ['ignore', 'pipe', 'pipe'] })
+  children.add(child)
   let stdout = ''
   let stderr = ''
   child.stdout.on('data', (d) => (stdout += d))
@@ -37,14 +46,14 @@ async function start(more: Record<string, string | undefined>, args: string[] = 
     child.stdout.on('data', () => stdout.includes('Claude Code:') && (clearTimeout(timer), resolve()))
     child.on('exit', () => (clearTimeout(timer), reject(new Error(`exited: ${stdout}${stderr}`))))
   })
-  const address = /Your agent, app and psql:\s+(\S+)/.exec(stdout)![1]!
+  const address = /Your agent, app and \w+:\s+(\S+)/.exec(stdout)![1]!
   return { child, address, stdout: () => stdout }
 }
 
-function stop(child: ChildProcess): Promise<number | null> {
+function stop(child: ChildProcess, signal: NodeJS.Signals = 'SIGINT'): Promise<number | null> {
   return new Promise((resolve) => {
     child.once('exit', (code) => resolve(code))
-    child.kill('SIGINT')
+    child.kill(signal)
   })
 }
 
@@ -76,7 +85,7 @@ describe('sosie', () => {
     expect(out).toMatch(/Your agent, app and psql:\s+postgres:\/\/localhost:\d+\/sosie_test_\w+/)
     expect(out).toContain('claude mcp add sosie -- npx @sosie/cli mcp')
     expect(out).not.toContain('reader')
-    const running = readFileSync(join(home, 'current.json'), 'utf8')
+    const running = readFileSync(join(home, 'running', `${sosie.child.pid}.json`), 'utf8')
     expect(running).not.toContain('reader')
     expect(JSON.parse(running).address).toBe(sosie.address)
   })
@@ -93,7 +102,7 @@ describe('sosie', () => {
 
   it('serves describe and query over MCP', async () => {
     const mcp = await mcpClient(home)
-    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query'])
+    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'graphql', 'request'])
     const users = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
     expect(users.entities[0].fields).toContainEqual({ field: 'email', type: 'string', key: 'unique' })
     const result = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT * FROM users u JOIN orders o ON o.user_id = u.id' } })
@@ -127,12 +136,54 @@ describe('sosie', () => {
 
   it('stops on Ctrl+C, and MCP then says how to start it', async () => {
     expect(await stop(sosie.child)).toBe(0)
-    expect(existsSync(join(home, 'current.json'))).toBe(false)
+    expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`))).toBe(false)
     const mcp = await mcpClient(home)
     const result = await mcp.callTool({ name: 'describe', arguments: {} })
     expect(result.isError).toBe(true)
     expect(text(result)).toMatch(/^Sosie is not running\. Ask the developer to start it/)
     await mcp.close()
+  })
+})
+
+describe('sosie, in front of an API', () => {
+  it('starts, serves curl and MCP, and says it found no OpenAPI document', async () => {
+    const api = await startApi()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-rest-'))
+    const sosie = await start({ SOSIE_UPSTREAM: api.url, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home }, ['--port', '0'])
+    const out = sosie.stdout()
+    expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document/)
+    expect(out).toContain('! No OpenAPI document found')
+    expect(out).toMatch(/Your agent, app and curl:\s+http:\/\/localhost:\d+\/v1/)
+    expect(out).not.toContain(TOKEN)
+    const users = (await (await fetch(`${sosie.address}/users`)).json()) as { data: unknown[] }
+    expect(users.data).toHaveLength(3)
+    const mcp = await mcpClient(home)
+    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'graphql', 'request'])
+    const result = JSON.parse(text(await mcp.callTool({ name: 'request', arguments: { path: '/users' } })))
+    expect(result.body.data).toHaveLength(3)
+    expect(canariesIn(JSON.stringify([users, result]))).toEqual([])
+    const query = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT 1' } })
+    expect(text(query)).toBe('Sosie serves rest here, not postgres: query is for postgres.')
+    await mcp.close()
+    expect(await stop(sosie.child)).toBe(0)
+    await api.close()
+  })
+})
+
+describe('sosie, in front of a GraphQL API', () => {
+  it('starts on its path, and serves GraphQL clients and MCP', async () => {
+    const api = await startGraphql()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-gql-'))
+    const sosie = await start({ SOSIE_UPSTREAM: api.url, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home }, ['--port', '0'])
+    expect(sosie.stdout()).toMatch(/✓ 127\.0\.0\.1:\d+\/api\/graphql, read-only: 8 types, 17 queries/)
+    expect(sosie.address).toMatch(/^http:\/\/localhost:\d+\/api\/graphql$/)
+    const mcp = await mcpClient(home)
+    const result = JSON.parse(text(await mcp.callTool({ name: 'graphql', arguments: { query: '{ users { email } }' } })))
+    expect(result.data.users).toHaveLength(3)
+    expect(canariesIn(JSON.stringify(result))).toEqual([])
+    await mcp.close()
+    expect(await stop(sosie.child)).toBe(0)
+    await api.close()
   })
 })
 
@@ -148,10 +199,10 @@ describe('sosie, when something is wrong', () => {
   it('names an upstream it cannot read, without echoing it', () => {
     const result = run([], { SOSIE_UPSTREAM: 'mysql://kim:secret@db/app', SOSIE_HOME: home })
     expect(result.status).toBe(2)
-    expect(result.stderr).toContain('Sosie reads postgres:// upstreams for now, not mysql://.')
+    expect(result.stderr).toContain('Sosie reads postgres:// databases and http:// or https:// APIs for now, not mysql://.')
     expect(result.stderr).not.toContain('secret')
     const notUrl = run([], { SOSIE_UPSTREAM: 'host=db password=secret', SOSIE_HOME: home })
-    expect(notUrl.stderr).toContain('The connection string is not a URL.')
+    expect(notUrl.stderr).toContain('The upstream is not a URL.')
     expect(notUrl.stderr).not.toContain('secret')
   })
 
@@ -169,6 +220,36 @@ describe('sosie, when something is wrong', () => {
     const result = run([], { SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home }, dir)
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('✗ sosie.yml: users.emial is not a field. Did you mean users.email?')
+  })
+
+  it('starts a second Sosie on the next free port, and MCP serves both', async () => {
+    const shared = mkdtempSync(join(tmpdir(), 'sosie-two-'))
+    const first = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: shared }, [])
+    const second = await start({ SOSIE_UPSTREAM: inject('admin'), SOSIE_HOME: shared }, []).catch(async (error) => {
+      await stop(first.child)
+      throw error
+    })
+    try {
+      // Other programs may hold and free ports meanwhile: the second only needs one of its own.
+      expect(new URL(second.address).port).not.toBe(new URL(first.address).port)
+      const mcp = await mcpClient(shared)
+      try {
+        const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'countries' } })))
+        expect(all.sources.map((s: { address: string }) => s.address)).toEqual([second.address, first.address])
+      } finally {
+        await mcp.close()
+      }
+    } finally {
+      await stop(second.child)
+      await stop(first.child)
+    }
+  })
+
+  it('stops when its terminal closes, and leaves no running file', async () => {
+    const sosie = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home })
+    expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`))).toBe(true)
+    expect(await stop(sosie.child, 'SIGHUP')).toBe(0)
+    expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`))).toBe(false)
   })
 
   it('counts the fields that pass', async () => {

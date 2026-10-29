@@ -16,6 +16,7 @@ const known: Record<string, Record<string, string>> = {
 const scope: RequestScope = {
   lookup: (fake: string, near?: Field) => (near ? known[near.id]?.[fake] : fake === 'kim@example.net' ? 'real@corp.test' : undefined),
   scrub: (t: string) => t,
+  turnedBack: () => false,
 }
 
 const rewrite = (sql: string) => {

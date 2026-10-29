@@ -5,6 +5,8 @@
   "workspaces": [
     "packages/core",
     "packages/postgres",
+    "packages/rest",
+    "packages/graphql",
     "packages/cli"
   ],
   "engines": {

@@ -23,7 +23,7 @@ export async function startSosie({
   upstream = new URL(inject('upstream')),
 } = {}): Promise<Started> {
   const connection = await postgres.connect(upstream, { maxRows, statementTimeout: 5000 })
-  const store = Store.open(storeDir(home, connection.label))
+  const store = Store.open(storeDir(home))
   const faker = createFaker({ schema: connection.schema, rules: loadRules(rules, connection.schema), store })
   const endpoint = await connection.serve({ host: '127.0.0.1', port: 0 }, faker)
   const clients: pg.Client[] = []

@@ -3,9 +3,9 @@
 Sosie is a read-only endpoint in front of a data source that fakes every value
 on the way out. An AI agent, the developer's app and their tools connect to it
 as they would to the real source, and get the real shape with fake contents.
-v0.1's source is Postgres; more are packages behind the same interface. This
-document covers v0.1, the [MVP](mvp.md); the [low-level design](lld.md) has the
-details.
+Postgres was its first source, in v0.1, the [MVP](mvp.md); the team's own REST
+and GraphQL APIs are the next. More are packages behind the same interface. The
+[low-level design](lld.md) has the details.
 
 ## Goals
 
@@ -23,11 +23,12 @@ details.
 - **Runs where the data lives.** On the developer's machine or a host the team
   chooses. Never a hosted service.
 
-## Non-goals (v0.1)
+## Non-goals
 
-Writes, databases other than Postgres, REST and GraphQL, shell-output filtering,
-team-shared mappings, and defending against an agent that deliberately hunts
-for secrets on the machine Sosie runs on (see [Threat model](#threat-model)).
+Writes, databases other than Postgres, third-party APIs (for now),
+shell-output filtering, team-shared mappings, and defending against an agent
+that deliberately hunts for secrets on the machine Sosie runs on (see
+[Threat model](#threat-model)).
 
 ## How a developer uses it
 
@@ -44,8 +45,8 @@ for secrets on the machine Sosie runs on (see [Threat model](#threat-model)).
 ## Architecture
 
 Sosie is a **core** that knows nothing about any database or API, and
-**sources** that each know one kind of upstream. v0.1 ships one source,
-Postgres. A source speaks its upstream's protocol to clients and reports which
+**sources** that each know one kind of upstream: Postgres, and the team's REST
+and GraphQL APIs. A source speaks its upstream's protocol to clients and reports which
 field each value came from; the core decides every fake.
 
 ```mermaid
@@ -70,7 +71,7 @@ flowchart LR
       results --> faker
       rewrite -. lookup .-> faker
       faker --> endpoint
-      later["Later sources:<br/>REST, GraphQL, MySQL"] -.-> faker
+      later["Other sources:<br/>REST, GraphQL; later MySQL"] -.-> faker
     end
   end
   upstream -->|read-only login| db[("Your database")]
@@ -90,6 +91,12 @@ flowchart LR
 | Postgres | Rewriter | Asks the core for the real value behind each fake in a query |
 | Postgres | Upstream client | One read-only session per client, with a timeout and a row cap |
 | Postgres | Results | Names the field of each result column, from the table and position Postgres reports |
+| REST | Endpoint and guard | The API's paths on a local HTTP address; `GET` and `HEAD` only, with Sosie's credentials |
+| REST | Fields | Names each value's field from the OpenAPI document, or from where it sits |
+| REST | Links | Points the API's links at Sosie, with nothing real in them, and reads them back |
+| GraphQL | Endpoint and guard | The API's path on a local HTTP address; queries only, checked with their variables against the schema |
+| GraphQL | Introspection | Answered from the schema Sosie holds; it never reaches the API |
+| GraphQL | Fields | Names each value's field from the schema, through aliases, fragments, interfaces and unions |
 
 ## How Sosie grows
 
@@ -101,7 +108,7 @@ same for every source.
 | Order | Source | Why then |
 | --- | --- | --- |
 | v0.1 | Postgres | Most personal data lives in databases, and teams least dare give an agent access to them |
-| Next | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
+| v0.2 | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
 | Later | MySQL and other databases; third-party APIs | On demand; many third-party APIs already offer a test mode |
 
 The core is tested through an in-memory test source, without Postgres, so
@@ -144,9 +151,9 @@ sequenceDiagram
 
 **Sosie protects against** real values reaching a model through normal agent
 work: query results, error messages, a query echoed back with real values
-substituted, and transcripts kept afterwards.
+substituted, links an API returns, and transcripts kept afterwards.
 
-**Sosie does not protect against, in v0.1:**
+**Sosie does not protect against:**
 
 - **An agent hunting for secrets on the same machine.** An agent runs as the
   developer's user, so it can read files and processes that user can. Run
@@ -161,8 +168,24 @@ substituted, and transcripts kept afterwards.
 - **Shape.** Row counts, which values are null, and the rough size of values are
   visible.
 - **Who can reach the endpoint.** It has no password. On 127.0.0.1, only this
-  machine can; on another `--host`, anyone who reaches that address can query
-  the fakes and filter on the real values.
+  machine can, and an HTTP endpoint answers only requests addressed to
+  localhost, and from no page of another site, so a web page can neither
+  rebind its name to it nor make it send a request; on another `--host`,
+  anyone who reaches that address can query the fakes and filter on the real
+  values.
+- **An API's own structure and behaviour.** Its paths, its base path (in
+  Sosie's address), its OpenAPI document or GraphQL schema with their
+  descriptions, and its status codes are visible: they are the API, not values
+  from it. A `GET`, or a GraphQL query field, that writes is the API's to
+  guard; Sosie sends every `GET` and every query on.
+- **What the team lets pass, and keys that look like structure.** A field
+  listed under `pass` shows its own values: Sosie hides in it only what the
+  request turned back and its own credentials. Without an API's document, a
+  map keyed by lowercase words (`{ "jdoe": … }`) keeps its keys, as a json
+  column's or a JSON scalar's do. The LLD's limits list each such case.
+- **Fakes crossing sources.** One store serves every source, so a fake from
+  the database typed into an API request turns back into its real value, which
+  goes to that API. It never reaches the client.
 - **The schema and the server.** Table and column names, the definitions of
   views and functions, the names of the server's databases and roles, the server's version and most of
   its settings are visible: drivers and agents need them, and they are not

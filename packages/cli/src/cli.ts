@@ -29,7 +29,7 @@ const USAGE = `Sosie: your AI agent sees a double of your data. Never the real t
 
 Usage:
   sosie                 Start. Reads SOSIE_UPSTREAM, or asks for it.
-  sosie mcp             MCP server over stdio, for the running sosie.
+  sosie mcp             MCP server over stdio, for every running sosie.
   sosie scan <path>...  Search files and folders for real values; exit 1 if one is found.
 
 Options for sosie:
@@ -38,8 +38,18 @@ Options for sosie:
   --rules <file>   Rules file (./sosie.yml when present)
   --max-rows <n>   Rows a query returns at most (1000)
 
-The connection string is never an argument: arguments show in shell history
-and the process list, where an agent can read them.
+Environment:
+  SOSIE_UPSTREAM          A database's connection string, or an API's base URL
+  SOSIE_UPSTREAM_HEADERS  For an API: headers Sosie sends it, one 'Name: value'
+                          per line, such as 'Authorization: Bearer ...'
+  SOSIE_OPENAPI           For a REST API: its OpenAPI document, a file or URL
+                          (otherwise Sosie looks for one at the usual paths)
+  SOSIE_GRAPHQL_SCHEMA    For a GraphQL API without introspection: its SDL file,
+                          or a file of its introspection result as JSON
+  SOSIE_HOME              Where Sosie keeps its store (~/.sosie)
+
+The upstream and its credentials are never arguments: arguments show in shell
+history and the process list, where an agent can read them.
 `
 
 class Exit extends Error {
@@ -82,7 +92,8 @@ async function main(argv: string[]): Promise<void> {
   if (command === 'scan') return scanCommand(rest)
   if (command !== undefined) throw new Exit(2, `Unknown command: ${command}\n\n${USAGE}`)
   return start({
-    port: number(values.port, 7674, '--port'),
+    port: number(values.port, DEFAULT_PORT, '--port'),
+    portChosen: values.port !== undefined,
     host: values.host ?? '127.0.0.1',
     rules: values.rules,
     maxRows: number(values['max-rows'], 1000, '--max-rows', 1),
@@ -98,16 +109,26 @@ function number(value: string | undefined, fallback: number, name: string, min =
 
 /* sosie */
 
-async function start(options: { port: number; host: string; rules: string | undefined; maxRows: number }): Promise<void> {
+const DEFAULT_PORT = 7674
+/** Ports a Sosie started without --port tries, so a second one, for another upstream, just starts. */
+const PORTS_TO_TRY = 10
+
+async function start(options: {
+  port: number
+  portChosen: boolean
+  host: string
+  rules: string | undefined
+  maxRows: number
+}): Promise<void> {
   const upstream = await readUpstream()
   const source = sources.find((s) => s.matches(upstream))
   if (!source) {
-    throw new Exit(2, fail(`Sosie reads ${sources.map((s) => `${s.kind}://`).join(', ')} upstreams for now, not ${upstream.protocol}//.`))
+    throw new Exit(2, fail(`Sosie reads postgres:// databases and http:// or https:// APIs for now, not ${upstream.protocol}//.`))
   }
 
   let connection
   try {
-    connection = await source.connect(upstream, { maxRows: options.maxRows, statementTimeout: 30_000 })
+    connection = await source.connect(upstream, { maxRows: options.maxRows, statementTimeout: 30_000, env: process.env })
   } catch (error) {
     throw new Exit(1, fail((error as Error).message))
   }
@@ -117,7 +138,7 @@ async function start(options: { port: number; host: string; rules: string | unde
   if (rulesFile) {
     if (!existsSync(rulesFile)) throw new Exit(2, fail(`No rules file at ${rulesFile}.`))
     try {
-      rules = loadRules(readFileSync(rulesFile, 'utf8'), connection.schema, rulesFile)
+      rules = loadRules(readFileSync(rulesFile, 'utf8'), connection.schema, rulesFile, { learns: !!connection.learns })
     } catch (error) {
       await connection.close()
       if (error instanceof RulesError) throw new Exit(1, error.problems.map(fail).join('\n'))
@@ -126,38 +147,24 @@ async function start(options: { port: number; host: string; rules: string | unde
   }
 
   const home = sosieHome()
-  const store = Store.open(storeDir(home, connection.label))
+  const store = Store.open(storeDir(home))
   const faker = createFaker({ schema: connection.schema, rules, store })
   let endpoint
-  try {
-    endpoint = await connection.serve({ host: options.host, port: options.port }, faker)
-  } catch (error) {
-    store.close()
-    await connection.close()
-    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-      throw new Exit(1, fail(`Port ${options.port} is in use. Is Sosie already running? Choose another with --port.`))
+  for (let port = options.port; !endpoint; port++) {
+    try {
+      endpoint = await connection.serve({ host: options.host, port }, faker)
+    } catch (error) {
+      const busy = (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
+      if (busy && !options.portChosen && port < options.port + PORTS_TO_TRY - 1) continue
+      store.close()
+      await connection.close()
+      if (busy) throw new Exit(1, fail(`Port ${port} is in use. Is Sosie already running? Choose another with --port.`))
+      throw error
     }
-    throw error
   }
-  writeRunning(home, { kind: source.kind, address: endpoint.address, schema: connection.schema, passing: [...rules.pass] })
-
-  const passing = rules.pass.size
-  const lines = [
-    '',
-    ok(`${connection.label}, read-only: ${connection.summary}`),
-    ok(passing ? `Every value is faked; ${passing} ${passing === 1 ? 'field passes' : 'fields pass'} (${rulesFile})` : 'Every value is faked'),
-    ...connection.warnings.map(warn),
-    ...(loopback(options.host)
-      ? []
-      : [warn(`Listening on ${options.host}, with no password: anyone who can reach it can query the fakes and filter on the real values.`)]),
-    '',
-    `  Your agent, app and psql:  ${endpoint.address}`,
-    `  Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp`,
-    '',
-  ]
-  process.stdout.write(lines.join('\n') + '\n')
-
-  await new Promise<void>((done) => {
+  // Ctrl+C, a kill, or the terminal closing: each stops Sosie and leaves no running/ file behind, from before
+  // the file is written and the address printed, so a client that starts on the address can stop it too.
+  const stopped = new Promise<void>((done) => {
     const stop = async () => {
       clearRunning(home)
       await endpoint.close()
@@ -167,7 +174,27 @@ async function start(options: { port: number; host: string; rules: string | unde
     }
     process.once('SIGINT', stop)
     process.once('SIGTERM', stop)
+    process.once('SIGHUP', stop)
   })
+  writeRunning(home, { kind: source.kind, address: endpoint.address, schema: connection.schema, passing: [...rules.pass] })
+
+  const passing = rules.pass.size
+  const lines = [
+    '',
+    ok(`${connection.label}, read-only: ${connection.summary}`),
+    ok(passing ? `Every value is faked; ${passing} ${passing === 1 ? 'field passes' : 'fields pass'} (${rulesFile})` : 'Every value is faked'),
+    ...connection.warnings.map(warn),
+    ...rules.warnings.map(warn),
+    ...(loopback(options.host)
+      ? []
+      : [warn(`Listening on ${options.host}, with no password: anyone who can reach it can query the fakes and filter on the real values.`)]),
+    '',
+    `  Your agent, app and ${(connection.client ?? 'tools') + ':'}`.padEnd(29) + endpoint.address,
+    `  Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp`,
+    '',
+  ]
+  process.stdout.write(lines.join('\n') + '\n')
+  await stopped
 }
 
 /** SOSIE_UPSTREAM, or a hidden prompt in a terminal. Never an argument, never echoed. */
@@ -175,7 +202,7 @@ async function readUpstream(): Promise<URL> {
   let text = process.env.SOSIE_UPSTREAM
   if (!text) {
     if (!process.stdin.isTTY) {
-      throw new Exit(2, fail("Set SOSIE_UPSTREAM to your database's connection string, or run sosie in a terminal to type it."))
+      throw new Exit(2, fail("Set SOSIE_UPSTREAM to your database's connection string or your API's base URL, or run sosie in a terminal to type it."))
     }
     try {
       text = await hiddenPrompt('  Connection string (hidden): ', process.stdin, process.stdout)
@@ -186,7 +213,10 @@ async function readUpstream(): Promise<URL> {
   try {
     return new URL(text)
   } catch {
-    throw new Exit(2, fail('The connection string is not a URL. It looks like postgres://user:password@host:5432/database.'))
+    throw new Exit(
+      2,
+      fail('The upstream is not a URL. It looks like postgres://user:password@host:5432/database, or https://api.example.com/v1.'),
+    )
   }
 }
 

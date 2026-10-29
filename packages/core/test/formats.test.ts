@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { formatByName } from '../src/fake/formats.js'
-import { planFields } from '../src/domains.js'
+import { planFields, planner } from '../src/domains.js'
 import { loadRules } from '../src/rules.js'
 import { schema } from '../../../test/memory-source/fixtures.js'
 
@@ -44,6 +44,21 @@ describe('domains', () => {
     expect(plans.get('users.email')!.domain).toBe('format:email')
     expect(plans.get('orders.contact_email')!.domain).toBe('format:email')
     expect(plans.get('users.name')!.domain).toBe('format:full_name')
+  })
+
+  it('plans a field learned at runtime as it would one in the schema', () => {
+    const rules = loadRules('pass:\n  - order.status\n  - country.*\n', { entities: [] }, 'sosie.yml', { learns: true })
+    const plan = planner({ entities: [] }, rules)
+    expect(plan({ id: 'order.status', name: 'status', type: { kind: 'string' } }).domain).toBeNull()
+    expect(plan({ id: 'country.name', name: 'name', type: { kind: 'string' } }).domain).toBeNull()
+    expect(plan({ id: 'user.email', name: 'email', type: { kind: 'string' } }).domain).toBe('format:email')
+    expect(plan({ id: 'user.name', name: 'name', type: { kind: 'string' } }).domain).toBe('format:full_name')
+    expect(plan({ id: 'order.userId', name: 'userId', type: { kind: 'integer' }, references: 'user.id' }).domain).toBe('user.id')
+    // A reference guessed from a name never passes because its target does: the guess may be wrong.
+    const passing = planner({ entities: [] }, loadRules('pass:\n  - tax.*\n', { entities: [] }, 'sosie.yml', { learns: true }))
+    expect(passing({ id: 'user.taxId', name: 'taxId', type: { kind: 'string' }, references: 'tax.id', guessed: true }).domain).toBe('tax.id')
+    expect(passing({ id: 'user.countryId', name: 'countryId', type: { kind: 'string' }, references: 'tax.id' }).domain).toBeNull()
+    expect(plan({ id: 'user.contact', name: 'contact', type: { kind: 'string' }, format: 'email' }).domain).toBe('format:email')
   })
 
   it('anything else fakes in its own domain, with the format sosie.yml gives', () => {
