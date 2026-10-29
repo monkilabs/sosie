@@ -8,7 +8,7 @@ import { memorySource, type MemoryEndpoint } from './source.js'
 
 async function serve(rules = '', home = mkdtempSync(join(tmpdir(), 'sosie-core-'))) {
   const connection = await memorySource(data).connect(new URL('memory:app'), { maxRows: 1000, statementTimeout: 30_000 })
-  const store = Store.open(storeDir(home, connection.label))
+  const store = Store.open(storeDir(home))
   const faker = createFaker({ schema: connection.schema, rules: loadRules(rules, connection.schema), store })
   const endpoint = (await connection.serve({ host: '127.0.0.1', port: 0 }, faker)) as MemoryEndpoint
   const all = () => ({ users: endpoint.rows('users'), orders: endpoint.rows('orders'), countries: endpoint.rows('countries') })

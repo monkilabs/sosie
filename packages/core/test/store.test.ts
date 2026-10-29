@@ -1,6 +1,9 @@
+import { execFile } from 'node:child_process'
 import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { Store, storeDir, storeDirs } from '../src/store.js'
 
@@ -17,6 +20,18 @@ describe('the mapping store', () => {
     expect(readFileSync(join(dir, 'key'))).toHaveLength(32)
   })
 
+  it('lets several Sosies start on a new store at once, and gives each fake to one value', async () => {
+    const dir = fresh()
+    const script = fileURLToPath(new URL('./store-race.mjs', import.meta.url))
+    const runs = await Promise.all(Array.from({ length: 6 }, () => promisify(execFile)(process.execPath, [script, dir])))
+    const mappings = runs.map((r) => JSON.parse(r.stdout) as Record<string, string>)
+    for (const mapping of mappings) expect(mapping).toEqual(mappings[0])
+    const store = Store.open(dir)
+    for (const fake of new Set(Object.values(mappings[0]!))) expect(store.reals(fake, 'd')).toHaveLength(1)
+    expect(new Set(Object.values(mappings[0]!)).size).toBe(30)
+    store.close()
+  })
+
   it('remembers a fake across sessions', () => {
     const dir = fresh()
     const store = Store.open(dir)
@@ -30,6 +45,16 @@ describe('the mapping store', () => {
   it('never gives a value itself as its fake', () => {
     const store = Store.open(fresh())
     expect(store.fake('d', 'same', unique, (_, attempt) => (attempt === 0 ? 'same' : 'other'))).toBe('other')
+  })
+
+  it('passes on why a fake could not be drawn, and stays usable', () => {
+    const store = Store.open(fresh())
+    expect(() =>
+      store.fake('d', 'broken', unique, () => {
+        throw new Error('the draw failed')
+      }),
+    ).toThrow('the draw failed')
+    expect(store.fake('d', 'next', unique, () => 'fine')).toBe('fine')
   })
 
   it('keeps a value with nothing to fake as it is, without drawing forever', () => {
@@ -84,11 +109,9 @@ describe('the mapping store', () => {
     expect(index.find('kim novak')).toBeUndefined()
   })
 
-  it('lists the stores under a home', () => {
+  it('is one store for every upstream under a home', () => {
     const home = mkdtempSync(join(tmpdir(), 'sosie-home-'))
-    Store.open(storeDir(home, 'db.internal:5432/app')).close()
-    Store.open(storeDir(home, 'db.internal:5432/crm')).close()
-    expect(storeDirs(home)).toHaveLength(2)
-    expect(storeDir(home, 'db.internal:5432/app')).toMatch(/[0-9a-f]{12}$/)
+    Store.open(storeDir(home)).close()
+    expect(storeDirs(home)).toEqual([join(home, 'store')])
   })
 })

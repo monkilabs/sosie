@@ -12,7 +12,7 @@ const echo: McpTool = {
   run: async (input, running) => ({ ...input, address: running.address }),
 }
 
-async function connect(running: () => Promise<Running>) {
+async function connect(running: () => Promise<Running[]>) {
   const [server, client] = InMemoryTransport.createLinkedPair()
   await serveMcp({ version: '0.0.0', tools: [{ kind: 'memory', tool: echo }], running, transport: server })
   const mcp = new Client({ name: 'test', version: '0.0.0' })
@@ -23,13 +23,15 @@ async function connect(running: () => Promise<Running>) {
 const text = (result: unknown) => ((result as { content: { text: string }[] }).content[0]!.text)
 
 describe('sosie mcp', () => {
-  const running = async (): Promise<Running> => ({ kind: 'memory', address: 'memory://app', schema, passing: ['orders.status'] })
+  const one: Running = { kind: 'memory', address: 'memory://app', schema, passing: ['orders.status'] }
+  const running = async (): Promise<Running[]> => [one]
 
   it('lists describe and the source tools', async () => {
     const mcp = await connect(running)
     const { tools } = await mcp.listTools()
     expect(tools.map((t) => t.name)).toEqual(['describe', 'echo'])
     expect(tools[1]!.inputSchema.required).toEqual(['text'])
+    expect(Object.keys(tools[1]!.inputSchema.properties!)).toEqual(['text', 'extra', 'address'])
   })
 
   it('describes entities, fields, keys, references and what passes', async () => {
@@ -62,7 +64,39 @@ describe('sosie mcp', () => {
     const result = await stopped.callTool({ name: 'describe', arguments: {} })
     expect(result.isError).toBe(true)
     expect(text(result)).toBe('Sosie is not running.')
-    const other = await connect(async () => ({ ...(await running()), kind: 'postgres' }))
-    expect(text(await other.callTool({ name: 'echo', arguments: { text: 'hi' } }))).toMatch(/serves a postgres upstream/)
+    const other = await connect(async () => [{ ...one, kind: 'postgres' }])
+    expect(text(await other.callTool({ name: 'echo', arguments: { text: 'hi' } }))).toBe('Sosie serves postgres here, not memory: echo is for memory.')
+  })
+
+  it('serves every running Sosie: describe each, and send a tool to the newest of its kind', async () => {
+    const api: Running = { kind: 'rest', address: 'http://localhost:7675', schema: { entities: [{ id: 'User', name: 'User', fields: [] }] }, passing: [] }
+    const older: Running = { ...one, address: 'memory://older' }
+    const mcp = await connect(async () => [api, one, older])
+    const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
+    expect(all.sources.map((s: { kind: string; address: string }) => [s.kind, s.address])).toEqual([
+      ['rest', 'http://localhost:7675'],
+      ['memory', 'memory://app'],
+      ['memory', 'memory://older'],
+    ])
+    const users = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
+    expect(users.sources.map((s: { address: string }) => s.address)).toEqual(['memory://app', 'memory://older'])
+    expect(JSON.parse(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi' } }))).address).toBe('memory://app')
+    expect(JSON.parse(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi', address: 'memory://older' } })))).toEqual({
+      text: 'hi',
+      address: 'memory://older',
+    })
+    const wrong = await mcp.callTool({ name: 'echo', arguments: { text: 'hi', address: 'http://localhost:7675' } })
+    expect(wrong.isError).toBe(true)
+    expect(text(wrong)).toBe('No memory Sosie runs at http://localhost:7675. Running: memory://app, memory://older.')
+  })
+
+  it('lists a Sosie that has met no entity yet, as an API without a schema document', async () => {
+    const learning: Running = { kind: 'rest', address: 'http://localhost:7675', schema: { entities: [] }, passing: [] }
+    const mcp = await connect(async () => [learning, one])
+    const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
+    expect(all.sources.map((s: { address: string; entities: unknown[] }) => [s.address, s.entities.length])).toEqual([
+      ['http://localhost:7675', 0],
+      ['memory://app', 3],
+    ])
   })
 })

@@ -1,39 +1,44 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Running } from './source.js'
 
 /**
- * `sosie` writes what `sosie mcp` needs to $SOSIE_HOME/current.json: the local
- * address, the source kind and the neutral schema. Nothing real: no upstream,
- * no credentials, no values.
+ * Each running `sosie` writes what `sosie mcp` needs to
+ * $SOSIE_HOME/running/<pid>.json: the local address, the source kind and the
+ * neutral schema. Nothing real: no upstream, no credentials, no values.
  */
-const FILE = 'current.json'
+const DIR = 'running'
 
 export function writeRunning(home: string, running: Running, pid = process.pid): void {
-  mkdirSync(home, { recursive: true, mode: 0o700 })
-  writeFileSync(join(home, FILE), JSON.stringify({ ...running, pid }, null, 2), { mode: 0o600 })
+  mkdirSync(join(home, DIR), { recursive: true, mode: 0o700 })
+  writeFileSync(join(home, DIR, `${pid}.json`), JSON.stringify({ ...running, pid, startedAt: Date.now() }, null, 2), { mode: 0o600 })
 }
 
-export function readRunning(home: string): Running {
-  let current: Running & { pid: number }
+/** Every Sosie running on this machine, the newest first. Throws a message for the agent when none is. */
+export function readRunning(home: string): Running[] {
+  let files: string[] = []
   try {
-    current = JSON.parse(readFileSync(join(home, FILE), 'utf8'))
+    files = readdirSync(join(home, DIR)).filter((f) => f.endsWith('.json'))
   } catch {
-    throw new Error(NOT_RUNNING)
+    // None has run yet.
   }
-  if (!alive(current.pid)) throw new Error(NOT_RUNNING)
-  const { pid: _, ...running } = current
-  return running
+  const running: (Running & { pid: number; startedAt: number })[] = []
+  for (const file of files) {
+    try {
+      const entry = JSON.parse(readFileSync(join(home, DIR, file), 'utf8'))
+      if (alive(entry.pid)) running.push(entry)
+      else rmSync(join(home, DIR, file), { force: true })
+    } catch {
+      // Being written, or not ours.
+    }
+  }
+  if (!running.length) throw new Error(NOT_RUNNING)
+  return running.sort((a, b) => b.startedAt - a.startedAt).map(({ pid: _, startedAt: __, ...r }) => r)
 }
 
-/** Remove current.json if this process wrote it. */
+/** Remove this process's entry. */
 export function clearRunning(home: string, pid = process.pid): void {
-  try {
-    const current = JSON.parse(readFileSync(join(home, FILE), 'utf8'))
-    if (current.pid === pid) rmSync(join(home, FILE))
-  } catch {
-    // Nothing to clear.
-  }
+  rmSync(join(home, DIR, `${pid}.json`), { force: true })
 }
 
 const NOT_RUNNING =
