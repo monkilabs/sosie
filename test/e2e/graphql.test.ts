@@ -81,7 +81,7 @@ describe('a GraphQL API', () => {
   it('is read by introspection, and its types become entities', () => {
     expect(graphql.matches(new URL(api.url))).toBe(true)
     expect(graphql.matches(new URL('https://api.internal/v1/users'))).toBe(false)
-    expect(sosie.connection.summary).toBe('8 types, 16 queries')
+    expect(sosie.connection.summary).toBe('8 types, 17 queries')
     const user = sosie.connection.schema.entities.find((e) => e.id === 'User')!
     expect(user.fields.find((f) => f.name === 'email')).toMatchObject({ format: 'email' })
     expect(sosie.connection.schema.entities.find((e) => e.id === 'Order')!.fields.find((f) => f.name === 'userId')!.references).toBe('User.id')
@@ -326,6 +326,27 @@ describe('a GraphQL API', () => {
     await lenient.ask({ query, operationName: 'A' }, { v: quill.email, extra: 'quill.vantablack@canary-mail.test' })
     expect(api.received.at(-1)!.variables).toEqual({ v: 'quill.vantablack@canary-mail.test' })
     await lenient.close()
+  })
+
+  it('sends no field of the mutation type, under a query field either', async () => {
+    const before = api.operations.length
+    const { status, body } = await sosie.ask('{ admin { deleteUser(id: "1") } }')
+    expect(status).toBe(400)
+    expect(body.errors[0].extensions.code).toBe('SOSIE_READ_ONLY')
+    expect(api.operations.slice(before)).toEqual([])
+  })
+
+  it('keeps an alias that names an object’s own machinery, and adds none the API left out', async () => {
+    const { body } = await sosie.ask('{ __proto__: motd constructor: motd @skip(if: true) toString: motd }')
+    expect(Object.keys(body.data)).toEqual(['__proto__', 'toString'])
+  })
+
+  it('refuses variables nested deeper than it reads, as the request’s own fault', async () => {
+    let deep: unknown = 'x'
+    for (let i = 0; i < 2000; i++) deep = [deep]
+    const { status, body } = await sosie.ask('{ motd }', { v: deep })
+    expect(status).toBe(400)
+    expect(body.errors[0].message).toBe('The variables nest deeper than Sosie reads (100 levels).')
   })
 
   it('lets sosie.yml name a scalar of the query type', async () => {

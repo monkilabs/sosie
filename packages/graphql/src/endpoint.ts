@@ -9,8 +9,10 @@ import {
   Kind,
   parse,
   print,
+  TypeInfo,
   valueFromASTUntyped,
   visit,
+  visitWithTypeInfo,
   type DocumentNode,
   type DefinitionNode,
   type FieldNode,
@@ -89,6 +91,9 @@ const errorCode = (code: unknown, names: Set<string>): code is string => {
 /** Tokens a query may have: parsing a larger one would keep other clients waiting. Checking it runs on threads of its own. */
 const MAX_TOKENS = 10_000
 
+/** How deeply variables may nest: deeper than any input a schema declares, shallower than a stack overflows. */
+const MAX_DEPTH = 100
+
 const TOO_MUCH = `A batch's introspection answers, together, are larger than Sosie sends at once (${MAX_ANSWER / 1024 / 1024} MB). Ask for less.`
 
 /** JSON already written, by the thread that answered introspection: sent as it is, never parsed again. */
@@ -119,6 +124,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       return failed(400, message)
     }
     if (variables !== null && (typeof variables !== 'object' || Array.isArray(variables))) return failed(400, 'The variables are a JSON object.')
+    if (depth(variables) > MAX_DEPTH) return failed(400, `The variables nest deeper than Sosie reads (${MAX_DEPTH} levels).`)
     if (operationName !== undefined && operationName !== null && typeof operationName !== 'string') return failed(400, 'The operationName is a string.')
     let document: DocumentNode
     try {
@@ -170,6 +176,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     // Only the operation to run, and the fragments it uses: no other operation's text, a mutation's least of all,
     // leaves Sosie, and no other operation's fields say what its variables are.
     const running: DocumentNode = { ...document, definitions: only(document.definitions, document.definitions.indexOf(operation)) }
+    if (writes(ctx.schema, running)) {
+      return failed(400, 'Sosie is read-only: a field of the mutation or subscription type does not reach the API, under a query either.', 'SOSIE_READ_ONLY')
+    }
     const real = rewrite(ctx.schema, running, values, scope, names)
     const answer = await ctx.upstream.post({
       query: print(real.document),
@@ -182,8 +191,8 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     try {
       // Integers beyond 2^53 (a BigInt or Long scalar sent as a number) kept as written, so their fakes lead back.
       body = parseJson(answer.body) as typeof body
-    } catch {
-      return failed(502, 'The API answered with JSON that does not parse.')
+    } catch (error) {
+      return failed(502, error instanceof RangeError ? 'The API answered with JSON nested too deep for Sosie to read.' : 'The API answered with JSON that does not parse.')
     }
     if (!body || typeof body !== 'object') return failed(502, 'The API answered with JSON that is not a GraphQL response.')
 
@@ -391,6 +400,29 @@ function only(definitions: readonly DefinitionNode[], at: number): DefinitionNod
   const operation = definitions[at] as OperationDefinitionNode
   walk(operation)
   return definitions.filter((d) => d === operation || (d.kind === Kind.FRAGMENT_DEFINITION && used.has(d.name.value)))
+}
+
+/** How deeply a JSON value nests, counted without recursion, so a value too deep to walk is told, not walked. */
+function depth(value: unknown): number {
+  let deepest = 0
+  const stack: [unknown, number][] = [[value, 1]]
+  while (stack.length) {
+    const [node, level] = stack.pop()!
+    if (!node || typeof node !== 'object') continue
+    deepest = Math.max(deepest, level)
+    for (const item of Object.values(node)) stack.push([item, level + 1])
+  }
+  return deepest
+}
+
+/** Whether a document asks for a field of the schema's mutation or subscription type, at any depth (Query.admin: Mutation). */
+function writes(schema: GraphQLSchema, document: DocumentNode): boolean {
+  const roots = [schema.getMutationType(), schema.getSubscriptionType()].filter((t) => t != null)
+  if (!roots.length) return false
+  const info = new TypeInfo(schema)
+  let found = false
+  visit(document, visitWithTypeInfo(info, { Field: () => void (found ||= roots.some((root) => root === info.getParentType())) }))
+  return found
 }
 
 /** Whether a document uses a name as a field or an alias. */

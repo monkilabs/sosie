@@ -54,6 +54,7 @@ type Query {
   report(country: String, q: String): Report
   big(n: Int!): JSON
   query: Query!
+  admin: Mutation
   debug: JSON
   account(id: Long): Account
 }
@@ -110,6 +111,8 @@ export async function startGraphql({ introspection = true, elsewhere = 'http://2
     report: ({ country, q }: { country?: string; q?: string }) => ({ country: country ?? 'Iceland', total: 6, note: q ? `Results for ${q.toUpperCase()}` : 'All' }),
     // The root again, as PostGraphile has it.
     query: () => root,
+    // The mutation type under a query field: its fields write, whatever operation asks for them.
+    admin: () => root,
     // What a debugging endpoint echoes: the credential it was sent, as a key.
     debug: () => ({ sesamesecretword: 1, theme: 2 }),
     // A 64-bit id, which no JavaScript number holds: written as its digits (see json below).

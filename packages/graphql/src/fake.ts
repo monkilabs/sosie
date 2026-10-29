@@ -72,19 +72,24 @@ async function walk(value: unknown, selections: readonly SelectionNode[], type: 
     else groups.set(key, [node])
   }
   const out: Record<string, unknown> = {}
+  // An alias is the client's own word (__proto__, constructor): only the answer's own keys count, and each is defined, not assigned.
+  const put = (key: string, value: unknown) => Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true })
   for (const [key, nodes] of groups) {
-    if (!(key in row)) continue
+    if (!Object.hasOwn(row, key)) continue
     const name = nodes[0]!.name.value
     if (name === '__typename') {
-      out[key] = named.name
+      put(key, named.name)
       continue
     }
     const def = named.getFields()[name]
     if (!def) continue
     const inner = getNamedType(def.type)
-    out[key] = isLeafType(inner)
-      ? await leaf(row[key], ctx.fields.get(`${named.name}.${name}`) ?? { id: `${named.name}.${name}`, name, type: typeOf(def.type) ?? { kind: 'string' } }, ctx, state)
-      : await walk(row[key], nodes.flatMap((n) => n.selectionSet?.selections ?? []), inner, ctx, state)
+    put(
+      key,
+      isLeafType(inner)
+        ? await leaf(row[key], ctx.fields.get(`${named.name}.${name}`) ?? { id: `${named.name}.${name}`, name, type: typeOf(def.type) ?? { kind: 'string' } }, ctx, state)
+        : await walk(row[key], nodes.flatMap((n) => n.selectionSet?.selections ?? []), inner, ctx, state),
+    )
   }
   return out
 }

@@ -885,7 +885,9 @@ then. A Sosie that cannot listen on its port stops its threads, and one that
 stops answers what they were still checking (`Sosie is stopping.`).
 Only queries reach the API, and only the operation to run with the fragments
 it uses: a mutation or a subscription is answered with an error, and its text
-never leaves Sosie. A persisted query without its text is refused. POSTs are
+never leaves Sosie, and so is a field of the mutation or subscription type
+asked for under a query field (`Query.admin: Mutation`). Variables that nest
+deeper than 100 levels get `400`. A persisted query without its text is refused. POSTs are
 not redirected: the body and the credentials stay with the API.
 
 Introspection is answered from the schema Sosie holds, with what the client
@@ -953,8 +955,8 @@ uses, count; only the variables it declares are sent.
   column's do, unless the request turned that word back.
 - The schema, its descriptions included, is visible: it is the API, not its
   data.
-- A query field that writes is the API's to guard: Sosie sends every query on,
-  as REST sends every `GET`.
+- A query field that writes, other than a field of the mutation type, is the
+  API's to guard: Sosie sends every query on, as REST sends every `GET`.
 - A variable sent as a JSON number beyond 2^53 is read as JavaScript reads it,
   rounded: a 64-bit id goes as a string (`"id": "4809558151065630052"`), or
   written in the query.
