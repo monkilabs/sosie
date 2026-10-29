@@ -227,11 +227,21 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
     }
     // An error whose body has a key of the record the path names.
     if (path === '/countries/missing') return json(404, { name: 'Quillon Vantablack', error: 'no such country' })
-    // An API that echoes the credentials it was sent, as keys.
+    // An API that echoes the credentials it was sent, as keys and in text: the token of a Rails-style header, the
+    // query credential, and the password, as an API that knows its users' passwords might.
     if (path === '/echo-credentials') {
-      const lower = String(req.headers['x-lower'] ?? 'none')
-      // The password, as an API that knows its users' passwords might echo it.
-      return json(200, { [lower]: 1, [url.searchParams.get('api_key') ?? 'none']: 2, sunshine99: 3, theme: 4, note: `signed with ${lower}` })
+      const token = /token="([^"]+)"/.exec(String(req.headers['x-api-key'] ?? ''))?.[1] ?? 'none'
+      return json(200, { [token]: 1, [url.searchParams.get('api_key') ?? 'none']: 2, sunshine99: 3, theme: 4, production: 5, note: `signed with ${token}` })
+    }
+    // Another kind of record under a collection's path: a word where an id would go.
+    if (path === '/products') return json(200, [{ id: 1, name: 'Plain Widget' }])
+    if (path === '/products/reviews' || path === '/users/reviews') {
+      return json(200, [{ id: 7, name: 'Quillon Vantablack', email: 'quill.vantablack@canary-mail.test' }])
+    }
+    // JSON nested deeper than a parser's stack.
+    if (path === '/deep') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(`${'['.repeat(100_000)}${']'.repeat(100_000)}`)
     }
     // A redirect that stays under the base as written, and leaves it at an API that decodes %2F and resolves ..
     if (path === '/sneaky') {

@@ -20,6 +20,8 @@ export interface RestContext {
 const OTHER_PATH = 'A segment of the path holds a / or \\, or is . or ..: the API could read it as another path, so Sosie does not send it.'
 /** Words Sosie remembers as names of the API's, at most: those a client sent are added as the API answers them. */
 const MAX_KNOWN = 10_000
+/** Query names frameworks read as the method to run instead of GET. */
+const OVERRIDE = /^(_method|x-http-method(-override)?)$/i
 /** How an error's body is read: as no entity's, each value faked by where it sits. */
 const NO_ENTITY: Route = { entity: '*', values: new Map() }
 /** A word that looks like a name of the API's: lowercase first, then letters and digits, in kebab, snake or camel case. */
@@ -69,7 +71,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
   /** The route of the path a redirect ended on: its words are the API's, as a link's are. */
   const readFinal = (url: URL, mine: Set<string>, scope: RequestScope): Route => {
     const real = under(url.pathname) ? segmentsOf(url.pathname.slice(basePath.length)) : undefined
-    return real ? readPath(real, (word) => (known.has(word) || mine.has(word)) && !scope.turnedBack(word)) : { entity: '*', values: new Map() }
+    const rt = real ? readPath(real, (word) => (known.has(word) || mine.has(word)) && !scope.turnedBack(word)) : NO_ENTITY
+    // A word where a value goes (/products/reviews) may name another kind of record: then the answer is no entity's.
+    return [...rt.values.keys()].some((i) => !VALUE_SEGMENT.test(real![i]!)) ? NO_ENTITY : rt
   }
   let local = ''
 
@@ -159,9 +163,16 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     })
     // A value the API holds may be a path too; sent in one segment, it could name another.
     if (!turned.every(oneSegment)) return send(res, 400, { error: OTHER_PATH })
+    // A word the client typed where a value goes, neither a number, a UUID nor a fake Sosie gave (/products/reviews, a
+    // login an app knows), may name another kind of record: the answer is then no entity's, and no rule applies to it.
+    const unsure = [...rt.values.keys()].some((i) => turned[i] === routed[i] && !VALUE_SEGMENT.test(routed[i]!))
     const real = turned.map(encodeURIComponent)
     const query = new URLSearchParams()
     const names: string[] = []
+    // A method override in the query (?_method=DELETE) asks a framework to write: it never leaves Sosie.
+    if ([...incoming.searchParams.keys()].some((name) => OVERRIDE.test(name))) {
+      return send(res, 400, { error: 'Sosie is read-only: a method override in the query (_method) is not sent.' })
+    }
     for (const [sentName, value] of incoming.searchParams) {
       const name = wordName(sentName) || known.has(sentName) ? sentName : (scope.lookup(sentName, QUERY_NAME) ?? sentName)
       if (name === sentName) names.push(name)
@@ -180,7 +191,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const mine = new Set([...sent.filter((segment, i) => !rt.values.has(i) && words[i] === undefined), ...names])
     // An answer the API redirected to another path is about what that path names; an error is about no
     // entity, so no field's rule in sosie.yml applies to its body, whatever keys it shares with the record.
-    const read = answer.status >= 300 ? NO_ENTITY : answer.url.pathname === target.pathname ? rt : readFinal(answer.url, mine, scope)
+    const read = answer.status >= 300 || unsure ? NO_ENTITY : answer.url.pathname === target.pathname ? rt : readFinal(answer.url, mine, scope)
     if (req.method === 'HEAD' || !answer.body) {
       res.writeHead(answer.status, json ? { 'content-type': 'application/json; charset=utf-8' } : {})
       return res.end()
@@ -197,8 +208,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     let body: unknown
     try {
       body = parseJson(answer.body)
-    } catch {
-      return send(res, 502, { error: 'The API answered with JSON that does not parse.' })
+    } catch (error) {
+      const deep = error instanceof RangeError
+      return send(res, 502, { error: deep ? 'The API answered with JSON nested too deep for Sosie to read.' : 'The API answered with JSON that does not parse.' })
     }
     // A collection's name, which any link may show: the path's last word, a name as the client wrote it, answered with a list.
     const last = sent.length - 1

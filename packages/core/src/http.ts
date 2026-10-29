@@ -28,14 +28,29 @@ export async function readCapped(response: Response, max: number): Promise<strin
 }
 
 /** Names of auth schemes, written before the credential in a header: words, not secrets. */
-const SCHEMES = /^(bearer|basic|digest|negotiate)$/i
+const SCHEMES = /^(bearer|basic|digest|negotiate|token)$/i
+/** Names of headers that carry a credential: Authorization, Cookie, X-Api-Key, X-Auth-Token and the like. */
+const CREDENTIAL_HEADER = /auth|key|token|secret|session|cookie|pass|credential|signature/i
 
 /**
- * The parts of Sosie's own credentials for an upstream worth hiding wherever it echoes them: each
- * run of six characters or more of a header value, a query credential, a user or a password, lowercased.
+ * The parts of Sosie's own credentials for an upstream worth hiding wherever it echoes them, lowercased:
+ * each run of six characters or more, between spaces, quotes, colons and separators, of a credential
+ * header's value (a Basic one's user and password too), and of the other values given (a query
+ * credential, a user or a password). Of a `name=value` pair (a cookie, Token token="…") only the
+ * value is one; a header that carries no credential (X-Tenant) has none.
  */
-export function secretParts(values: Iterable<string>): string[] {
-  const parts = [...values].flatMap((value) => value.split(/[\s,;=]+/)).filter((part) => part.length >= 6 && !SCHEMES.test(part))
+export function secretParts(headers: Record<string, string>, values: Iterable<string> = []): string[] {
+  const given = [...Object.entries(headers).flatMap(([name, value]) => (CREDENTIAL_HEADER.test(name) ? [value] : [])), ...values]
+  const basic = given.flatMap((value) => {
+    const encoded = /^basic\s+([A-Za-z0-9+/=]+)$/i.exec(value.trim())?.[1]
+    return encoded ? [Buffer.from(encoded, 'base64').toString('utf8')] : []
+  })
+  const parts = [...given, ...basic]
+    .flatMap((value) => value.split(/[\s,;]+/))
+    // Of a pair (session=…, token="…"), its value: a token padded with = (abc123==) is no pair, and stays whole.
+    .map((token) => /^[A-Za-z_][\w-]*=[^=]/.exec(token) ? token.slice(token.indexOf('=') + 1) : token)
+    .flatMap((value) => value.split(/[:"']+/))
+    .filter((part) => part.length >= 6 && !SCHEMES.test(part))
   return [...new Set(parts.map((part) => part.toLowerCase()))]
 }
 

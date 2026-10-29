@@ -208,7 +208,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
     if (!BOOLEAN.test(real)) return shape(real, new Random(store.seed(domain, real)))
     if (!flips(domain)) return real
     const truthy = TRUE.test(real)
-    const [yes, no] = real.length === 1 ? ['t', 'f'] : real === real.toUpperCase() ? ['TRUE', 'FALSE'] : ['true', 'false']
+    const [yes, no] = /^[01]$/.test(real) ? ['1', '0'] : real.length === 1 ? ['t', 'f'] : real === real.toUpperCase() ? ['TRUE', 'FALSE'] : ['true', 'false']
     return truthy ? no : yes
   }
 

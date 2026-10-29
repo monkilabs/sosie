@@ -42,8 +42,13 @@ async function walk(value: unknown, node: Node | undefined, entity: string, pref
     prefix = ''
   }
   let schema = node && ctx.api ? merged(node, ctx.api.schemas) : undefined
-  // A body that does not have the shape its document says is named by where its values sit.
-  if (schema && Array.isArray(value) !== (schema.type === 'array') && schema.type !== undefined && typeof value === 'object') schema = undefined
+  // A body that does not have the shape its document says may be another kind of record: it is no entity's, named by where
+  // its values sit, so the document's entity, and its rules in sosie.yml, do not apply to it.
+  if (schema && Array.isArray(value) !== (schema.type === 'array') && schema.type !== undefined && typeof value === 'object') {
+    schema = undefined
+    entity = '*'
+    prefix = ''
+  }
   if (Array.isArray(value)) {
     if (value.length > ctx.maxItems) state.cut = true
     const out: unknown[] = []

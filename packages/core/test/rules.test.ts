@@ -58,6 +58,13 @@ describe('sosie.yml', () => {
     expect(problems('format:\n  user.handle: usrname\n')[0]).toMatch(/usrname is not a format/)
   })
 
+  it('refuses, even for a source that learns its fields, a rule for what names no entity or is Sosie’s own', () => {
+    for (const id of ['*.*', '*.error', '$path', '$query.value', '$key']) {
+      expect(() => loadRules(`pass:\n  - "${id}"\n`, { entities: [] }, 'sosie.yml', { learns: true }), id).toThrow(/names no entity/)
+    }
+    expect(() => loadRules('pass:\n  - users\n', { entities: [] })).toThrow(/users is not a table/)
+  })
+
   it('suggests only near misses', () => {
     expect(suggest('emial', ['email', 'name'])).toBe('email')
     expect(suggest('zzzzzz', ['email', 'name'])).toBeUndefined()
