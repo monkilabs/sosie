@@ -27,4 +27,4 @@ For an API, `SOSIE_UPSTREAM` is its address (`https://api.internal/v1`, or
 Options: `--port` (7674), `--host` (127.0.0.1), `--rules` (`./sosie.yml`),
 `--max-rows` (1000). PostgreSQL 15 to 18; Node 24 or later.
 
-More in the [repository](https://github.com/monkilabs/sosie).
+The [docs](https://monkilabs.github.io/sosie/docs/) say more, and the [repository](https://github.com/monkilabs/sosie) has the code.

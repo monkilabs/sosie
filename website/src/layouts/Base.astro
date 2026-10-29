@@ -1,0 +1,98 @@
+---
+/** Every page's shell: head, header, footer, and the copy buttons. */
+import '../styles/global.css';
+import Logo from '../components/Logo.astro';
+import { NPM, REPO, url } from '../url';
+
+interface Props {
+  title: string;
+  description: string;
+  /** The page's path under the site's base, such as `docs/postgres/`. */
+  path: string;
+  /** Shown after the logo, linked: the docs' name on docs pages. */
+  crumb?: { label: string; href: string };
+  /** A page search engines should leave out, with no canonical address: the 404. */
+  noindex?: boolean;
+}
+
+const { title, description, path, crumb, noindex = false } = Astro.props;
+const canonical = new URL(url(path), Astro.site).href;
+const image = new URL(url('og-image.png'), Astro.site).href;
+const here = (p: string) => (path.startsWith(p) ? 'page' : undefined);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#0b0d10" />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
+    <link rel="icon" type="image/svg+xml" href={url('favicon.svg')} />
+    <link rel="sitemap" href={url('sitemap-index.xml')} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Sosie" />
+    {!noindex && <meta property="og:url" content={canonical} />}
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={image} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={image} />
+  </head>
+  <body>
+    <header class="header">
+      <div class="wrap header__inner">
+        <div class="brand">
+          <a class="brand" href={url()} aria-label="Sosie, home"><Logo /> Sosie</a>
+          {crumb && (
+            <span class="brand__crumb">
+              / <a href={crumb.href}>{crumb.label}</a>
+            </span>
+          )}
+        </div>
+        <nav class="nav" aria-label="Main">
+          <a class="nav__wide" href={url('docs/how-it-works/')} aria-current={here('docs/how-it-works/')}>How it works</a>
+          <a class="nav__wide" href={url('docs/security/')} aria-current={here('docs/security/')}>Security</a>
+          <a href={url('docs/')} aria-current={path.startsWith('docs/') && !here('docs/how-it-works/') && !here('docs/security/') ? 'page' : undefined}>Docs</a>
+          <a href={REPO} rel="noopener">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <slot />
+
+    <footer class="footer">
+      <div class="wrap footer__inner">
+        <span>MIT License · MonkiLabs · No trackers on this site, and none in Sosie.</span>
+        <ul>
+          <li><a href={url('docs/')}>Docs</a></li>
+          <li><a href={REPO} rel="noopener">GitHub</a></li>
+          <li><a href={NPM} rel="noopener">npm</a></li>
+          <li><a href={`${REPO}/blob/main/CHANGELOG.md`} rel="noopener">Changelog</a></li>
+        </ul>
+      </div>
+    </footer>
+
+    <script>
+      // A button with data-copy copies that text, and says so for a moment.
+      for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-copy]')) {
+        button.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(button.dataset.copy ?? '');
+            const label = button.textContent;
+            button.textContent = 'Copied';
+            setTimeout(() => (button.textContent = label), 1500);
+          } catch {
+            // No clipboard here (an insecure page, or denied): the command stays on screen to select.
+          }
+        });
+      }
+    </script>
+  </body>
+</html>

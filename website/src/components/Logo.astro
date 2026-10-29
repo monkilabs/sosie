@@ -1,0 +1,12 @@
+---
+/** Two of the same circle, one of them only an outline: a value and its double. */
+interface Props {
+  size?: number;
+}
+const { size = 26 } = Astro.props;
+---
+
+<svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+  <circle cx="12.5" cy="16" r="7.5" fill="#5eead4"></circle>
+  <circle cx="19.5" cy="16" r="7.5" fill="none" stroke="#5eead4" stroke-width="2" stroke-dasharray="3 2.4"></circle>
+</svg>
