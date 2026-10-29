@@ -211,7 +211,11 @@ Each `sosie` writes `$SOSIE_HOME/running/<pid>.json` (default `~/.sosie`) for
 `sosie mcp`: the local address, the source kind, the neutral schema and the
 fields that pass. Nothing real: no upstream, no credentials, no values. It is
 removed on Ctrl+C, a kill, or the terminal closing, and `sosie mcp` skips, and
-removes, the entry of a process that is gone.
+removes, the entry of a process that is gone. A Sosie stopped by `kill -9`
+leaves its entry, and if another process takes its pid before `sosie mcp`
+looks, the entry stays until that process ends: the tools could then send an
+agent's request to whatever listens on that address. Start a Sosie again, or
+delete the file.
 
 ## `sosie.yml`
 
