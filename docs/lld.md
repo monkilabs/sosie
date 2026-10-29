@@ -228,7 +228,11 @@ Each `sosie` writes `$SOSIE_HOME/running/<pid>.json` (default `~/.sosie`) for
 `sosie mcp`: the local address, the source kind, the neutral schema and the
 fields that pass. Nothing real: no upstream, no credentials, no values. It is
 removed on Ctrl+C, a kill, or the terminal closing, and `sosie mcp` skips, and
-removes, the entry of a process that is gone.
+removes, the entry of a process that is gone. A Sosie stopped by `kill -9`
+leaves its entry, and if another process takes its pid before `sosie mcp`
+looks, the entry stays until that process ends: the tools could then send an
+agent's request to whatever listens on that address. Start a Sosie again, or
+delete the file.
 
 ## `sosie.yml`
 
@@ -798,6 +802,10 @@ would turn into that field's real value, which the passing field would show.
   `/users/jdoe`, is shown as it is.
 - A body is parsed in one go before it is faked a slice at a time: about half
   a second, at the 20 MB cap, in which other clients wait.
+- The OpenAPI document, asked for through Sosie (`/v1/openapi.json`), is an
+  answer like any other, and comes back faked; `describe` shows what Sosie
+  read from it. A template whose parameter shares a segment (`{id}.json`) is
+  not read as a value there.
 - A word a client typed that looks like a name, a tenant's slug in lowercase
   (`jones`, `acme-industries`), names an entity after it, and the domains of
   that entity's fields, which `sosie scan` prints, are named after it too; a
