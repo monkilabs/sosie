@@ -92,7 +92,7 @@ export interface Source {
 
 export interface Connection {
   readonly schema: Schema
-  /** Where the upstream is, without credentials: 'db.internal:5432/app'. Shown in the terminal, and keys the store. */
+  /** Where the upstream is, without credentials: 'db.internal:5432/app'. Shown in the terminal. */
   readonly label: string
   /** What was found, for the terminal: '42 tables'. */
   readonly summary: string
