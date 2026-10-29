@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createFaker, loadRules, Store, storeDir, type Value } from '@sosie/core'
+import { createFaker, loadRules, secretParts, Store, storeDir, type Field, type Value } from '@sosie/core'
 import { describe, expect, it } from 'vitest'
 import { CANARIES, data } from './fixtures.js'
 import { memorySource, type MemoryEndpoint } from './source.js'
@@ -181,6 +181,155 @@ describe('fakes by type', async () => {
     const { faker } = await serve()
     expect(faker.computed('abc', { kind: 'decimal' })).not.toBe('abc')
     expect(faker.computed('-Infinity', { kind: 'decimal' })).toBe('-Infinity')
+    expect(faker.computed('6.02e23', { kind: 'decimal' })).toMatch(/^\d\.\d\de23$/)
+  })
+
+  it('a letter outside the basic plane is faked like any other', async () => {
+    const { faker } = await serve()
+    for (const name of ['𠮷野', '𠮷-12']) expect(faker.computed(name, { kind: 'string' }) as string).not.toMatch(/𠮷/u)
+  })
+
+  it('a JSON key that echoes a value the request turned back is faked, even when it looks like a word', async () => {
+    const { faker } = await serve()
+    const settings = { id: 'users.settings', name: 'settings', type: { kind: 'json' } } as const
+    const city = faker.value('vantaville', { id: 'users.city', name: 'city', type: { kind: 'string' } }) as string
+    const scope = faker.request(`SELECT settings FROM users WHERE city = '${city}'`)
+    expect(scope.lookup(city)).toBe('vantaville')
+    expect(scope.turnedBack('Vantaville')).toBe(true)
+    expect(Object.keys(JSON.parse(faker.value('{"vantaville":1,"theme":2}', settings) as string))).toEqual(['vantaville', 'theme'])
+    const echoed = Object.keys(JSON.parse(faker.value('{"vantaville":1,"theme":2}', settings, scope) as string))
+    expect(echoed[0]).not.toBe('vantaville')
+    expect(echoed[1]).toBe('theme')
+  })
+
+  it('a JSON key that holds a value the request turned back is faked', async () => {
+    const { faker } = await serve()
+    const name = faker.value('Quillon Vantablack', { id: 'users.name', name: 'name', type: { kind: 'string' } }) as string
+    const city = faker.value('vantaville', { id: 'users.city', name: 'city', type: { kind: 'string' } }) as string
+    const scope = faker.request(`SELECT 1 FROM users WHERE name = '${name}' AND city = '${city}'`)
+    expect(scope.lookup(name)).toBe('Quillon Vantablack')
+    expect(scope.lookup(city)).toBe('vantaville')
+    for (const key of ['vantaville_weather', 'byVantaville', 'quillonvantablack', 'QUILLON-VANTABLACK', 'teamQuillonVantablack', 'xvantavillex']) {
+      expect(scope.turnedBack(key), key).toBe(true)
+    }
+    // A word of a value is no echo of it: it may be any key's (by-email turned back leaves email a key).
+    for (const key of ['theme', 'quill', 'vantablack', 'profile_id']) expect(scope.turnedBack(key), key).toBe(false)
+  })
+
+  it('a field that passes shows the fake the client sent, not a value the request turned back', async () => {
+    const { faker } = await serve('pass:\n  - users.city\n  - users.account\n  - users.score\n')
+    const email = faker.value('quill.vantablack@canary-mail.test', { id: 'users.email', name: 'email', type: { kind: 'string' } }) as string
+    const city = { id: 'users.city', name: 'city', type: { kind: 'string' } } as const
+    const scope = faker.request(`SELECT city FROM users WHERE email = '${email}'`)
+    expect(scope.lookup(email)).toBe('quill.vantablack@canary-mail.test')
+    expect(faker.value('QUILL.VANTABLACK@canary-mail.test', city, scope)).toBe(email)
+    expect(faker.value('Results for quill.vantablack@canary-mail.test.', { ...city, id: 'users.account' }, scope)).toBe(`Results for ${email}.`)
+    // Anything else in a field that passes stays, and so does a short number, which may be any count.
+    expect(faker.value('Reykjavik', city, scope)).toBe('Reykjavik')
+    const id = faker.value('7', { id: 'users.id', name: 'id', type: { kind: 'integer' } }) as string
+    const byId = faker.request(`SELECT score FROM users WHERE id = ${id}`)
+    byId.lookup(id, { id: 'users.id', name: 'id', type: { kind: 'integer' } })
+    expect(faker.value('7', { id: 'users.score', name: 'score', type: { kind: 'decimal' } }, byId)).toBe('7')
+    // Without a request, as in a session's own reads, nothing changes.
+    expect(faker.value('quill.vantablack@canary-mail.test', city)).toBe('quill.vantablack@canary-mail.test')
+  })
+
+  it('a field that passes and holds a value the request turned back in another form is faked whole', async () => {
+    const { faker } = await serve('pass:\n  - users.city\n  - users.tags\n')
+    const name = faker.value('Quillon Vantablack', { id: 'users.name', name: 'name', type: { kind: 'string' } }) as string
+    const email = faker.value('quill.vantablack@canary-mail.test', { id: 'users.email', name: 'email', type: { kind: 'string' } }) as string
+    const city = { id: 'users.city', name: 'city', type: { kind: 'string' } } as const
+    const scope = faker.request(`SELECT city FROM users WHERE name = '${name}' OR email = '${email}'`)
+    expect(scope.lookup(name)).toBe('Quillon Vantablack')
+    expect(scope.lookup(email)).toBe('quill.vantablack@canary-mail.test')
+    // Escaped as a URL or a form escapes it, spaced, or cased otherwise.
+    for (const echo of ['Results for quill.vantablack%40canary-mail.test', 'q=Quillon+Vantablack', 'quillon-vantablack', 'QuillonVantablack', 'by_quill_vantablack_canary_mail_test']) {
+      expect(faker.value(echo, city, scope) as string, echo).not.toMatch(/vantablack/i)
+    }
+    // In an array, the item that holds one is faked with the rest.
+    const tags = faker.value(['Reykjavik', 'quillon_vantablack'], { id: 'users.tags', name: 'tags', type: { kind: 'array', of: { kind: 'string' } } }, scope)
+    expect(JSON.stringify(tags)).not.toMatch(/vantablack/i)
+    // Text that holds none stays, a word of a value included.
+    expect(faker.value('Quillon Street', city, scope)).toBe('Quillon Street')
+  })
+
+  it('a field that passes shows the fake the client sent for a label or a boolean the request turned back, as a word of text', async () => {
+    const { faker } = await serve('pass:\n  - users.city\n  - users.active\n')
+    const city = { id: 'users.city', name: 'city', type: { kind: 'string' } } as const
+    // Whether a boolean flips, and where a label goes, is decided once per domain: find a field where they change.
+    const flags = Array.from({ length: 20 }, (_, i): Field => ({ id: `users.flag${i}`, name: `flag${i}`, type: { kind: 'boolean' } }))
+    const flag = flags.find((f) => faker.value('true', f) === 'false')!
+    const levels = Array.from({ length: 20 }, (_, i): Field => ({ id: `users.level${i}`, name: `level${i}`, type: { kind: 'enum', labels: ['admin', 'editor', 'viewer'] } }))
+    const level = levels.find((f) => faker.value('admin', f) !== 'admin')!
+    const shown = faker.value('admin', level) as string
+    const scope = faker.request(`flag=false&level=${shown}`)
+    expect(scope.lookup('false', flag)).toBe('true')
+    expect(scope.lookup(shown, level)).toBe('admin')
+    // An API that echoes the filters it applied, in text that passes, echoes what the client sent.
+    expect(faker.value('applied: flag=true, level=admin', city, scope)).toBe(`applied: flag=false, level=${shown}`)
+    expect(faker.value('{"level":"Admin"}', { ...city, type: { kind: 'json' } }, scope)).toBe(`{"level":"${shown}"}`)
+    // A field of their own kind holds its own value, not an echo: it keeps it.
+    expect(faker.value('true', { id: 'users.active', name: 'active', type: { kind: 'boolean' } }, scope)).toBe('true')
+    // A key that is one is an echo too.
+    expect(scope.turnedBack('admin')).toBe(true)
+  })
+
+  it('fakes a key or a value that passes when it holds Sosie’s own credentials', async () => {
+    const { faker } = await serve('pass:\n  - users.city\n')
+    const city = { id: 'users.city', name: 'city', type: { kind: 'string' } } as const
+    const scope = faker.request('', undefined, secretParts({ authorization: 'Bearer sesamesecretword' }, ['sunshine99']))
+    expect(scope.turnedBack('sesamesecretword')).toBe(true)
+    expect(scope.turnedBack('Bearer')).toBe(false)
+    for (const echo of ['token sesamesecretword', 'pw=sunshine%39%39', 'SUNSHINE99', 'Sesame Secret Word', 'sunshine_99']) {
+      expect(faker.value(echo, city, scope) as string, echo).not.toMatch(/sesame|sunshine/i)
+    }
+    expect(faker.value('Reykjavik', city, scope)).toBe('Reykjavik')
+    // A scope that carries another's over keeps its credentials.
+    expect(faker.request('', scope).turnedBack('sesamesecretword')).toBe(true)
+  })
+
+  it('takes the parts of credentials as headers write them', () => {
+    const basic = `Basic ${Buffer.from('robot:sunshine99').toString('base64')}`
+    expect(secretParts({ authorization: 'Token token="sesamesecretword"' })).toEqual(['sesamesecretword'])
+    expect(secretParts({ authorization: basic })).toEqual(expect.arrayContaining(['sunshine99']))
+    expect(secretParts({ authorization: 'Bearer abc123def456==' })).toEqual(['abc123def456=='])
+    // A cookie's names, and a header that carries no credential, are no secrets.
+    expect(secretParts({ cookie: 'session=k9q2x8w7; theme=darkmode', 'x-tenant': 'production' })).toEqual(['k9q2x8w7', 'darkmode'])
+  })
+
+  it('turns a boolean written as 1 or 0 back as 1 or 0', async () => {
+    const { faker } = await serve()
+    // Whether a boolean flips is decided once per domain: find a field where it does.
+    const flags = Array.from({ length: 20 }, (_, i): Field => ({ id: `users.flag${i}`, name: `flag${i}`, type: { kind: 'boolean' } }))
+    const flag = flags.find((f) => faker.value('true', f) === 'false')!
+    expect(faker.request().lookup('1', flag)).toBe('0')
+    expect(faker.request().lookup('0', flag)).toBe('1')
+  })
+
+  it('checks a field that passes for every value the request turned back at once, not one by one', async () => {
+    const { faker } = await serve('pass:\n  - users.city\n')
+    const email = { id: 'users.email', name: 'email', type: { kind: 'string' } } as const
+    const fakes = Array.from({ length: 2000 }, (_, i) => faker.value(`person${i}@canary-mail.test`, email) as string)
+    const scope = faker.request('SELECT city FROM users WHERE email = ANY($1)')
+    for (const fakeEmail of fakes) scope.lookup(fakeEmail, email)
+    const city = { id: 'users.city', name: 'city', type: { kind: 'string' } } as const
+    // A query by two thousand fakes that returns two thousand rows: one by one, millions of checks and seconds.
+    const started = performance.now()
+    for (let i = 0; i < 2000; i++) expect(faker.value(`Reykjavik, street ${i}`, city, scope)).toBe(`Reykjavik, street ${i}`)
+    expect(faker.value('Results for person1999@canary-mail.test', city, scope)).toBe(`Results for ${fakes[1999]}`)
+    expect(performance.now() - started).toBeLessThan(500)
+  })
+
+  it('a value of another form than its type, as an API may send, is faked whole', async () => {
+    const { faker } = await serve()
+    // An "e" in text is no exponent, and a "/" no prefix length: nothing of either value stays.
+    const number = faker.computed('Zephyrine Orrowmoor, flat 2', { kind: 'decimal' }) as string
+    expect(number).toMatch(/^[A-Z][a-z]{8} [A-Z][a-z]{8}, [a-z]{4} \d$/)
+    expect(number).not.toMatch(/phyrine|Orrowmoor/)
+    const address = faker.computed('x/Vantaville', { kind: 'ip' }) as string
+    expect(address).not.toMatch(/Vantaville/)
+    expect(faker.computed('10.1.2.3/24', { kind: 'ip' })).toMatch(/^(192\.0\.2|198\.51\.100|203\.0\.113)\.\d+\/24$/)
+    expect(faker.computed('Quillon', { kind: 'integer' })).not.toBe('Quillon')
   })
 
   it('values with nothing to fake stay as they are; digits of any script are faked', async () => {

@@ -28,16 +28,17 @@ been wrapped around the same code.
 
 ## Packages
 
-One repository, npm workspaces, three packages:
+One repository, npm workspaces, four packages:
 
 | Package | Published as | Holds |
 | --- | --- | --- |
 | `packages/cli` | `@sosie/cli` | The CLI, run with `npx @sosie/cli` or installed as the `sosie` command, and the official sources it bundles |
 | `packages/core` | `@sosie/core` | Everything that does not depend on a source: the source interface, the neutral schema, rules, faking, the store, `scan`, the MCP server |
 | `packages/postgres` | `@sosie/postgres` | The Postgres source: endpoint, guard, rewriting, schema reading |
+| `packages/rest` | `@sosie/rest` | The REST source: an HTTP endpoint for the team's own API, OpenAPI reading, JSON faking |
 
-Later sources are packages of their own in the same scope: `@sosie/rest`,
-`@sosie/graphql`, `@sosie/mysql`. The `@sosie` scope is an npm organisation,
+Later sources are packages of their own in the same scope: `@sosie/graphql`,
+`@sosie/mysql`. The `@sosie` scope is an npm organisation,
 registered on 25 October 2026, so nobody else can take a name in it. Its team
 `developers` publishes.
 
@@ -77,13 +78,21 @@ packages/
     results.ts       which field each result column came from
     arrays.ts        Postgres array text
     mcp.ts           the query tool
+  rest/src/
+    index.ts         the Source: matches http:// and https://, finds the OpenAPI document
+    endpoint.ts      the HTTP server: the guard, paths and queries back to real values
+    upstream.ts      the API: Sosie's credentials, same-origin redirects, a timeout
+    openapi.ts       an OpenAPI document to the neutral schema and its GET operations
+    paths.ts         what a path names: an entity, and the field of each value in it
+    fake.ts          a JSON body, every value faked by its field
+    mcp.ts           the request tool
   cli/src/
     cli.ts           sosie, sosie mcp, sosie scan
     sources.ts       the sources this CLI knows
     prompt.ts        the hidden prompt
 test/
   memory-source/     a source that serves rows from memory, for core tests
-  e2e/               Postgres, seeded with canary values
+  e2e/               Postgres seeded with canary values, and a fake API serving the same people
 ```
 
 ## The source interface
@@ -173,7 +182,7 @@ export type FieldType =
 ```
 
 **Choosing a source:** the CLI asks each source it knows whether it `matches`
-the upstream URL, in order. v0.1 knows one. Sources from other packages, listed
+the upstream URL, in order: Postgres, then REST for any other http(s) URL. Sources from other packages, listed
 in `sosie.yml`, come after v0.1, when the interface is settled; until 1.0 it may
 change between minor versions.
 
@@ -246,6 +255,10 @@ so a typo never passes data silently. Every problem is listed at once:
 A field that shares another's values cannot pass alone:
 `sosie.yml: orders.user_id passes but users.id, whose values it shares, does not. List both or neither.`
 
+Nor can what names no entity, as an API's error body (`*.error`), or Sosie's own
+words for an API's (`$path`, `$query.value`): a source that learns its fields
+keeps a rule it has not met yet, but never one of these.
+
 ## Start-up
 
 1. Read the upstream; pick the source that matches it.
@@ -283,7 +296,7 @@ Values a query computes fake in `computed:<type>`.
 | `enum` | A label of the same enum, by a fixed shuffle per domain; the shuffle may leave a label in place |
 | `date`, `datetime`, `time` | Shifted by up to a year, the same shift for the same value, in the same format |
 | Any type, a value with no letter or digit (`''`, `-`, `NaN`, `infinity`) | Itself: there is nothing in it to fake |
-| `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked |
+| `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked. Anywhere, a key that holds a value the request turned back from a fake (`quillon`, `quillon_profile`, `QuillonSettings`) is faked, however it looks: an answer that holds it is echoing what the client sent |
 | `array` | Each element faked in the field's domain |
 | `ip` | An address from a documentation range |
 | `bytes` | Random bytes of the same length; derived, not stored |
@@ -291,6 +304,25 @@ Values a query computes fake in `computed:<type>`.
 
 Fakes are deterministic: the faker is seeded from the value's keyed hash, so the
 same real value gives the same fake in every session.
+
+A field that passes still never shows a value the request turned back from a
+fake: an answer that holds it, whole or within text and whatever its case, is
+echoing what the client sent, and shows the fake the client sent instead. One
+that holds it in another form, escaped as a URL or a form escapes it (`%40`,
+`+`) or with other separators (`quillon-vantablack`), is faked whole, as a
+computed value is. An enum label or a boolean the request turned back is an
+echo as a word of text (`active=true`, `{"role":"admin"}`), and shows the fake
+the client sent; a field of its own kind keeps its value, which is its own.
+Sosie's own credentials for the upstream count as well: a key, or a value that
+passes, that holds one, as written, escaped, or with other separators or
+none (`zq_secret_token` for `zq-secret-token`), is faked. What an answer makes of an
+echo beyond that, a part of it (an
+email's local part) or it encoded (base64) or reversed, is not caught: a field
+passes because the team chose to show it. A number counts when it is six
+digits or more; a shorter one may be any count. The values a request turned
+back are indexed once, so each value is checked against all of them in time of
+its own length: a query by a thousand fakes that returns a thousand rows takes
+no longer to check than it takes to fake.
 
 ## Core: store
 
@@ -344,8 +376,14 @@ punctuation around them, and compares every run of one to four words, by
 keyed hash, with the store's real values. Only distinctive values are looked
 for: one to four words of at least four characters, and numbers of six digits
 or more, so years, ports and line numbers are not findings. A run that is also
-a fake is not counted: it is what the agent was shown. It never prints the real
-value, and exits 1 if it finds one, so CI can run it.
+a fake is not counted: it is what the agent was shown. An API's own words in
+paths and query names are structure, and not looked for. A real value that is
+a common word held as text rather than an enum (a role `admin`, a status
+`paid`) is looked for like any other, so a transcript that uses the word is a
+finding: such a field belongs under `pass` in `sosie.yml`, and a field that
+passes is neither stored nor looked for. A finding from a domain of no entity
+(`*.error`, an error's body) cannot pass: it may be any value an API quotes. It never prints the real value, and
+exits 1 if it finds one, so CI can run it.
 
 ```
   ✗ ~/.claude/projects/app/2026-11-02.jsonl:1203  a real value from users.email
@@ -364,6 +402,7 @@ lists it, for when several Sosies of a kind run; without it, the newest.
 | --- | --- | --- | --- |
 | `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice; every value a consistent fake |
+| `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a GET through Sosie, up to 200 items of each list, within 50 s; it reaches the running Sosie only, whatever the path says |
 
 When Sosie is not running, every tool says so, and how to start it.
 
@@ -580,6 +619,218 @@ upstream as the client wrote it.
 - `count(…)` with a filter answers yes-or-no questions about real values
   (`WHERE id <= (SELECT score …)`), as the threat model says of filters.
 
+## REST source
+
+For the team's own HTTP API, where the database's people come back as JSON.
+`SOSIE_UPSTREAM` is the API's base URL: `https://api.internal/v1`.
+
+### Endpoint and guard
+
+A local HTTP address with the API's own paths: `http://localhost:7674/v1/users`
+reads `https://api.internal/v1/users`. Only `GET` and `HEAD` reach the API;
+anything else gets `405` and never leaves Sosie. Requests outside the base path
+get `404`, and a path whose `%` starts no escape `400`. So does a segment that
+decodes to one with a `/` or `\` in it, or to `.` or `..`, and a fake in a
+segment that stands for such a value: an API, or a proxy before it, that
+decodes `%2F` and resolves `..` would read another path than Sosie does, one
+outside the base or of another kind. A method override in the query
+(`?_method=DELETE`, `method`, `X-HTTP-Method-Override` and the like, with a
+method that writes), which some frameworks run instead of `GET`, gets `400`,
+as written or as Sosie turns a name it faked back. On
+this machine's own
+address, a request whose `Host` is not `localhost`, a `127.` address or `[::1]`
+gets `403`: a web page that rebinds its own name to this machine cannot read the
+fakes. So does a browser's request for a page of another site (an `Origin` that
+is not this machine, or `Sec-Fetch-Site: cross-site` without one): a web page
+cannot make Sosie send a `GET` with its credentials. A page of this machine, an
+app on another port, is answered; Sosie sends no CORS headers, so a browser app
+reads it through its dev server's proxy.
+
+### Credentials
+
+The API's credentials are Sosie's, never the client's: `SOSIE_UPSTREAM_HEADERS`
+holds them, one `Name: value` per line (`Authorization: Bearer …`), and a user
+and password in the URL become a Basic header; a query on it (`?api_key=…`) goes
+with every request and is never shown, links included. Headers the client sends,
+`Authorization` included, are not passed on. Redirects are followed inside
+Sosie, within the API's origin and its base path only, never to an address with
+a user name in it nor through a segment that decodes to a `/` or `..`, so
+credentials never go elsewhere and the client never sees a real URL. What the
+terminal says when the API cannot be read leaves the query credentials out. Each request has the statement timeout (30 s) and
+a body cap (20 MB), counted as the body arrives.
+
+### Schema
+
+From an OpenAPI document, 3.x or Swagger 2.0, JSON or YAML: the file or URL in
+`SOSIE_OPENAPI`, or the first of `openapi.json`, `openapi.yaml`,
+`swagger.json`, `v3/api-docs`, `api-docs` and `docs/openapi.json` the API
+serves under its base. Each object schema is an entity (`allOf` merged), each
+property a field, a nested object's properties dotted (`User.address.city`).
+A property that refers to another schema (`$ref`, or `allOf` of one, as
+OpenAPI 3.0 writes a nullable reference) is that entity's row, so a schema that
+refers to itself is read once, and an array of arrays of itself, so deep it
+has no end, is JSON. A document the API serves but Sosie cannot read is named
+in the banner's warning.
+JSON Schema types and formats map to neutral types (`date-time` to `datetime`,
+`uuid`, `ipv4`, `enum` to `enum`); `format: email` and `uri` pick the email and
+URL formats. A property `id` is the entity's key; one named `userId`, `user_id`
+or `userIds` shares the values of the id of the entity it names, `User`. Such a
+reference is a guess from a name: it shares the target's fakes, but never
+passes because the target does in `sosie.yml`.
+
+Without a document, the schema is learned as responses come: a value is the
+field of where it sits, in the entity its path names, singular (`/users` and
+`/users/87` are `user`; `{ "data": [{ "email": … }] }` is `user.email`, the
+envelope keys `data`, `items`, `results` and the like left out). The banner says
+so, and `sosie.yml` may name fields not met yet: they warn instead of failing,
+and apply once met. A body that does not have the shape its document says is
+read the same way.
+
+### Faking
+
+Every value of a JSON body is faked by its field, with the core's rules: types,
+domains, formats by name, `sosie.yml`. Formats are shared with every source, so
+a person's email is the same fake from the database and the API. A key that is
+structure (`city`, `createdAt`) stays; one that is a value (a map keyed by
+email) is faked, each to its own fake. Every key of a map the document declares
+(`additionalProperties` with a schema) is a value, and so is a key that holds a
+value the request turned back, whatever its case and separators
+(`quillon_profile`, `quillonSettings` for `quillon`): an API that answers with
+what it was asked never hands the real value back. So is a key that holds one
+of Sosie's own credentials, each part of it six characters or more, between
+spaces, quotes, colons and separators: of a credential header's value
+(`Authorization`, `Cookie`, `X-Api-Key` and the like; of `name=value` pairs,
+such as `Token token="…"` or a cookie, the value; a `Basic` one's user and
+password; the scheme's name, `Bearer`, aside), of a query credential, and of
+the user and the password in the URL. A header that carries no credential
+(`X-Tenant`) holds none, so its words stay where they are structure. An integer beyond 2^53 (a 64-bit id) is read and
+written as its digits, never rounded, so its fake leads back to its record. A
+list keeps its first
+`--max-rows` items, and the answer's `sosie-notice` header says the rest were
+cut; a large body is faked a slice of 20 ms at a time, so other clients are
+answered meanwhile.
+
+A URL into the API (`next`, `href`, or a path under the base) points at Sosie
+instead, with nothing real in it, so following it reads the record it names:
+
+- A path segment stays as written when it is a word Sosie knows as a name of
+  the API's: a fixed segment of an OpenAPI path, a collection's name
+  (lowercase, plural) a client asked for as the last word of a path and the
+  API answered with a list (`/users`, `/users/87/orders`), or a word of the
+  request the answer is for. Another word a client sent (a tenant's slug from
+  an app's settings, `/jones/profile`) is never shown to another request. A
+  value (a number, a UUID, a template's parameter, or what follows a
+  collection's name, as in `/users/jdoe`) is faked as the id of what it
+  follows; any other word is faked in a domain of its own (`$path`), and names
+  no entity, so no domain holds it. What follows such a word is its id only
+  when it is a number or a UUID; a word there (`/quillon/repos`) is the API's,
+  in `$path` too. Nor does a word a client typed that is no
+  name (`Vantablack`, an email): a name starts lowercase and runs on in
+  letters and digits, in kebab, snake or camel case. The API's words in
+  `$path` and in query names (`$query`) are its structure: `sosie scan` does
+  not look for them.
+- Query values are faked by the field they name, so a real value Sosie sent
+  upstream comes back as the fake the client sent; a page's number (`page`,
+  `limit`, `offset` and the like, up to five digits) stays. A name stays when
+  it is a common one (`sort`, `cursor`, `q`), a field of the document, a key a
+  body has shown as structure, a reference (`userId`), or one of the request
+  the answer is for; any other (`q[Quillon]`, `?jdoe=1`) is faked, and its
+  value too, under no field's name, which no rule in `sosie.yml`, a wildcard
+  included, can name. A reference guessed from a name (`countryId`) shares the
+  id's fakes, and never passes because the id does, as in a body. Sosie's own
+  query credentials are left out.
+- Every value is faked in the request's scope, so a field that passes shows
+  the fake the client sent where the API carries a filter into a link
+  (`/users?id=<what it was asked>`), as in a body.
+- A word or a name that holds a value the request turned back is faked,
+  however it looks.
+- The fragment is left out. Text that starts with a URL and goes on is text.
+
+Status codes pass; error bodies in JSON are faked as no entity's, each value by
+where it sits, so no field's rule in `sosie.yml` applies to them; a body that is
+not JSON is not passed on: an error status passes with Sosie's own message, and
+any other answer is `502`, saying why, JSON nested too deep to read included.
+An answer the API redirected to another path is read by that path, as a link
+is, so another kind's rule in `sosie.yml` never applies to it.
+
+An answer is read as an entity's only when Sosie can tell its path names one:
+every value in it is a number, a UUID or a fake Sosie gave. A word the client
+typed where a value goes (`/products/reviews` without a document, or matching
+`/products/{id}` with one; a login an app knows) may name another kind of
+record, so the answer is no entity's: its values are faked by where they sit,
+and no rule passes them. So is a redirect to such a path, and a body that does
+not have the shape its document gives it (a list where it says an object).
+With a document, a path it declares no operation for is no entity's too. Under
+a record (`/users/4/countries`), the last name says what the answer is only
+when it is a collection's (lowercase, plural) and the API answers it with a
+list: an API that routes by prefix answers `/users/4/<anything>` with the user,
+so a singular resource under a record (`/users/4/profile`) is no entity's, and
+no rule applies to it.
+
+### Query by what you saw
+
+Sosie reads a path the way it reads a link, so following a link and asking
+directly name the same record. A word it made up for a link turns back into the
+API's word. A value, by the same habit or because it is a fake Sosie gave, turns
+back into a real one in the domain of the id of the entity it follows
+(`/users/87` is `user.id`, `/users/{userId}/orders` by its OpenAPI name); text,
+but never a bare number, is looked up anywhere too. A query parameter is looked
+up in the field it names (`?email=` in `user.email`, `?userId=` in `user.id`,
+`?role=` by the document's enum, `?active=false` as the boolean it shows);
+other text anywhere; a number that names no field (`limit=10`, `page=2`) stays
+as written. A value compared with a field that passes is real already, and
+stays as written, in a path too: looked up anywhere, a fake of another field
+would turn into that field's real value, which the passing field would show.
+
+### Limits
+
+- Response headers other than the content type are not passed on, `Link`
+  among them: pagination works through the body.
+- JSON only: images, files and HTML from the API are not passed on.
+- Ids are consistent within the API and across its links. Domains are named
+  after entities and fields, so an API's ids and a database's share fakes only
+  when their names meet in one store (a GraphQL type and a Prisma model both
+  `User`, as `User.id`), and then the same id is the same fake in both.
+- Without a document, a field rule with a wildcard (`country.*`) passes every
+  top-level key of that entity the API ever answers with, a key that `expand=`
+  or a new release adds included, and the value of every word-like query name
+  in a link to it (`?email=` in a `/countries` link). With a document, it
+  passes the fields the document names.
+- A rule that passes an id (`user.id`) passes what follows a collection's name
+  in a path, which Sosie reads as the id: a login or an email, as in
+  `/users/jdoe`, is shown as it is.
+- A body is parsed in one go before it is faked a slice at a time: about half
+  a second, at the 20 MB cap, in which other clients wait.
+- The OpenAPI document, asked for through Sosie (`/v1/openapi.json`), is an
+  answer like any other, and comes back faked; `describe` shows what Sosie
+  read from it. A template whose parameter shares a segment (`{id}.json`) is
+  not read as a value there.
+- A word a client typed that looks like a name, a tenant's slug in lowercase
+  (`jones`, `acme-industries`), names an entity after it, and the domains of
+  that entity's fields, which `sosie scan` prints, are named after it too; a
+  link never shows it. One that starts with a capital (`/Customers`, as OData
+  writes paths) names no entity, so no rule in `sosie.yml` applies under it:
+  every value there is faked.
+- Without a document, the same record read through two kinds of path may be
+  two entities, with two fakes of its id: `/users/87` is `user`, while
+  `/people/by-email/…` names its entity after the last word it can.
+- A map keyed by lowercase words (`{ "jdoe": … }`) keeps its keys, as a json
+  column's do, unless the document declares it a map or the request turned
+  that word back: they look like structure. Such a key is part of the names of
+  the domains below it, which `sosie scan` prints. A link's query name stays
+  for the same reason once a body has shown it as such a key (`?jdoe=1` after
+  `{ "jdoe": … }`); before, it is faked.
+- A link reads less well than the API's own: a word no client has asked a list
+  of yet, and one that follows a collection's name (`/users/by-email/…`), comes
+  back faked, and so does a query name Sosie cannot tell is structure.
+- Without a document, a tenant's slug that is itself a lowercase plural
+  (`jones`), asked for on its own (`/jones`) and answered with a list, is taken
+  for a collection's name, and links show it.
+- An endpoint the API serves for `GET` that writes is the API's to guard: Sosie
+  sends every `GET` on.
+- An id with a `/` in it (`group%2Fproject`, as GitLab names projects) cannot
+  be asked for by path; the API's other id for it can.
+
 ## Adding a source after v0.1
 
 A new source is a package that exports a `Source`. It decides how clients talk
@@ -588,7 +839,7 @@ returns and every value a client sends. What each planned source maps:
 
 | Source | Endpoint for clients | Read-only guard | Field of a value |
 | --- | --- | --- | --- |
-| REST | A local HTTP address; paths and methods as upstream | `GET` and `HEAD` only | The OpenAPI document when given; otherwise the response's JSON path, until `sosie.yml` names it |
+| REST (built, above) | A local HTTP address; paths as upstream | `GET` and `HEAD` only | The OpenAPI document when there is one; otherwise where the value sits |
 | GraphQL | A local HTTP address | Queries only, no mutations | The schema, by introspection or a file |
 | MySQL | MySQL's wire protocol | Reads only, read-only session | Its result metadata, as with Postgres |
 
@@ -616,8 +867,15 @@ domains make a person's email the same fake from the database and from the API.
 - **Drivers.** `psql` (with `\d`), `node-postgres`, `postgres.js`, Drizzle over
   both, and Prisma 7 through its node-postgres adapter. The psql tests skip
   where psql is missing, except in CI.
-- **The CLI.** The built CLI is run: start, MCP over stdio, `scan`, Ctrl+C, and
-  the errors a developer meets first.
+- **REST, end to end.** A fake API under `/v1` wants a bearer token and serves
+  the database's canary people as JSON: an envelope, a map keyed by email, a
+  map the document declares, links with canaries in every part, an image, a
+  long list, an error that quotes a canary; with and without an OpenAPI
+  document. A redirect away goes to a recording server, which must receive
+  nothing. A person's email is the same fake from the database and from the
+  API.
+- **The CLI.** The built CLI is run: start against a database and an API, MCP
+  over stdio, `scan`, Ctrl+C, and the errors a developer meets first.
 - **The dependency rule.** A test reads the imports and manifests.
 - **CI.** PostgreSQL 15, 16, 17 and 18 on Node 26; 18 on Node 24.
 
@@ -626,7 +884,7 @@ domains make a person's email the same fake from the database and from the API.
 | Setting | Default |
 | --- | --- |
 | Address | 127.0.0.1:7674 (7674 spells "sosi" on a phone keypad), and ::1, where `localhost` often goes first; a port another program holds on ::1 counts as taken |
-| Rows per query | 1,000 |
+| Rows per query; items per list of an API's answer | 1,000 |
 | Rows per MCP query | 200 |
 | Statement timeout upstream | 30 s |
 | Store | `$SOSIE_HOME`, or `~/.sosie` |

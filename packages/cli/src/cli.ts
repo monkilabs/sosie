@@ -29,7 +29,7 @@ const USAGE = `Sosie: your AI agent sees a double of your data. Never the real t
 
 Usage:
   sosie                 Start. Reads SOSIE_UPSTREAM, or asks for it.
-  sosie mcp             MCP server over stdio, for the running sosie.
+  sosie mcp             MCP server over stdio, for every running sosie.
   sosie scan <path>...  Search files and folders for real values; exit 1 if one is found.
 
 Options for sosie:
@@ -38,8 +38,16 @@ Options for sosie:
   --rules <file>   Rules file (./sosie.yml when present)
   --max-rows <n>   Rows a query returns at most (1000)
 
-The connection string is never an argument: arguments show in shell history
-and the process list, where an agent can read them.
+Environment:
+  SOSIE_UPSTREAM          A database's connection string, or an API's base URL
+  SOSIE_UPSTREAM_HEADERS  For an API: headers Sosie sends it, one 'Name: value'
+                          per line, such as 'Authorization: Bearer ...'
+  SOSIE_OPENAPI           For an API: its OpenAPI document, a file or URL
+                          (otherwise Sosie looks for one at the usual paths)
+  SOSIE_HOME              Where Sosie keeps its store (~/.sosie)
+
+The upstream and its credentials are never arguments: arguments show in shell
+history and the process list, where an agent can read them.
 `
 
 class Exit extends Error {
@@ -113,12 +121,12 @@ async function start(options: {
   const upstream = await readUpstream()
   const source = sources.find((s) => s.matches(upstream))
   if (!source) {
-    throw new Exit(2, fail(`Sosie reads ${sources.map((s) => `${s.kind}://`).join(', ')} upstreams for now, not ${upstream.protocol}//.`))
+    throw new Exit(2, fail(`Sosie reads postgres:// databases and http:// or https:// APIs for now, not ${upstream.protocol}//.`))
   }
 
   let connection
   try {
-    connection = await source.connect(upstream, { maxRows: options.maxRows, statementTimeout: 30_000 })
+    connection = await source.connect(upstream, { maxRows: options.maxRows, statementTimeout: 30_000, env: process.env })
   } catch (error) {
     throw new Exit(1, fail((error as Error).message))
   }
@@ -128,7 +136,7 @@ async function start(options: {
   if (rulesFile) {
     if (!existsSync(rulesFile)) throw new Exit(2, fail(`No rules file at ${rulesFile}.`))
     try {
-      rules = loadRules(readFileSync(rulesFile, 'utf8'), connection.schema, rulesFile)
+      rules = loadRules(readFileSync(rulesFile, 'utf8'), connection.schema, rulesFile, { learns: !!connection.learns })
     } catch (error) {
       await connection.close()
       if (error instanceof RulesError) throw new Exit(1, error.problems.map(fail).join('\n'))
@@ -174,11 +182,12 @@ async function start(options: {
     ok(`${connection.label}, read-only: ${connection.summary}`),
     ok(passing ? `Every value is faked; ${passing} ${passing === 1 ? 'field passes' : 'fields pass'} (${rulesFile})` : 'Every value is faked'),
     ...connection.warnings.map(warn),
+    ...rules.warnings.map(warn),
     ...(loopback(options.host)
       ? []
       : [warn(`Listening on ${options.host}, with no password: anyone who can reach it can query the fakes and filter on the real values.`)]),
     '',
-    `  Your agent, app and psql:  ${endpoint.address}`,
+    `  Your agent, app and ${(connection.client ?? 'tools') + ':'}`.padEnd(29) + endpoint.address,
     `  Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp`,
     '',
   ]
@@ -191,7 +200,7 @@ async function readUpstream(): Promise<URL> {
   let text = process.env.SOSIE_UPSTREAM
   if (!text) {
     if (!process.stdin.isTTY) {
-      throw new Exit(2, fail("Set SOSIE_UPSTREAM to your database's connection string, or run sosie in a terminal to type it."))
+      throw new Exit(2, fail("Set SOSIE_UPSTREAM to your database's connection string or your API's base URL, or run sosie in a terminal to type it."))
     }
     try {
       text = await hiddenPrompt('  Connection string (hidden): ', process.stdin, process.stdout)
@@ -202,7 +211,10 @@ async function readUpstream(): Promise<URL> {
   try {
     return new URL(text)
   } catch {
-    throw new Exit(2, fail('The connection string is not a URL. It looks like postgres://user:password@host:5432/database.'))
+    throw new Exit(
+      2,
+      fail('The upstream is not a URL. It looks like postgres://user:password@host:5432/database, or https://api.example.com/v1.'),
+    )
   }
 }
 

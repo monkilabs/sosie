@@ -49,6 +49,22 @@ describe('sosie.yml', () => {
     expect(problems('pass: [\n')[0]).toMatch(/^sosie\.yml: /)
   })
 
+  it('for a source that learns its fields, keeps the ones not met yet, with a warning', () => {
+    const rules = loadRules('pass:\n  - order.status\n  - user.*\nformat:\n  user.handle: username\n', { entities: [] }, 'sosie.yml', { learns: true })
+    expect([...rules.pass]).toEqual(['order.status', 'user.*'])
+    expect(rules.format.get('user.handle')).toBe('username')
+    expect(rules.warnings).toHaveLength(3)
+    expect(rules.warnings[0]).toBe('sosie.yml: order is not known yet: it applies once Sosie meets it.')
+    expect(problems('format:\n  user.handle: usrname\n')[0]).toMatch(/usrname is not a format/)
+  })
+
+  it('refuses, even for a source that learns its fields, a rule for what names no entity or is Sosie’s own', () => {
+    for (const id of ['*.*', '*.error', '$path', '$query.value', '$key']) {
+      expect(() => loadRules(`pass:\n  - "${id}"\n`, { entities: [] }, 'sosie.yml', { learns: true }), id).toThrow(/names no entity/)
+    }
+    expect(() => loadRules('pass:\n  - users\n', { entities: [] })).toThrow(/users is not a table/)
+  })
+
   it('suggests only near misses', () => {
     expect(suggest('emial', ['email', 'name'])).toBe('email')
     expect(suggest('zzzzzz', ['email', 'name'])).toBeUndefined()

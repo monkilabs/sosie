@@ -28,6 +28,15 @@ export interface Field {
   key?: 'primary' | 'unique'
   /** The id of the field whose values this one shares: a foreign key's target, or a view column's source. */
   references?: string
+  /**
+   * The reference was guessed from the field's name (userId to User.id), not read from the upstream: it shares
+   * the target's fakes, but never passes because the target does, since a wrong guess must let nothing through.
+   */
+  guessed?: boolean
+  /** A format the upstream's own schema gives (OpenAPI's format: email), used when sosie.yml names none. */
+  format?: string
+  /** The upstream's own words (a path's, a query's names): faked so none shows, but structure, so `sosie scan` does not look for them. */
+  words?: boolean
 }
 
 export type FieldType =
@@ -43,21 +52,26 @@ export type FieldType =
   | { kind: 'unknown' }
 
 export interface Faker {
-  /** The fake of a value read from a field. Null stays null; a field that passes returns the value unchanged. */
-  value(value: Value, field: Field): Value
+  /**
+   * The fake of a value read from a field. Null stays null; a field that passes returns the value unchanged.
+   * With the request's scope, a JSON key that is a value the request turned back is faked, however it looks.
+   */
+  value(value: Value, field: Field, scope?: RequestScope): Value
   /**
    * The fake of a value no field holds, such as length(email) or upper(name).
    * `sent` is what the client sent: a JSON key it wrote is structure, not a value.
    */
-  computed(value: Value, type: FieldType, sent?: string): Value
+  computed(value: Value, type: FieldType, sent?: string, scope?: RequestScope): Value
   /** Whether a field's values pass unchanged. */
   passes(field: Field): boolean
   /**
    * A scope per request, so its errors can be scrubbed of what it substituted.
    * `sent` is what the client sent; `from` is an earlier scope of the same
    * request, such as a prepared statement's, whose substitutions carry over.
+   * `secrets` are Sosie's own credentials for the upstream, as `secretParts`
+   * gives them: a key, or a value that passes, that holds one is faked.
    */
-  request(sent?: string, from?: RequestScope): RequestScope
+  request(sent?: string, from?: RequestScope, secrets?: readonly string[]): RequestScope
 }
 
 export interface RequestScope {
@@ -68,6 +82,8 @@ export interface RequestScope {
    * leaves the value as written.
    */
   lookup(fake: string, near?: Field): string | undefined
+  /** Whether this request turned a fake into this real value, ignoring case: an answer that holds it is echoing it. */
+  turnedBack(real: string): boolean
   /** Text with every real value this request substituted turned back into its fake, and anything quoted the client did not send masked. */
   scrub(text: string): string
 }
@@ -77,6 +93,8 @@ export interface SourceOptions {
   maxRows: number
   /** Milliseconds a statement may run upstream. */
   statementTimeout: number
+  /** Where a source reads its own settings, never arguments: SOSIE_UPSTREAM_HEADERS, SOSIE_OPENAPI. */
+  env?: Record<string, string | undefined>
 }
 
 export interface Source {
@@ -98,6 +116,10 @@ export interface Connection {
   readonly summary: string
   /** Things the developer should know, for the terminal. */
   readonly warnings: string[]
+  /** The schema grows as values come (an API without a schema): sosie.yml may name fields not met yet. */
+  readonly learns?: boolean
+  /** The tool a developer would point at the address, for the terminal: 'psql', 'curl'. */
+  readonly client?: string
   /** Start the endpoint clients use. Every value it returns goes through the Faker. */
   serve(listen: { host: string; port: number }, faker: Faker): Promise<Endpoint>
   close(): Promise<void>

@@ -27,6 +27,7 @@ export const postgres: Source = {
       schema: catalog.schema,
       label,
       summary: counts.join(', '),
+      client: 'psql',
       warnings: [
         ...(catalog.admin
           ? ['The login is a superuser or can replicate. Sosie refuses the admin functions it knows, but a read-only login is safer.']

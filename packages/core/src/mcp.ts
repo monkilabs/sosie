@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { z } from 'zod'
+import { exactInteger } from './json.js'
 import type { McpTool, Running, Schema } from './source.js'
 
 export interface McpOptions {
@@ -80,6 +81,20 @@ async function respond(work: () => Promise<unknown>) {
   } catch (error) {
     return { content: [{ type: 'text' as const, text: (error as Error).message }], isError: true }
   }
+}
+
+/** JSON with each of its lists cut to the first `max` items, for an agent's context; `cut` says whether one was. */
+export function capLists(value: unknown, max: number): { value: unknown; cut: boolean } {
+  let cut = false
+  const walk = (node: unknown): unknown => {
+    if (Array.isArray(node)) {
+      if (node.length > max) cut = true
+      return node.slice(0, max).map(walk)
+    }
+    if (node && typeof node === 'object' && exactInteger(node) === undefined) return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, walk(v)]))
+    return node
+  }
+  return { value: walk(value), cut }
 }
 
 /** The neutral schema as an agent reads it. */

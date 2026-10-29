@@ -80,11 +80,10 @@ function integer(real: string, bytes: 2 | 4 | 8 | undefined, { random, attempt }
   return negative && n !== 0n ? `-${n}` : String(n)
 }
 
-/** Digits replaced: the same sign, digits and scale. */
+/** Digits replaced: the same sign, digits and scale. Text that is not a number, as an API may send for one, is shaped whole. */
 function decimal(real: string, random: Random): string {
   if (/^[+-]?(NaN|Infinity)$/i.test(real)) return real
-  if (!/\d/.test(real)) return shape(real, random)
-  const exponent = real.search(/[eE]/)
+  const exponent = NUMBER.test(real) ? real.search(/[eE]/) : -1
   return exponent < 0 ? shape(real, random) : shape(real.slice(0, exponent), random) + real.slice(exponent)
 }
 
@@ -125,10 +124,11 @@ function pad(n: number): string {
   return String(n).padStart(2, '0')
 }
 
-/** An address from a documentation range, with the real value's prefix length. */
+/** An address from a documentation range, with the real value's prefix length. Text that is not an address is shaped whole. */
 function ip(real: string, random: Random): string {
-  const slash = real.indexOf('/')
-  const suffix = slash < 0 ? '' : real.slice(slash)
+  const m = /^([0-9.]+|[0-9a-f:.]*:[0-9a-f:.]*)(\/\d{1,3})?$/i.exec(real)
+  if (!m) return shape(real, random)
+  const suffix = m[2] ?? ''
   if (real.includes(':')) {
     const groups = Array.from({ length: 6 }, () => random.int(0, 0xffff).toString(16))
     return `2001:db8:${groups.join(':')}${suffix}`

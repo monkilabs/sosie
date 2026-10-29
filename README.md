@@ -13,8 +13,8 @@ credentials and hostnames stay on your side.
 
 ## Status
 
-v0.1 works end to end with PostgreSQL 15 to 18, on Node 26 and 24. It is not
-published yet. The [MVP](docs/mvp.md), the [high-level design](docs/hld.md)
+Sosie works end to end in front of PostgreSQL 15 to 18 and in front of REST
+APIs, on Node 26 and 24. It is not published yet. The [MVP](docs/mvp.md), the [high-level design](docs/hld.md)
 and the [low-level design](docs/lld.md) say what it does and how.
 
 ## How it works
@@ -82,8 +82,35 @@ one store, so a person is the same fake in each, and `sosie mcp` serves them
 all.
 
 Tested with `psql`, `node-postgres`, `postgres.js`, Drizzle and Prisma.
-Postgres is the first source. More databases and your own REST and GraphQL
-APIs come next, each a package behind the same interface.
+
+### In front of your API
+
+The same, for your team's own REST API: the agent reads it through Sosie, and a
+person is the same fake from the API as from the database.
+
+```sh
+export SOSIE_UPSTREAM='https://api.internal/v1'
+export SOSIE_UPSTREAM_HEADERS="$(cat ~/.config/api.headers)"   # Authorization: Bearer …
+npx @sosie/cli
+```
+
+```
+  ✓ api.internal/v1, read-only: OpenAPI 3.1, 24 schemas, 41 GET paths
+  ✓ Every value is faked
+
+  Your agent, app and curl:  http://localhost:7675/v1
+```
+
+Only `GET` and `HEAD` reach the API, with Sosie's credentials, never the
+agent's; read them from a file or a secret manager, as above, so they stay out
+of your shell's history. Sosie reads the API's OpenAPI document when it serves one, or the one
+in `SOSIE_OPENAPI`; without one, it names each value by where it sits. Links in
+the API's answers point at Sosie with every value in them faked, and following
+one reads the record it names; a word that is the API's own, a collection's
+name or a query name its document or its answers show, stays as written.
+
+Postgres and REST are the first sources. GraphQL and more databases come next,
+each a package behind the same interface.
 
 ## Good to know
 
