@@ -1,6 +1,6 @@
 import { exactInteger, integerOf, structuralKey, type Faker, type Field, type RequestScope } from '@sosie/core'
 import { merged, refName, refOf, referenceOf, type Api, type Node } from './openapi.js'
-import { idField, wordName, type Route } from './paths.js'
+import { idField, QUERY_VALUE, wordName, type Route } from './paths.js'
 
 /** Keys of a response's root that wrap its rows: { data: [...] }. A field below one is named as if it were not there. */
 export const ENVELOPES = new Set(['data', 'items', 'results', 'records', 'rows', 'content', 'values', 'entries', 'hits', 'nodes', 'list'])
@@ -24,8 +24,6 @@ export interface FakeContext {
   pace: () => Promise<void> | undefined
   /** Told each key shown as structure: a client has seen it. */
   shown?: (key: string) => void
-  /** Whether a key holds Sosie's own credentials: it is faked, however much it looks like a word. */
-  secret?: (key: string) => boolean
 }
 
 /** A JSON body, every value faked by the field it is: from the OpenAPI schema, or named by where it is. `cut` says a list was cut. */
@@ -61,12 +59,14 @@ async function walk(value: unknown, node: Node | undefined, entity: string, pref
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       const documented = properties?.[k]
-      const structural = documented !== undefined || (!map && structuralKey(k) && !ctx.scope?.turnedBack(k) && !ctx.secret?.(k))
+      const structural = documented !== undefined || (!map && structuralKey(k) && !ctx.scope?.turnedBack(k))
       // A key that is a value (a map keyed by email) is faked, and never named in a field.
       const name = structural ? k : (ctx.faker.value(k, MAP_KEY, ctx.scope) as string)
       if (structural) ctx.shown?.(k)
       const envelope = !schema && !prefix && ENVELOPES.has(k) && v !== null && typeof v === 'object'
-      out[name] = await walk(v, documented ?? map, entity, envelope ? '' : `${prefix}${structural ? k : '*'}.`, structural ? k : '', ctx, state)
+      const faked = await walk(v, documented ?? map, entity, envelope ? '' : `${prefix}${structural ? k : '*'}.`, structural ? k : '', ctx, state)
+      // Defined, not assigned: a key __proto__ is the API's data, not the object's prototype.
+      Object.defineProperty(out, name, { value: faked, enumerable: true, writable: true, configurable: true })
     }
     return out
   }
@@ -102,12 +102,13 @@ function fieldAt(entity: string, prefix: string, key: string, value: unknown, ct
  * A name that is not a word (q[Quillon]) is no field's: its values fake alike.
  */
 export function queryField(name: string, value: string, route: Route, ctx: Pick<FakeContext, 'fields' | 'entityFor'>, hidden = false): Field {
-  // A name the client is not shown is no field's either, so no domain holds it.
-  if (hidden || !wordName(name)) return { id: `${route.entity}.*`, name: '', type: { kind: 'string' } }
+  // A name the client is not shown is no field's either, so no domain holds it, and no rule in sosie.yml names it.
+  if (hidden || !wordName(name)) return QUERY_VALUE
   if (name === 'id') return idField(route.entity, value)
-  const target = referenceOf(name, ctx.entityFor)
-  if (target) return idField(target, value)
   const documented = ctx.fields.get(`${route.entity}.${name}`)
   if (documented) return documented
+  // A reference guessed from a name (countryId) shares the id's fakes, but never passes because the id does.
+  const target = referenceOf(name, ctx.entityFor)
+  if (target) return { id: `${route.entity}.${name}`, name, type: idField(target, value).type, references: `${target}.id`, guessed: true }
   return { id: `${route.entity}.${name}`, name, type: /^(true|false)$/.test(value) ? { kind: 'boolean' } : { kind: 'string' } }
 }

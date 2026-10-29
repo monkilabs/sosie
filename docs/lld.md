@@ -122,7 +122,7 @@ export interface Source {
 
 export interface Connection {
   readonly schema: Schema
-  /** Where the upstream is, without credentials: 'db.internal:5432/app'. Shown in the terminal, and keys the store. */
+  /** Where the upstream is, without credentials: 'db.internal:5432/app'. Shown in the terminal. */
   readonly label: string
   /** What was found, for the terminal: '42 tables, 3 views'. */
   readonly summary: string
@@ -310,7 +310,12 @@ fake: an answer that holds it, whole or within text and whatever its case, is
 echoing what the client sent, and shows the fake the client sent instead. One
 that holds it in another form, escaped as a URL or a form escapes it (`%40`,
 `+`) or with other separators (`quillon-vantablack`), is faked whole, as a
-computed value is. What an answer makes of it beyond that, a part of it (an
+computed value is. An enum label or a boolean the request turned back is an
+echo as a word of text (`active=true`, `{"role":"admin"}`), and shows the fake
+the client sent; a field of its own kind keeps its value, which is its own.
+Sosie's own credentials for the upstream count as well: a key, or a value that
+passes, that holds one, escaped or not, is faked. What an answer makes of an
+echo beyond that, a part of it (an
 email's local part) or it encoded (base64) or reversed, is not caught: a field
 passes because the team chose to show it. A number counts when it is six
 digits or more; a shorter one may be any count. The values a request turned
@@ -322,7 +327,10 @@ no longer to check than it takes to fake.
 
 One SQLite file for every upstream: `~/.sosie/store/store.db`. One store, one
 key: a person's email is the same fake from a database and from an API, through
-its format domain, as the high-level design promises.
+its format domain, as the high-level design promises. A build before this one
+kept a store per upstream, `~/.sosie/<hash>/`, with its own key: it is left as
+it is, its fakes are not carried over, and `sosie scan` still reads it until it
+is deleted.
 
 ```sql
 CREATE TABLE value (
@@ -685,8 +693,9 @@ email) is faked, each to its own fake. Every key of a map the document declares
 value the request turned back, whatever its case and separators
 (`quillon_profile`, `quillonSettings` for `quillon`): an API that answers with
 what it was asked never hands the real value back. So is a key that holds one
-of Sosie's own credentials, a part of a header value or a query credential of
-six characters or more. An integer beyond 2^53 (a 64-bit id) is read and
+of Sosie's own credentials: a part of six characters or more of a header value
+(the scheme's name, `Bearer`, aside), a query credential, or the user or the
+password in the URL. An integer beyond 2^53 (a 64-bit id) is read and
 written as its digits, never rounded, so its fake leads back to its record. A
 list keeps its first
 `--max-rows` items, and the answer's `sosie-notice` header says the rest were
@@ -705,7 +714,9 @@ instead, with nothing real in it, so following it reads the record it names:
   value (a number, a UUID, a template's parameter, or what follows a
   collection's name, as in `/users/jdoe`) is faked as the id of what it
   follows; any other word is faked in a domain of its own (`$path`), and names
-  no entity, so no domain holds it. Nor does a word a client typed that is no
+  no entity, so no domain holds it. What follows such a word is its id only
+  when it is a number or a UUID; a word there (`/quillon/repos`) is the API's,
+  in `$path` too. Nor does a word a client typed that is no
   name (`Vantablack`, an email): a name starts lowercase and runs on in
   letters and digits, in kebab, snake or camel case. The API's words in
   `$path` and in query names (`$query`) are its structure: `sosie scan` does
@@ -716,7 +727,13 @@ instead, with nothing real in it, so following it reads the record it names:
   it is a common one (`sort`, `cursor`, `q`), a field of the document, a key a
   body has shown as structure, a reference (`userId`), or one of the request
   the answer is for; any other (`q[Quillon]`, `?jdoe=1`) is faked, and its
-  value too, under no field's name. Sosie's own query credentials are left out.
+  value too, under no field's name, which no rule in `sosie.yml`, a wildcard
+  included, can name. A reference guessed from a name (`countryId`) shares the
+  id's fakes, and never passes because the id does, as in a body. Sosie's own
+  query credentials are left out.
+- Every value is faked in the request's scope, so a field that passes shows
+  the fake the client sent where the API carries a filter into a link
+  (`/users?id=<what it was asked>`), as in a body.
 - A word or a name that holds a value the request turned back is faked,
   however it looks.
 - The fragment is left out. Text that starts with a URL and goes on is text.
@@ -754,8 +771,14 @@ would turn into that field's real value, which the passing field would show.
   `User`, as `User.id`), and then the same id is the same fake in both.
 - Without a document, a field rule with a wildcard (`country.*`) passes every
   top-level key of that entity the API ever answers with, a key that `expand=`
-  or a new release adds included. With a document, it passes the fields the
-  document names.
+  or a new release adds included, and the value of every word-like query name
+  in a link to it (`?email=` in a `/countries` link). With a document, it
+  passes the fields the document names.
+- A rule that passes an id (`user.id`) passes what follows a collection's name
+  in a path, which Sosie reads as the id: a login or an email, as in
+  `/users/jdoe`, is shown as it is.
+- A body is parsed in one go before it is faked a slice at a time: about half
+  a second, at the 20 MB cap, in which other clients wait.
 - A word a client typed that looks like a name, a tenant's slug in lowercase
   (`jones`, `acme-industries`), names an entity after it, and the domains of
   that entity's fields, which `sosie scan` prints, are named after it too; a

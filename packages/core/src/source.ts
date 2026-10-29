@@ -76,8 +76,10 @@ export interface Faker {
    * A scope per request, so its errors can be scrubbed of what it substituted.
    * `sent` is what the client sent; `from` is an earlier scope of the same
    * request, such as a prepared statement's, whose substitutions carry over.
+   * `secrets` are Sosie's own credentials for the upstream, as `secretParts`
+   * gives them: a key, or a value that passes, that holds one is faked.
    */
-  request(sent?: string, from?: RequestScope): RequestScope
+  request(sent?: string, from?: RequestScope, secrets?: readonly string[]): RequestScope
 }
 
 export interface RequestScope {
@@ -116,7 +118,7 @@ export interface Source {
 
 export interface Connection {
   readonly schema: Schema
-  /** Where the upstream is, without credentials: 'db.internal:5432/app'. Shown in the terminal, and keys the store. */
+  /** Where the upstream is, without credentials: 'db.internal:5432/app'. Shown in the terminal. */
   readonly label: string
   /** What was found, for the terminal: '42 tables'. */
   readonly summary: string

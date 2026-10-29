@@ -210,11 +210,28 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
       res.writeHead(200, { 'content-type': 'application/json' })
       return res.end(path === '/big-ids' ? `[${record}]` : record)
     }
+    // Links that carry a filter on, as related and canonical links do: what Sosie sent upstream comes back in them.
+    if (path === '/lookup') {
+      const email = encodeURIComponent(url.searchParams.get('email') ?? '')
+      return json(200, { self: `${origin}/v1/users/${email}`, list: `${origin}/v1/users?id=${email}`, near: `${origin}/v1/reports?countryId=Vantablack` })
+    }
+    if (path === '/countries') return json(200, [{ id: 1, name: 'Iceland' }])
+    // A link with query names that are values, and values under them.
+    if (path === '/country-links') {
+      return json(200, { next: `${origin}/v1/countries?Quillon=Vantablack&jdoe=quill.vantablack%40canary-mail.test&q%5BZephyrine%5D=Orrowmoor` })
+    }
+    // Keys that name an object's own machinery, as data.
+    if (path === '/proto') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end('{"__proto__":{"a":1},"constructor":{"b":2},"x":1}')
+    }
     // An error whose body has a key of the record the path names.
     if (path === '/countries/missing') return json(404, { name: 'Quillon Vantablack', error: 'no such country' })
     // An API that echoes the credentials it was sent, as keys.
     if (path === '/echo-credentials') {
-      return json(200, { [String(req.headers['x-lower'] ?? 'none')]: 1, [url.searchParams.get('api_key') ?? 'none']: 2, theme: 3 })
+      const lower = String(req.headers['x-lower'] ?? 'none')
+      // The password, as an API that knows its users' passwords might echo it.
+      return json(200, { [lower]: 1, [url.searchParams.get('api_key') ?? 'none']: 2, sunshine99: 3, theme: 4, note: `signed with ${lower}` })
     }
     // A redirect that stays under the base as written, and leaves it at an API that decodes %2F and resolves ..
     if (path === '/sneaky') {

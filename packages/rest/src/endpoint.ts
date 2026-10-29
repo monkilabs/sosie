@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { crossSite, localRequest, pacer, parseJson, why, type Endpoint, type Faker, type Field, type RequestScope } from '@sosie/core'
 import { ENVELOPES, fakeBody, queryField, type FakeContext } from './fake.js'
 import { referenceOf, type Api } from './openapi.js'
-import { oneSegment, PAGING, PATH_WORD, QUERY_NAME, route, segmentsOf, singular, valueByHabit, wordName, type Route } from './paths.js'
+import { oneSegment, PAGING, PATH_WORD, QUERY_NAME, QUERY_VALUE, route, segmentsOf, singular, VALUE_SEGMENT, valueByHabit, wordName, type Route } from './paths.js'
 import type { RestUpstream } from './upstream.js'
 
 export interface RestContext {
@@ -11,6 +11,8 @@ export interface RestContext {
   faker: Faker
   /** Items of a list at most, as --max-rows. */
   maxItems: number
+  /** Sosie's own credentials for the API, as `secretParts` gives them. */
+  secrets: readonly string[]
   log: (line: string) => void
 }
 
@@ -64,11 +66,6 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       valueByHabit(segment, afterName, known),
     )
   const under = (path: string) => path === basePath || path.startsWith(`${basePath}/`)
-  /** Sosie's own credentials, in parts long enough to be one: an API that echoes one as a key shows it to no client. */
-  const secrets = [...Object.values(ctx.upstream.headers).flatMap((value) => value.split(/[\s,;=]+/)), ...ctx.upstream.params.values()]
-    .filter((part) => part.length >= 6)
-    .map((part) => part.toLowerCase())
-  const secret = (key: string) => secrets.some((part) => key.toLowerCase().includes(part))
   /** The route of the path a redirect ended on: its words are the API's, as a link's are. */
   const readFinal = (url: URL, mine: Set<string>, scope: RequestScope): Route => {
     const real = under(url.pathname) ? segmentsOf(url.pathname.slice(basePath.length)) : undefined
@@ -97,8 +94,11 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     // A word the client has not seen, and the document does not name, names no entity: it never becomes part of a domain.
     const rt = readPath(real, shown)
     const path = real.map((segment, i) => {
-      const field = rt.values.get(i) ?? (shown(segment) ? undefined : PATH_WORD)
-      return encodeURIComponent(field ? String(ctx.faker.value(segment, field)) : segment)
+      // What follows a word that names no entity is the id of nothing: a number or a UUID is a value, a word is the API's.
+      const value = rt.values.get(i)
+      const field = value && !(value.id === '*.id' && !VALUE_SEGMENT.test(segment)) ? value : shown(segment) ? undefined : PATH_WORD
+      // In the request's scope: a field that passes shows the fake the client sent, never the value it turned back.
+      return encodeURIComponent(field ? String(ctx.faker.value(segment, field, scope)) : segment)
     })
     const query = new URLSearchParams()
     for (const [name, value] of url.searchParams) {
@@ -109,7 +109,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       const named = hidden ? String(ctx.faker.value(name, QUERY_NAME)) : name
       // A page's number stays; a long number under such a name may be an id, and is faked.
       const keep = PAGING.has(name) && /^\d{1,5}$/.test(value)
-      query.append(named, keep ? value : String(ctx.faker.value(value, queryField(name, value, rt, { fields, entityFor }, hidden))))
+      query.append(named, keep ? value : String(ctx.faker.value(value, queryField(name, value, rt, { fields, entityFor }, hidden), scope)))
     }
     const search = query.toString()
     // The fragment is the client's own business, and may hold anything: it is left out.
@@ -131,7 +131,8 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const sent = segmentsOf(incoming.pathname.slice(basePath.length))
     if (!sent) return send(res, 400, { error: 'The path has a % that does not start an escape (%20).' })
     if (!sent.every(oneSegment)) return send(res, 400, { error: OTHER_PATH })
-    const scope = ctx.faker.request(`${sent.join('/')}?${[...incoming.searchParams].flat().join('&')}`)
+    // Sosie's own credentials: a key, or a value that passes, that holds one is faked.
+    const scope = ctx.faker.request(`${sent.join('/')}?${[...incoming.searchParams].flat().join('&')}`, undefined, ctx.secrets)
     /**
      * The real value behind a fake: in its field, and text, not a bare number, anywhere too. A value
      * compared with a field that passes is real already, and stays as written: looked up anywhere, it
@@ -216,7 +217,6 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       maxItems: ctx.maxItems,
       pace: pacer(),
       shown: showKey,
-      secret,
     }
     const faked = await fakeBody(body, read, fake)
     const notice = `Sosie returned the first ${ctx.maxItems} items of a list; the rest were cut. Narrow the request, or start Sosie with a higher --max-rows.`

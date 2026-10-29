@@ -54,7 +54,7 @@ describe('sosie.yml', () => {
     expect([...rules.pass]).toEqual(['order.status', 'user.*'])
     expect(rules.format.get('user.handle')).toBe('username')
     expect(rules.warnings).toHaveLength(3)
-    expect(rules.warnings[0]).toBe('sosie.yml: order is not known yet; It applies once Sosie meets it.')
+    expect(rules.warnings[0]).toBe('sosie.yml: order is not known yet: it applies once Sosie meets it.')
     expect(problems('format:\n  user.handle: usrname\n')[0]).toMatch(/usrname is not a format/)
   })
 

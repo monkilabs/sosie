@@ -83,6 +83,9 @@ export const PATH_WORD: Field = { id: '$path', name: 'path', type: { kind: 'stri
 /** Names of a link's query parameters that are not words (q[Quillon]) fake here. */
 export const QUERY_NAME: Field = { id: '$query', name: 'query', type: { kind: 'string' }, format: 'shape', words: true }
 
+/** The value of a query name Sosie hides: no entity's field, so no rule in sosie.yml, a wildcard included, passes it. */
+export const QUERY_VALUE: Field = { id: '$query.value', name: '', type: { kind: 'string' } }
+
 /** Whether a query parameter's name is structure: words, as in page, sort-by, filter[email] or pageSize, with indexes after a word (ids[0]). */
 export function wordName(name: string): boolean {
   const [first, ...rest] = name.split(/[-.[\]]+/).filter(Boolean)
