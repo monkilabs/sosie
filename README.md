@@ -106,8 +106,8 @@ agent's; read them from a file or a secret manager, as above, so they stay out
 of your shell's history. Sosie reads the API's OpenAPI document when it serves one, or the one
 in `SOSIE_OPENAPI`; without one, it names each value by where it sits. Links in
 the API's answers point at Sosie with every value in them faked, and following
-one reads the record it names; a word that looks like the API's own, a
-collection's name or a lowercase query name, stays as written.
+one reads the record it names; a word that is the API's own, a collection's
+name or a query name its document or its answers show, stays as written.
 
 A GraphQL API works the same way: point `SOSIE_UPSTREAM` at its endpoint
 (`https://api.internal/graphql`). Sosie reads the schema by introspection, or

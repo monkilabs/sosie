@@ -473,10 +473,45 @@ describe('the guard and the credentials', () => {
     await documented.close()
   })
 
+  it('applies no rule of the kind a name under a record names, unless the API answers it with a list of that kind', async () => {
+    const lenient = await startRest(api, { rules: 'pass:\n  - country.*\n  - order.status\n' })
+    expect((await lenient.get('/countries')).status).toBe(200)
+    const [quill] = (await lenient.get('/users')).body.data
+    // An API that routes by prefix answers these with the user: the user is no country.
+    for (const name of ['countries', 'country']) {
+      const { status, body } = await lenient.get(`/users/${quill.id}/${name}`)
+      expect(status, name).toBe(200)
+      expect(canariesIn(JSON.stringify(body)), name).toEqual([])
+    }
+    // A list under a record is that kind's, so its rules apply.
+    expect((await lenient.get(`/users/${quill.id}/orders`)).body.map((o: Json) => o.status)).toEqual(['paid', 'new'])
+    await lenient.close()
+    // With a document, a path it declares no operation for is no entity's.
+    const documented = await startApi({ withOpenapi: true })
+    const s = await startRest(documented, { rules: 'pass:\n  - Country.*\n' })
+    const [user] = (await s.get('/users')).body.data
+    const { body } = await s.get(`/users/${user.id}/countries`)
+    expect(canariesIn(JSON.stringify(body))).toEqual([])
+    expect((await s.get('/countries')).body).toEqual([{ id: 1, name: 'Iceland' }])
+    await s.close()
+    await documented.close()
+  })
+
   it('sends no method override, which asks a framework to write', async () => {
     const before = api.requests.length
-    for (const name of ['_method', 'X-HTTP-Method-Override']) expect((await sosie.get(`/users/1?${name}=DELETE`)).status, name).toBe(400)
+    for (const name of ['_method', '__method', 'method', '_HttpMethod', 'X-HTTP-Method-Override']) {
+      expect((await sosie.get(`/users/1?${name}=DELETE`)).status, name).toBe(400)
+    }
     expect(api.requests.length).toBe(before)
+    // A method that is a value of the API's own (?method=card) goes on.
+    expect((await sosie.get('/users/1?method=card')).status).toBe(200)
+    // Nor one whose name Sosie faked in a link and the client sent back.
+    const { next } = (await sosie.get('/override-link')).body
+    const name = new URL(next).searchParams.keys().next().value!
+    expect(name).not.toBe('X-HTTP-Method-Override')
+    const asked = api.requests.length
+    expect((await sosie.get(`/things?${encodeURIComponent(name)}=DELETE`)).status).toBe(400)
+    expect(api.requests.length).toBe(asked)
   })
 
   it('says so when the API’s JSON is nested too deep to read', async () => {
@@ -507,7 +542,7 @@ describe('an API with an OpenAPI document', () => {
   it('finds the document, and fakes each value by its schema', async () => {
     const documented = await startApi({ withOpenapi: true })
     const s = await startRest(documented)
-    expect(s.connection.summary).toBe('OpenAPI 3.1, 3 schemas, 4 GET paths')
+    expect(s.connection.summary).toBe('OpenAPI 3.1, 4 schemas, 5 GET paths')
     expect(s.connection.schema.entities.find((e) => e.id === 'Order')!.fields.find((f) => f.name === 'userId')!.references).toBe('User.id')
     const users = (await s.get('/users')).body.data
     for (const u of users) expect(['admin', 'editor', 'viewer']).toContain(u.role)

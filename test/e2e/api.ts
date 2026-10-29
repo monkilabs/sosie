@@ -53,6 +53,9 @@ const openapi = {
     '/users/{userId}/orders': {
       get: { responses: { '200': { content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Order' } } } } } } },
     },
+    '/countries': {
+      get: { responses: { '200': { content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Country' } } } } } } },
+    },
   },
   components: {
     schemas: {
@@ -70,6 +73,7 @@ const openapi = {
         },
       },
       Member: { type: 'object', properties: { role: { type: 'string' } } },
+      Country: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' } } },
       Order: {
         type: 'object',
         properties: {
@@ -262,6 +266,14 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
     if (path === '/big') {
       const n = Number(url.searchParams.get('n') ?? 10)
       return json(200, Array.from({ length: n }, (_, i) => ({ id: i + 1, email: `person${i + 1}@example.org` })))
+    }
+    // A link whose query names a method override, as a form's might.
+    if (path === '/override-link') return json(200, { next: `${origin}/v1/things?X-HTTP-Method-Override=PATCH&page=1` })
+    // An API that routes by prefix answers /users/{id}/<anything else> with the user.
+    m = /^\/users\/(\d+)\/(countries|country)$/.exec(path)
+    if (m) {
+      const found = users.find((u) => u.id === Number(m![1]))
+      return found ? json(200, found) : json(404, { error: 'not found' })
     }
     m = /^\/users\/(\d+)\/orders$/.exec(path)
     if (m) return json(200, orders.filter((o) => o.userId === Number(m![1])))
