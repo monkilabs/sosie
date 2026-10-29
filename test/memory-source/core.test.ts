@@ -280,7 +280,9 @@ describe('fakes by type', async () => {
     const scope = faker.request('', undefined, secretParts({ authorization: 'Bearer sesamesecretword' }, ['sunshine99']))
     expect(scope.turnedBack('sesamesecretword')).toBe(true)
     expect(scope.turnedBack('Bearer')).toBe(false)
-    for (const echo of ['token sesamesecretword', 'pw=sunshine%39%39', 'SUNSHINE99']) expect(faker.value(echo, city, scope) as string, echo).not.toMatch(/sesame|sunshine/i)
+    for (const echo of ['token sesamesecretword', 'pw=sunshine%39%39', 'SUNSHINE99', 'Sesame Secret Word', 'sunshine_99']) {
+      expect(faker.value(echo, city, scope) as string, echo).not.toMatch(/sesame|sunshine/i)
+    }
     expect(faker.value('Reykjavik', city, scope)).toBe('Reykjavik')
     // A scope that carries another's over keeps its credentials.
     expect(faker.request('', scope).turnedBack('sesamesecretword')).toBe(true)
