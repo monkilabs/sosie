@@ -21,7 +21,9 @@ const OTHER_PATH = 'A segment of the path holds a / or \\, or is . or ..: the AP
 /** Words Sosie remembers as names of the API's, at most: those a client sent are added as the API answers them. */
 const MAX_KNOWN = 10_000
 /** Query names frameworks read as the method to run instead of GET. */
-const OVERRIDE = /^(_method|x-http-method(-override)?)$/i
+const OVERRIDE = /^(_+method|_?httpmethod|method|x-http-method(-override)?|x-method-override)$/i
+/** Methods that write, as an override names them. */
+const WRITE = /^(post|put|patch|delete|merge)$/i
 /** How an error's body is read: as no entity's, each value faked by where it sits. */
 const NO_ENTITY: Route = { entity: '*', values: new Map() }
 /** A word that looks like a name of the API's: lowercase first, then letters and digits, in kebab, snake or camel case. */
@@ -169,12 +171,12 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const real = turned.map(encodeURIComponent)
     const query = new URLSearchParams()
     const names: string[] = []
-    // A method override in the query (?_method=DELETE) asks a framework to write: it never leaves Sosie.
-    if ([...incoming.searchParams.keys()].some((name) => OVERRIDE.test(name))) {
-      return send(res, 400, { error: 'Sosie is read-only: a method override in the query (_method) is not sent.' })
-    }
     for (const [sentName, value] of incoming.searchParams) {
       const name = wordName(sentName) || known.has(sentName) ? sentName : (scope.lookup(sentName, QUERY_NAME) ?? sentName)
+      // A method override (?_method=DELETE), as sent or as Sosie turns its name back, asks a framework to write: it never leaves Sosie.
+      if (OVERRIDE.test(name) && WRITE.test(value)) {
+        return send(res, 400, { error: 'Sosie is read-only: a method override in the query (_method=DELETE) is not sent.' })
+      }
       if (name === sentName) names.push(name)
       // A number that names no field (limit=10) stays as written; other text is looked up anywhere.
       query.append(name, lookup(value, queryField(name, value, rt, { fields, entityFor }, name !== sentName)) ?? value)
@@ -191,7 +193,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const mine = new Set([...sent.filter((segment, i) => !rt.values.has(i) && words[i] === undefined), ...names])
     // An answer the API redirected to another path is about what that path names; an error is about no
     // entity, so no field's rule in sosie.yml applies to its body, whatever keys it shares with the record.
-    const read = answer.status >= 300 || unsure ? NO_ENTITY : answer.url.pathname === target.pathname ? rt : readFinal(answer.url, mine, scope)
+    // With a document, a path it declares no operation for is no entity's: the API may answer it with anything.
+    const undocumented = !!ctx.api && !rt.operation
+    let read = answer.status >= 300 || unsure || undocumented ? NO_ENTITY : answer.url.pathname === target.pathname ? rt : readFinal(answer.url, mine, scope)
     if (req.method === 'HEAD' || !answer.body) {
       res.writeHead(answer.status, json ? { 'content-type': 'application/json; charset=utf-8' } : {})
       return res.end()
@@ -212,6 +216,11 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       const deep = error instanceof RangeError
       return send(res, 502, { error: deep ? 'The API answered with JSON nested too deep for Sosie to read.' : 'The API answered with JSON that does not parse.' })
     }
+    // Under a record (/users/4/countries), the last name says what the answer is only when it is a collection the API answers
+    // with a list: an API that routes by prefix answers /users/4/<anything> with the user, and another kind's rule must not pass it.
+    const lastName = routed.findLastIndex((_, i) => !rt.values.has(i))
+    const nested = [...rt.values.keys()].some((i) => i < lastName)
+    if (read === rt && !ctx.api && nested && !(COLLECTION.test(routed[lastName]!) && listOf(body, routed[lastName]!))) read = NO_ENTITY
     // A collection's name, which any link may show: the path's last word, a name as the client wrote it, answered with a list.
     const last = sent.length - 1
     const word = sent[last]

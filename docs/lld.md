@@ -633,7 +633,9 @@ decodes to one with a `/` or `\` in it, or to `.` or `..`, and a fake in a
 segment that stands for such a value: an API, or a proxy before it, that
 decodes `%2F` and resolves `..` would read another path than Sosie does, one
 outside the base or of another kind. A method override in the query
-(`?_method=DELETE`), which some frameworks run instead of `GET`, gets `400`. On
+(`?_method=DELETE`, `method`, `X-HTTP-Method-Override` and the like, with a
+method that writes), which some frameworks run instead of `GET`, gets `400`,
+as written or as Sosie turns a name it faked back. On
 this machine's own
 address, a request whose `Host` is not `localhost`, a `127.` address or `[::1]`
 gets `403`: a web page that rebinds its own name to this machine cannot read the
@@ -757,6 +759,12 @@ typed where a value goes (`/products/reviews` without a document, or matching
 record, so the answer is no entity's: its values are faked by where they sit,
 and no rule passes them. So is a redirect to such a path, and a body that does
 not have the shape its document gives it (a list where it says an object).
+With a document, a path it declares no operation for is no entity's too. Under
+a record (`/users/4/countries`), the last name says what the answer is only
+when it is a collection's (lowercase, plural) and the API answers it with a
+list: an API that routes by prefix answers `/users/4/<anything>` with the user,
+so a singular resource under a record (`/users/4/profile`) is no entity's, and
+no rule applies to it.
 
 ### Query by what you saw
 
@@ -808,8 +816,9 @@ would turn into that field's real value, which the passing field would show.
 - A map keyed by lowercase words (`{ "jdoe": … }`) keeps its keys, as a json
   column's do, unless the document declares it a map or the request turned
   that word back: they look like structure. Such a key is part of the names of
-  the domains below it, which `sosie scan` prints. A link's query name that is
-  a lowercase word (`?jdoe=1`) stays for the same reason.
+  the domains below it, which `sosie scan` prints. A link's query name stays
+  for the same reason once a body has shown it as such a key (`?jdoe=1` after
+  `{ "jdoe": … }`); before, it is faked.
 - A link reads less well than the API's own: a word no client has asked a list
   of yet, and one that follows a collection's name (`/users/by-email/…`), comes
   back faked, and so does a query name Sosie cannot tell is structure.
