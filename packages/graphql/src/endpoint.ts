@@ -19,7 +19,7 @@ import {
   type GraphQLSchema,
   type SelectionNode,
 } from 'graphql'
-import { Checker } from './check.js'
+import { Checker, MAX_ANSWER } from './check.js'
 import { fakeData, TYPENAME } from './fake.js'
 import { rewrite } from './rewrite.js'
 import type { GraphqlUpstream } from './upstream.js'
@@ -88,6 +88,8 @@ const errorCode = (code: unknown, names: Set<string>): code is string => {
 }
 /** Tokens a query may have: parsing a larger one would keep other clients waiting. Checking it runs on threads of its own. */
 const MAX_TOKENS = 10_000
+
+const TOO_MUCH = `A batch's introspection answers, together, are larger than Sosie sends at once (${MAX_ANSWER / 1024 / 1024} MB). Ask for less.`
 
 /** JSON already written, by the thread that answered introspection: sent as it is, never parsed again. */
 class Written {
@@ -260,8 +262,17 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     }
     if (Array.isArray(request)) {
       if (request.length > MAX_BATCH) return send(res, 400, { errors: [{ message: `A batch has at most ${MAX_BATCH} operations.` }] })
+      // A batch's answers are kept until it is sent: together, introspection's are no larger than one may be.
       const answers = []
-      for (const r of request) answers.push((await one(r)).body)
+      let size = 0
+      for (const r of request) {
+        let { body } = await one(r)
+        if (body instanceof Written) {
+          if (size + body.text.length > MAX_ANSWER) body = { errors: [{ message: TOO_MUCH, extensions: { code: 'SOSIE_TOO_COSTLY' } }] }
+          else size += body.text.length
+        }
+        answers.push(body)
+      }
       return send(res, 200, answers)
     }
     const answer = await one(request)
@@ -270,7 +281,9 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
 
   const accept = (req: IncomingMessage, res: ServerResponse) => {
     handle(req, res).catch((error: Error) => {
-      ctx.log(`Cannot read the API: ${why(error)}`)
+      // Sosie's own credentials (a query's api_key) stay out of the terminal too.
+      const said = ctx.secrets.reduce((text, secret) => text.replace(new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '…'), why(error))
+      ctx.log(`Cannot read the API: ${said}`)
       if (!res.headersSent) send(res, 502, { errors: [{ message: 'Sosie cannot reach the API. The terminal running Sosie says why.' }] })
       else res.end()
     })
@@ -404,8 +417,10 @@ function read(req: IncomingMessage): Promise<string | undefined> {
 }
 
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
+  // Written before the status, so an answer too large to write is a 502, never a 200 with nothing in it.
+  const text = json(body)
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', ...headers })
-  res.end(json(body))
+  res.end(text)
 }
 
 /** A body as JSON, with what is written already as it is: a batch may hold introspection's answer. */

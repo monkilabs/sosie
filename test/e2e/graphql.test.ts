@@ -196,6 +196,27 @@ describe('a GraphQL API', () => {
     expect((await sosie.ask('{ __schema { queryType { name } } }')).body).toEqual({ data: { __schema: { queryType: { name: 'Query' } } } })
   })
 
+  it('answers a batch’s introspection no larger, together, than one answer may be', async () => {
+    const t = Array.from({ length: 60 }, (_, i) => `t${i}: types { ...A }`).join(' ')
+    const f = Array.from({ length: 40 }, (_, i) => `f${i}: fields { name type { name } }`).join(' ')
+    // About 9 MB each: two fit in the 20 MB one answer may take, the third does not.
+    const fan = { query: `{ __schema { ${t} } } fragment A on __Type { name ${f} }` }
+    const response = await fetch(sosie.address, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify([fan, fan, fan]) })
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as Json[]
+    expect(body[0].data.__schema.t0.length).toBeGreaterThan(0)
+    expect(body[1].data.__schema.t0.length).toBeGreaterThan(0)
+    expect(body[2]).toMatchObject({ errors: [{ extensions: { code: 'SOSIE_TOO_COSTLY' } }] })
+  })
+
+  it('answers a query it is checking when it stops, instead of leaving it waiting', async () => {
+    const s = await startGraphqlSosie(api)
+    const asked = s.ask(`{ ${Array(1100).fill('user(id: 1) { id }').join(' ')} }`)
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    await s.close()
+    expect(await asked).toMatchObject({ status: 400, body: { errors: [{ message: 'Sosie is stopping.' }] } })
+  })
+
   it('fakes a large JSON value a slice at a time, and answers other clients meanwhile', async () => {
     const { result, ms } = await stillest(sosie.ask('{ big(n: 20000) }'))
     expect(Object.keys(result.body.data.big)).toHaveLength(20000)
@@ -264,7 +285,8 @@ describe('a GraphQL API', () => {
   })
 
   it('fakes a JSON key that holds its own credentials, even one that looks like a word', async () => {
-    const s = await startGraphqlSosie(api, { env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Lower: sesamesecretword` } })
+    // A Rails-style header writes its token in quotes.
+    const s = await startGraphqlSosie(api, { env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Api-Key: Token token="sesamesecretword"` } })
     const { body } = await s.ask('{ debug }')
     expect(Object.keys(body.data.debug)).toHaveLength(2)
     expect(body.data.debug.theme).toBeDefined()
@@ -281,6 +303,9 @@ describe('a GraphQL API', () => {
     const again = await text(`{ account(id: "${id}") { id } }`)
     expect(api.received.at(-1)!.query).toContain('"1234567890123456789"')
     expect(again).toContain(`"id":${id}`)
+    // So does the MCP tool's answer.
+    const running: Running = { kind: 'graphql', address: sosie.address, schema: { entities: [] }, passing: [] }
+    expect(JSON.stringify(await graphql.tools![0]!.run({ query: '{ account { id } }' }, running))).toContain(`"id":${id}`)
   })
 
   it('answers no introspection the API would see, at any depth', async () => {

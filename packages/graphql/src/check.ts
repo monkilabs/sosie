@@ -8,7 +8,7 @@ const CHECK_MB = 256
 /** Threads: while one works on a costly query, the other answers everyone else. */
 const THREADS = 2
 /** The largest introspection answer: as large as an answer Sosie reads from the API. */
-const MAX_ANSWER = 20 * 1024 * 1024
+export const MAX_ANSWER = 20 * 1024 * 1024
 
 const TOO_COSTLY = `The query asks for more than Sosie checks or answers at once (${CHECK_SECONDS} s, ${CHECK_MB} MB). Ask for less.`
 
@@ -45,6 +45,12 @@ export class Checker {
 
   async close(): Promise<void> {
     this.#closed = true
+    // Every job is answered, those a thread is working on too, so no request waits on a thread that is gone.
+    for (const slot of this.#slots) {
+      clearTimeout(slot.timer)
+      if (slot.busy) this.#queue.push(slot.busy)
+      slot.busy = undefined
+    }
     for (const pending of this.#queue.splice(0)) pending.done({ id: pending.job.id, refused: 'Sosie is stopping.' })
     await Promise.all(this.#slots.map((slot) => slot.worker.terminate()))
   }

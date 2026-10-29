@@ -17,7 +17,7 @@ export const graphql: Source = {
     const user = decodeURIComponent(upstream.username)
     const password = decodeURIComponent(upstream.password)
     if (user) headers.authorization ??= `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
-    const secrets = secretParts([...Object.values(headers), ...new URL(upstream.href).searchParams.values(), user, password])
+    const secrets = secretParts(headers, [...new URL(upstream.href).searchParams.values(), user, password])
     const url = new URL(upstream.href)
     // A query on the URL (?api_key=) is a credential too: sent with every request, never shown.
     url.username = url.password = url.hash = ''

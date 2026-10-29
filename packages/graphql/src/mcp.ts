@@ -1,4 +1,4 @@
-import { capLists, type McpTool } from '@sosie/core'
+import { capLists, parseJson, type McpTool } from '@sosie/core'
 
 const MAX_ITEMS = 200
 /** How long the tool waits for Sosie: less than MCP clients wait for a tool. */
@@ -29,7 +29,8 @@ export const graphqlTool: McpTool = {
     }).catch((error: Error) => {
       throw new Error(error.name === 'TimeoutError' ? `Sosie did not answer at ${running.address} in ${TIMEOUT / 1000} s.` : `Cannot reach Sosie at ${running.address}.`)
     })
-    const capped = capLists(await response.json(), MAX_ITEMS)
+    // Integers beyond 2^53 kept as written, as the endpoint wrote them.
+    const capped = capLists(parseJson(await response.text()), MAX_ITEMS)
     return capped.cut ? { ...(capped.value as object), note: `Only the first ${MAX_ITEMS} items of each list are shown.` } : capped.value
   },
 }

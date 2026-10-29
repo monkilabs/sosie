@@ -863,7 +863,8 @@ query that repeats a field, so one that needs more is refused
 (`SOSIE_TOO_COSTLY`). One costly query leaves the other thread to answer
 everyone else; while both work on costly queries, others wait their turn, at
 most 2 seconds for each costly query ahead of them, since each is refused by
-then. A Sosie that cannot listen on its port stops its threads.
+then. A Sosie that cannot listen on its port stops its threads, and one that
+stops answers what they were still checking (`Sosie is stopping.`).
 Only queries reach the API, and only the operation to run with the fragments
 it uses: a mutation or a subscription is answered with an error, and its text
 never leaves Sosie. A persisted query without its text is refused. POSTs are
@@ -873,7 +874,10 @@ Introspection is answered from the schema Sosie holds, with what the client
 sent, and never reaches the API; so clients introspect an API that has
 introspection off. It runs on the same threads, within the same limits and an
 answer of up to 20 MB, since aliases and fragments can ask for the schema many
-times over in a few lines. `__schema` and `__type` beside data fields, or
+times over in a few lines; a batch's introspection answers are kept until the
+batch is sent, so together they are held to the same 20 MB, and one past it is
+refused (`SOSIE_TOO_COSTLY`). An answer is written whole before its status, so
+one too large to write is a `502`, never an empty `200`. `__schema` and `__type` beside data fields, or
 below the root (under a field of type `Query`, as PostGraphile's `query`), are
 refused: ask for them at the root of a query of their own.
 
@@ -933,6 +937,9 @@ uses, count; only the variables it declares are sent.
   data.
 - A query field that writes is the API's to guard: Sosie sends every query on,
   as REST sends every `GET`.
+- A variable sent as a JSON number beyond 2^53 is read as JavaScript reads it,
+  rounded: a 64-bit id goes as a string (`"id": "4809558151065630052"`), or
+  written in the query.
 
 ## Adding a source after v0.1
 
