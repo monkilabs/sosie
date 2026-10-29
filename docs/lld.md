@@ -810,7 +810,8 @@ For the team's own GraphQL API. `SOSIE_UPSTREAM` is its endpoint, whose path
 ends in `graphql` (`https://api.internal/graphql`); any other http(s) URL is
 the REST source's. Credentials as for REST: `SOSIE_UPSTREAM_HEADERS`, a user
 and password in the URL, or a query on it, never shown; the client's are never
-passed on.
+passed on. As for REST, a JSON key, or a value that passes, that holds a part
+of them is faked.
 
 ### Schema
 
@@ -853,8 +854,9 @@ Introspection is answered from the schema Sosie holds, with what the client
 sent, and never reaches the API; so clients introspect an API that has
 introspection off. It runs on the same threads, within the same limits and an
 answer of up to 20 MB, since aliases and fragments can ask for the schema many
-times over in a few lines. `__schema` and `__type` beside data fields are
-refused: ask for them in a query of their own.
+times over in a few lines. `__schema` and `__type` beside data fields, or
+below the root (under a field of type `Query`, as PostGraphile's `query`), are
+refused: ask for them at the root of a query of their own.
 
 ### Faking
 
@@ -870,7 +872,8 @@ say, or names a type it cannot be, comes back `null`. So a `User` under
 another type's rule. `__typename` comes back as the schema names it. A list
 keeps its first `--max-rows` items, and the response's `extensions.sosie` says
 the rest were cut; a large answer is faked a slice at a time, a large JSON
-value in it too.
+value in it too. An integer beyond 2^53 (a `BigInt` or `Long` scalar sent as a
+number) is read and written as its digits, so its fake leads back.
 
 Errors: since Sosie checked the query and its variables itself, anything the API
 says beyond that may quote data, whether it ran the query (`data` is there) or
@@ -900,7 +903,8 @@ argument (`@include(if:)`) is left alone. A value compared with a field that
 passes is real already, and stays as written, as for REST. A variable has one
 value for all its uses, so it is looked up in the fields of every use at once:
 it is real only when they agree, and stays as written when any use compares it
-with a field that passes.
+with a field that passes. Only the operation that runs, and the fragments it
+uses, count; only the variables it declares are sent.
 
 ### Limits
 

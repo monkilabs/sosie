@@ -81,7 +81,7 @@ describe('a GraphQL API', () => {
   it('is read by introspection, and its types become entities', () => {
     expect(graphql.matches(new URL(api.url))).toBe(true)
     expect(graphql.matches(new URL('https://api.internal/v1/users'))).toBe(false)
-    expect(sosie.connection.summary).toBe('7 types, 13 queries')
+    expect(sosie.connection.summary).toBe('8 types, 16 queries')
     const user = sosie.connection.schema.entities.find((e) => e.id === 'User')!
     expect(user.fields.find((f) => f.name === 'email')).toMatchObject({ format: 'email' })
     expect(sosie.connection.schema.entities.find((e) => e.id === 'Order')!.fields.find((f) => f.name === 'userId')!.references).toBe('User.id')
@@ -136,7 +136,7 @@ describe('a GraphQL API', () => {
     const typed = await sosie.ask('query ($e: String) { users(email: $e) { id } }', { e: [quill.email] })
     expect(typed.status).toBe(400)
     const mixed = await sosie.ask(`{ __type(name: "User") { name } users(email: "${quill.email}") { id } }`)
-    expect(mixed.body.errors[0].message).toBe('Ask for __schema and __type in a query of their own: Sosie answers them from the schema, without the API.')
+    expect(mixed.body.errors[0].message).toBe('Ask for __schema and __type at the root of a query of their own: Sosie answers them from the schema, without the API.')
     expect(api.received.length).toBe(before)
   })
 
@@ -246,6 +246,61 @@ describe('a GraphQL API', () => {
       await connection.close()
       await new Promise((resolve) => taken.close(resolve))
     }
+  })
+
+  it('shows the fake the client sent where a field that passes echoes a label or a boolean Sosie turned back', async () => {
+    const lenient = await startGraphqlSosie(api, { rules: 'pass:\n  - User.matchedBy\n' })
+    // Every label and boolean the client saw turns back into a real one; the API echoes that one as it filtered by it.
+    for (const role of ['admin', 'editor', 'viewer']) {
+      const { users } = (await lenient.ask(`{ users(role: ${role}) { matchedBy } }`)).body.data
+      expect(users.length, role).toBeGreaterThan(0)
+      for (const u of users) expect(u.matchedBy, role).toEqual({ role })
+    }
+    for (const active of [true, false]) {
+      const { users } = (await lenient.ask(`{ users(active: ${active}) { matchedBy } }`)).body.data
+      for (const u of users) expect(u.matchedBy).toEqual({ active })
+    }
+    await lenient.close()
+  })
+
+  it('fakes a JSON key that holds its own credentials, even one that looks like a word', async () => {
+    const s = await startGraphqlSosie(api, { env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Lower: sesamesecretword` } })
+    const { body } = await s.ask('{ debug }')
+    expect(Object.keys(body.data.debug)).toHaveLength(2)
+    expect(body.data.debug.theme).toBeDefined()
+    expect(JSON.stringify(body)).not.toMatch(/sesamesecretword/)
+    await s.close()
+  })
+
+  it('keeps an id beyond 2^53 exact, so its fake leads back to its record', async () => {
+    const text = async (query: string) =>
+      (await fetch(sosie.address, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query }) })).text()
+    const first = await text('{ account { id } }')
+    const id = /"id":(\d+)/.exec(first)![1]!
+    expect(id).not.toBe('1234567890123456789')
+    const again = await text(`{ account(id: "${id}") { id } }`)
+    expect(api.received.at(-1)!.query).toContain('"1234567890123456789"')
+    expect(again).toContain(`"id":${id}`)
+  })
+
+  it('answers no introspection the API would see, at any depth', async () => {
+    const before = api.received.length
+    for (const query of ['{ query { __schema { queryType { name } } } }', '{ query { ...F } } fragment F on Query { __type(name: "User") { name } }']) {
+      const { status, body } = await sosie.ask(query)
+      expect(status, query).toBe(400)
+      expect(body.errors[0].message).toMatch(/at the root of a query of their own/)
+    }
+    expect(api.received.length).toBe(before)
+  })
+
+  it('looks up and sends the variables of the operation it runs only', async () => {
+    const lenient = await startGraphqlSosie(api, { rules: 'pass:\n  - Report.country\n' })
+    const [quill] = (await lenient.ask('{ users { email } }')).body.data.users
+    // Another operation uses $v with a field that passes: it is not sent, so it says nothing of $v.
+    const query = 'query A($v: String) { users(email: $v) { id } } query B($v: String) { report(country: $v) { country } }'
+    await lenient.ask({ query, operationName: 'A' }, { v: quill.email, extra: 'quill.vantablack@canary-mail.test' })
+    expect(api.received.at(-1)!.variables).toEqual({ v: 'quill.vantablack@canary-mail.test' })
+    await lenient.close()
   })
 
   it('lets sosie.yml name a scalar of the query type', async () => {

@@ -44,7 +44,8 @@ Environment:
                           per line, such as 'Authorization: Bearer ...'
   SOSIE_OPENAPI           For a REST API: its OpenAPI document, a file or URL
                           (otherwise Sosie looks for one at the usual paths)
-  SOSIE_GRAPHQL_SCHEMA    For a GraphQL API without introspection: its SDL file
+  SOSIE_GRAPHQL_SCHEMA    For a GraphQL API without introspection: its SDL file,
+                          or a file of its introspection result as JSON
   SOSIE_HOME              Where Sosie keeps its store (~/.sosie)
 
 The upstream and its credentials are never arguments: arguments show in shell

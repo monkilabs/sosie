@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { crossSite, localRequest, pacer, singular, why, type Endpoint, type Faker, type Field } from '@sosie/core'
+import { crossSite, localRequest, pacer, parseJson, singular, why, type Endpoint, type Faker, type Field } from '@sosie/core'
 import {
   getOperationAST,
   getVariableValues,
@@ -32,6 +32,8 @@ export interface GraphqlContext {
   faker: Faker
   /** Items of a list at most, as --max-rows. */
   maxItems: number
+  /** Sosie's own credentials for the API, as `secretParts` gives them. */
+  secrets: readonly string[]
   log: (line: string) => void
 }
 
@@ -147,22 +149,28 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       if ('refused' in answer) return failed(400, answer.refused, 'SOSIE_TOO_COSTLY')
       return { status: 200, body: new Written('text' in answer ? answer.text : '{}') }
     }
-    if (roots.some((f) => f.name.value === '__schema' || f.name.value === '__type')) {
-      return failed(400, 'Ask for __schema and __type in a query of their own: Sosie answers them from the schema, without the API.')
+    // Anywhere in the query, a field of type Query (PostGraphile's query: Query!) included.
+    if (asksSchema(operation.selectionSet.selections, fragments)) {
+      return failed(400, 'Ask for __schema and __type at the root of a query of their own: Sosie answers them from the schema, without the API.')
     }
 
-    // A variable's default is a value the client wrote too: it goes as a variable, so it is turned back like one.
-    const values = { ...given }
+    // Only the variables the operation declares go; a variable's default is a value the client wrote too: it goes
+    // as a variable, so it is turned back like one.
+    const values: Record<string, unknown> = {}
     for (const definition of operation.variableDefinitions ?? []) {
       const name = definition.variable.name.value
-      if (!(name in values) && definition.defaultValue) values[name] = valueFromASTUntyped(definition.defaultValue)
+      if (name in given) values[name] = given[name]
+      else if (definition.defaultValue) values[name] = valueFromASTUntyped(definition.defaultValue)
     }
     const sent = `${query}\n${JSON.stringify(values)}`
-    const scope = ctx.faker.request(sent)
-    const real = rewrite(ctx.schema, document, values, scope, names)
+    // Sosie's own credentials: a key, or a value that passes, that holds one is faked.
+    const scope = ctx.faker.request(sent, undefined, ctx.secrets)
+    // Only the operation to run, and the fragments it uses: no other operation's text, a mutation's least of all,
+    // leaves Sosie, and no other operation's fields say what its variables are.
+    const running: DocumentNode = { ...document, definitions: only(document.definitions, document.definitions.indexOf(operation)) }
+    const real = rewrite(ctx.schema, running, values, scope, names)
     const answer = await ctx.upstream.post({
-      // Only the operation to run, and the fragments it uses: no other operation's text, a mutation's least of all, leaves Sosie.
-      query: print({ ...real.document, definitions: only(real.document.definitions, document.definitions.indexOf(operation)) }),
+      query: print(real.document),
       variables: real.variables,
       ...(operationName && { operationName }),
     })
@@ -170,7 +178,8 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     if (!/json/i.test(answer.type)) return failed(502, 'The API did not answer with JSON; Sosie fakes JSON only.')
     let body: { data?: unknown; errors?: unknown }
     try {
-      body = JSON.parse(answer.body)
+      // Integers beyond 2^53 (a BigInt or Long scalar sent as a number) kept as written, so their fakes lead back.
+      body = parseJson(answer.body) as typeof body
     } catch {
       return failed(502, 'The API answered with JSON that does not parse.')
     }
@@ -308,6 +317,17 @@ function rootFields(selections: readonly SelectionNode[], fragments: Record<stri
     if (seen.has(s.name.value) || !fragments[s.name.value]) return []
     seen.add(s.name.value)
     return rootFields(fragments[s.name.value]!.selectionSet.selections, fragments, seen)
+  })
+}
+
+/** Whether a selection asks for __schema or __type at any depth, through fragments: Sosie answers those, never the API. */
+function asksSchema(selections: readonly SelectionNode[], fragments: Record<string, FragmentDefinitionNode>, seen = new Set<string>()): boolean {
+  return selections.some((s) => {
+    if (s.kind === Kind.FIELD) return s.name.value === '__schema' || s.name.value === '__type' || (!!s.selectionSet && asksSchema(s.selectionSet.selections, fragments, seen))
+    if (s.kind === Kind.INLINE_FRAGMENT) return asksSchema(s.selectionSet.selections, fragments, seen)
+    if (seen.has(s.name.value) || !fragments[s.name.value]) return false
+    seen.add(s.name.value)
+    return asksSchema(fragments[s.name.value]!.selectionSet.selections, fragments, seen)
   })
 }
 

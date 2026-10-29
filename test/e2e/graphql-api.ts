@@ -21,6 +21,7 @@ type User implements Node {
   address: Address
   apiKey: String
   orders: [Order!]!
+  matchedBy: JSON
 }
 type Order implements Node {
   id: ID!
@@ -32,6 +33,8 @@ type Order implements Node {
 }
 type Product { id: ID! name: String sku: String }
 type Report { country: String total: Int note: String }
+scalar Long
+type Account { id: Long name: String }
 input IdComparison { _eq: ID }
 input BooleanComparison { _eq: Boolean }
 input UserFilter { id: IdComparison, active: BooleanComparison }
@@ -50,6 +53,9 @@ type Query {
   filtered(where: UserFilter): [User!]!
   report(country: String, q: String): Report
   big(n: Int!): JSON
+  query: Query!
+  debug: JSON
+  account(id: Long): Account
 }
 type Mutation {
   deleteUser(id: ID!): Boolean
@@ -89,8 +95,11 @@ export async function startGraphql({ introspection = true, elsewhere = 'http://2
   const operations: string[] = []
   const received: FakeGraphql['received'] = []
   const root = {
+    // Each user found says which filters found it, as servers echo what they applied.
     users: ({ email, role, active }: { email?: string; role?: string; active?: boolean }) =>
-      people.filter((p) => (!email || p.email === email) && (!role || p.role === role) && (active === undefined || p.active === active)).map(user),
+      people
+        .filter((p) => (!email || p.email === email) && (!role || p.role === role) && (active === undefined || p.active === active))
+        .map((p) => ({ ...user(p), matchedBy: { ...(role && { role }), ...(active !== undefined && { active }) } })),
     node: ({ id }: { id: string }) => {
       const p = people.find((x) => x.id === id)
       return p ? user(p) : null
@@ -99,6 +108,12 @@ export async function startGraphql({ introspection = true, elsewhere = 'http://2
     motd: () => 'Hello',
     // A report that echoes its filters: the country it was asked for, and a search's text, as servers write it back.
     report: ({ country, q }: { country?: string; q?: string }) => ({ country: country ?? 'Iceland', total: 6, note: q ? `Results for ${q.toUpperCase()}` : 'All' }),
+    // The root again, as PostGraphile has it.
+    query: () => root,
+    // What a debugging endpoint echoes: the credential it was sent, as a key.
+    debug: () => ({ sesamesecretword: 1, theme: 2 }),
+    // A 64-bit id, which no JavaScript number holds: written as its digits (see json below).
+    account: ({ id }: { id?: unknown }) => (id === undefined || String(id) === '1234567890123456789' ? { id: '@@1234567890123456789@@', name: 'Quillon Vantablack' } : null),
     big: ({ n }: { n: number }) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${1000 + i}`, `value ${i}`])),
     // A lookup keyed by what it was asked, as JSON: the real handles Sosie sent it.
     usersByHandles: ({ handles }: { handles: string[] }) => Object.fromEntries(handles.map((h) => [h, { found: people.some((p) => p.handle === h) }])),
@@ -123,7 +138,7 @@ export async function startGraphql({ introspection = true, elsewhere = 'http://2
     req.on('end', async () => {
       const json = (status: number, body: unknown) => {
         res.writeHead(status, { 'content-type': 'application/json' })
-        res.end(JSON.stringify(body))
+        res.end(JSON.stringify(body).replace(/"@@(\d+)@@"/g, '$1'))
       }
       if (req.headers.authorization !== `Bearer ${TOKEN}`) return json(401, { errors: [{ message: 'unauthorized' }] })
       const request = JSON.parse(text || '{}')

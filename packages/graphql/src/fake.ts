@@ -1,4 +1,4 @@
-import type { Faker, Field, RequestScope } from '@sosie/core'
+import { exactInteger, integerOf, type Faker, type Field, type RequestScope } from '@sosie/core'
 import {
   getNamedType,
   isAbstractType,
@@ -67,7 +67,9 @@ async function walk(value: unknown, selections: readonly SelectionNode[], type: 
   const groups = new Map<string, FieldNode[]>()
   for (const node of collect(selections, named, ctx)) {
     const key = node.alias?.value ?? node.name.value
-    groups.set(key, [...(groups.get(key) ?? []), node])
+    const group = groups.get(key)
+    if (group) group.push(node)
+    else groups.set(key, [node])
   }
   const out: Record<string, unknown> = {}
   for (const [key, nodes] of groups) {
@@ -120,7 +122,9 @@ async function leaf(value: unknown, field: Field, ctx: FakeContext, state: { cut
     return out
   }
   await ctx.pace()
-  if (typeof value === 'object') {
+  // An integer beyond 2^53, kept as written: a value, not an object.
+  const exact = exactInteger(value)
+  if (typeof value === 'object' && exact === undefined) {
     // An object in a scalar's place: a JSON scalar's by its field, any other custom scalar's (jsonb, Map, Any) as JSON a
     // query built; one that passes, as JSON still, so what it echoes is found. A large one is faked a slice at a time.
     const json = JSON.stringify(value)
@@ -130,8 +134,9 @@ async function leaf(value: unknown, field: Field, ctx: FakeContext, state: { cut
         : await ctx.faker.computedPaced(json, { kind: 'json' }, ctx.sent ?? '', ctx.scope, ctx.pace)
     return JSON.parse(fake as string)
   }
-  const fake = ctx.faker.value(String(value), field, ctx.scope) as string | null
+  const fake = ctx.faker.value(exact ?? String(value), field, ctx.scope) as string | null
   if (fake === null) return null
+  if (exact !== undefined) return /^-?\d+$/.test(fake) ? integerOf(fake) : fake
   if (typeof value === 'number') return Number.isFinite(Number(fake)) ? Number(fake) : fake
   if (typeof value === 'boolean') return /^(t|true)$/i.test(fake)
   return fake

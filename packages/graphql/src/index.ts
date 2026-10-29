@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { upstreamHeaders, why, type Connection, type Field, type Source } from '@sosie/core'
+import { secretParts, upstreamHeaders, why, type Connection, type Field, type Source } from '@sosie/core'
 import { buildClientSchema, buildSchema, getIntrospectionQuery, validateSchema, type GraphQLSchema, type IntrospectionQuery } from 'graphql'
 import { startEndpoint } from './endpoint.js'
 import { graphqlTool } from './mcp.js'
@@ -14,9 +14,10 @@ export const graphql: Source = {
   async connect(upstream, options): Promise<Connection> {
     const env = options.env ?? {}
     const headers = upstreamHeaders(env.SOSIE_UPSTREAM_HEADERS)
-    if (upstream.username) {
-      headers.authorization ??= `Basic ${Buffer.from(`${decodeURIComponent(upstream.username)}:${decodeURIComponent(upstream.password)}`).toString('base64')}`
-    }
+    const user = decodeURIComponent(upstream.username)
+    const password = decodeURIComponent(upstream.password)
+    if (user) headers.authorization ??= `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
+    const secrets = secretParts([...Object.values(headers), ...new URL(upstream.href).searchParams.values(), user, password])
     const url = new URL(upstream.href)
     // A query on the URL (?api_key=) is a credential too: sent with every request, never shown.
     url.username = url.password = url.hash = ''
@@ -62,7 +63,7 @@ export const graphql: Source = {
       summary: `${neutral.entities.length} types, ${queries} ${queries === 1 ? 'query' : 'queries'}`,
       warnings: [],
       client: 'curl',
-      serve: (listen, faker) => startEndpoint(listen, { upstream: api, schema, fields, faker, maxItems: options.maxRows, log: (line) => process.stderr.write(`  ! ${line}\n`) }),
+      serve: (listen, faker) => startEndpoint(listen, { upstream: api, schema, fields, faker, maxItems: options.maxRows, secrets, log: (line) => process.stderr.write(`  ! ${line}\n`) }),
       async close() {},
     }
   },
