@@ -114,7 +114,7 @@ export interface Source {
 
 export interface Connection {
   readonly schema: Schema
-  /** Where the upstream is, without credentials: 'db.internal:5432/app'. Shown in the terminal, and keys the store. */
+  /** Where the upstream is, without credentials: 'db.internal:5432/app'. Shown in the terminal. */
   readonly label: string
   /** What was found, for the terminal: '42 tables, 3 views'. */
   readonly summary: string
@@ -319,7 +319,10 @@ no longer to check than it takes to fake.
 
 One SQLite file for every upstream: `~/.sosie/store/store.db`. One store, one
 key: a person's email is the same fake from a database and from an API, through
-its format domain, as the high-level design promises.
+its format domain, as the high-level design promises. A build before this one
+kept a store per upstream, `~/.sosie/<hash>/`, with its own key: it is left as
+it is, its fakes are not carried over, and `sosie scan` still reads it until it
+is deleted.
 
 ```sql
 CREATE TABLE value (
