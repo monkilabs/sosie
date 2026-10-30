@@ -57,4 +57,5 @@ a developer has to learn before the first query.
 
 ## Release
 
-The repository stays private until v0.1 works end to end, then opens under MIT.
+The repository stayed private until v0.1 worked end to end, then opened under MIT. v0.1.0 was published to npm on
+29 October 2026, with the REST and GraphQL sources too.
