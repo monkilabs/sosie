@@ -49,7 +49,7 @@ const here = (p: string) => (path.startsWith(p) ? 'page' : undefined);
     <header class="header">
       <div class="wrap header__inner">
         <div class="brand">
-          <a class="brand" href={url()} aria-label="Sosie, home"><Logo /> Sosie</a>
+          <a class="brand" href={url()} aria-label="Sosie, home"><Logo /></a>
           {crumb && (
             <span class="brand__crumb">
               / <a href={crumb.href}>{crumb.label}</a>

@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/monkilabs/sosie/main/assets/sosie-logo-white.svg">
+  <img alt="Sosie" src="https://raw.githubusercontent.com/monkilabs/sosie/main/assets/sosie-logo-black.svg" height="48">
+</picture>
+
 # @sosie/cli
 
 **Your AI agent sees a double of your data. Never the real thing.**

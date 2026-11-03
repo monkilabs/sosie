@@ -1,4 +1,9 @@
-# Sosie
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/sosie-logo-white.svg">
+    <img alt="Sosie" src="assets/sosie-logo-black.svg" height="56">
+  </picture>
+</h1>
 
 **Your AI agent sees a double of your data. Never the real thing.**
 
