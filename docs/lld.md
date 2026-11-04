@@ -563,7 +563,11 @@ build`. `test/plugin.test.ts` fails until both agree with `packages/cli/package.
   to say it first either way.
 - The skill is advice. A working agent follows it; it is no wall against one that hunts for the credentials (see the
   [threat model](hld.md#threat-model)).
-- Cursor and Codex get no hooks yet: their transcripts are for `sosie scan` by hand.
+- Cursor and Codex get no hooks yet: their transcripts are for `sosie scan` by hand. Cursor runs a plugin's hooks
+  only from its own package format (`.cursor-plugin/plugin.json`), in a hooks format of its own, and reads an Agent
+  Plugin for its skills and MCP servers alone. Codex reads hooks as Claude Code writes them, but its code loads none
+  from an Agent Plugin (November 2026, Codex 0.166), and asks the developer to trust each plugin's hooks. Either
+  would take a package of its own beside this one; neither could be run here to check one.
 - In VS Code, a finding is reported at the start of a session, while the session it was found in may still be open.
 
 ## Postgres source
