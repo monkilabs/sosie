@@ -1,4 +1,5 @@
-import { mkdtempSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
@@ -33,7 +34,15 @@ async function startRest(
     statementTimeout: 5000,
     env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, ...env },
   })
-  const store = Store.open(storeDir(home))
+  // The same key on every run, so the same fakes. With a key of its own each run, a value's fake could by chance be
+  // one of the API's own words: a single word is faked as a word, and a value Sosie gave, typed where a path starts
+  // (/deep), is read as that value, as a client that saw it would mean. A store that has a key keeps it.
+  const dir = storeDir(home)
+  if (!existsSync(join(dir, 'key'))) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    writeFileSync(join(dir, 'key'), createHash('sha256').update('sosie: the REST end-to-end tests').digest(), { mode: 0o600 })
+  }
+  const store = Store.open(dir)
   const loaded = loadRules(rules, connection.schema, 'sosie.yml', { learns: !!connection.learns })
   const faker = createFaker({ schema: connection.schema, rules: loaded, store })
   const endpoint = await connection.serve({ host: '127.0.0.1', port: 0 }, faker, learned)

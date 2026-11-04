@@ -997,6 +997,9 @@ would turn into that field's real value, which the passing field would show.
   .NET's often do, want a document.
 - Answers under another JSON type than `application/json` in the document (`application/hal+json`,
   `application/vnd.api+json`, `*/*`) have no schema there: their entity is named by the path, as without a document.
+- A word of the API's that a client types where a path starts (`/deep`), when it is also the fake Sosie gave a
+  value, is read as that value, as a client that saw the fake would mean it: a single word is faked as a word. A word
+  the document declares, or the API has answered with a list, is the API's, and stays.
 - Paths are matched against the document's templates from `SOSIE_UPSTREAM`'s path, not from the document's
   `servers` or `basePath`: when they differ, no path matches, every answer is no entity's, and no rule passes.
 - JSON only: images, files and HTML from the API are not passed on.
