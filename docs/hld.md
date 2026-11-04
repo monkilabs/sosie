@@ -39,7 +39,7 @@ that deliberately hunts for secrets on the machine Sosie runs on (see
 2. Sosie prints one local address. The agent, the app and `psql` use it.
 3. Agents that prefer MCP get `npx @sosie/cli mcp`, which talks to the same
    endpoint. The plugin installs it in the assistant, with a skill that says how to read through Sosie, and, in
-   Claude Code, tells each session which Sosies run.
+   Claude Code, Copilot CLI and VS Code, tells each session which Sosies run.
 4. When it matters, `npx @sosie/cli scan` checks transcripts and logs for any real
    value that passed through.
 5. If a fake breaks the app's logic (a status that must be a real one), the

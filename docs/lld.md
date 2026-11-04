@@ -125,12 +125,12 @@ packages/
     prompt.ts        the hidden prompt
     listen.ts        whether an address is this machine's only, for the warning on --host
   */test/            each package's unit tests
-plugins/sosie/       the plugin: the MCP server, the skill, Claude Code's hooks
+plugins/sosie/       the plugin: the MCP server, the skill, the hooks for Claude Code, Copilot CLI and VS Code
 test/
   memory-source/     a source that serves rows from memory, for core tests
   e2e/               Postgres seeded with canary values, and fake REST and GraphQL APIs serving the same people
   dependencies.test.ts  the dependency rule
-  plugin.test.ts     the plugin's version and the CLI it runs
+  plugin.test.ts     the plugin's version, the CLI it runs, and its hooks
 ```
 
 ## The source interface
@@ -540,7 +540,7 @@ and runs the same scripts. Each finds the plugin's folder by the token it replac
 | Assistant | Reads | Session start | Session end | Plugin's data |
 | --- | --- | --- | --- | --- |
 | Claude Code | `hooks/hooks.json`, `${CLAUDE_PLUGIN_ROOT}` | `SessionStart`; context in `hookSpecificOutput.additionalContext`, the report in `systemMessage` too | `SessionEnd`, with `transcript_path`; 1.5 s, nothing it prints shown | `CLAUDE_PLUGIN_DATA` |
-| Copilot CLI | the same file, `${CLAUDE_PLUGIN_ROOT}` | `sessionStart`; context in a top-level `additionalContext` | `sessionEnd`, with the session's id only: its files are in `$COPILOT_HOME`, or `~/.copilot`, under `session-state/<id>`, a folder, or `<id>.jsonl` before | `CLAUDE_PLUGIN_DATA` |
+| Copilot CLI | the same file, `${CLAUDE_PLUGIN_ROOT}` | `sessionStart`; context in a top-level `additionalContext` | `sessionEnd`, with the session's id only: its files are under `session-state/<id>`, a folder, or `<id>.jsonl` before, in Copilot CLI's folder: the one `--config-dir` names, which holds the plugin's data in `plugin-data/`, or `$COPILOT_HOME`, or `~/.copilot`. A session not found is reported as a scan that failed | `CLAUDE_PLUGIN_DATA` |
 | VS Code | `com.github.copilot/hooks/hooks.json`, `${PLUGIN_ROOT}` | `SessionStart`, as Claude Code; also run when a subagent starts | none: `Stop`, after each turn, with `transcript_path`; also run when a subagent stops | none: `$SOSIE_HOME/plugin` |
 
 Copilot CLI is told apart by the `COPILOT_PLUGIN_DATA` it sets beside `CLAUDE_PLUGIN_DATA`. VS Code reads only the
@@ -554,17 +554,24 @@ file in its namespace, for an Agent Plugin, and Copilot CLI only `hooks/hooks.js
 A hook gets little time, and a scan reads the whole store, so the scan runs on its own and the next session reports
 it. `scan.mjs` runs `npx -y @sosie/cli@<version> scan <files>` with `NO_COLOR`, within 10 minutes, from the plugin's
 data folder rather than the project's, so a `@sosie/cli` in the project's `node_modules` never runs in its place. It
-holds `scans/<session>.lock` while it runs, and runs again while `<session>.again` is there. It reads the
-[lines `sosie scan` prints](#core-sosie-scan) and keeps, in `scans/<session>.json` (mode 0600), each finding's file,
-line and field: never the value. A scan that fails keeps the last line of its error; a clean one keeps nothing.
+holds `scans/<session>.lock` while it runs, and runs again while `<session>.again` is there. The lock holds its pid,
+written again each time it scans: a lock whose pid is not this user's live process, or older than a scan may run, was
+left by a scan that was killed, and counts for nothing. On Windows, where `npx` is a batch file only `cmd.exe` runs,
+it runs npm's `npx-cli.js` beside `node`, with no shell, or each argument quoted; and no window opens. It reads the
+[lines `sosie scan` prints](#core-sosie-scan) and adds, to `scans/<session>.json` (mode 0600), each finding's file,
+line and field: never the value. What earlier scans found stays until a session reports it: a scan that fails keeps
+it, and the line of its error beside it (exit 1 with nothing found is the CLI's own error); a clean one ends the
+failure. Each file is written to a draft and renamed into place.
 
-A session start takes each result, reports only the findings not in `seen/<session>.json`, and adds them there: VS
-Code scans a session after each turn, and finds the same lines again. A month after its last change, a session's
-`seen` is forgotten.
+A session start reads each result, reports the findings not in `seen/<session>.json` and the failure, and only once
+its answer is written adds them there and removes the result: a start that fails on the way leaves them for the next,
+and a result a scan added to meanwhile stays. VS Code scans a session after each turn, and finds the same lines
+again. A `seen` that cannot be read is read as empty. A month after its last change, a session's `seen` is
+forgotten.
 
 The agent is told to tell the developer first and, when something was found, not to open those files: reading one
-would bring the real value into the new session. In Claude Code the same text goes in the hook's `systemMessage`, for
-Claude Code to show the developer.
+would bring the real value into the new session. In Claude Code and VS Code the same text goes in the hook's
+`systemMessage`, for the assistant to show the developer; Copilot CLI reads only the context.
 
 **A release** of `@sosie/cli` sets its version in `plugin.json` and in `mcp.json`, then runs `opencastle plugin
 build`. `test/plugin.test.ts` fails until both agree with `packages/cli/package.json`.
@@ -1365,8 +1372,11 @@ domains make a person's email the same fake from the database and from the API.
 - **The plugin.** `test/plugin.test.ts`: the plugin's version and the CLI its server runs are `@sosie/cli`'s, in its
   source and in Claude Code's files, and its hooks read the `running/` entries the core writes. Each assistant's hooks
   file names scripts that are there, by the token it replaces; a session's files are found from a transcript or a
-  Copilot CLI session id; a finding is reported once; the context comes in each assistant's shape, and none of the
-  report to a subagent. Copilot CLI was run with the plugin: the context reached the agent, the session's scan found a
+  Copilot CLI session id, `--config-dir` too; a finding is reported once, kept through a scan that fails, and marked
+  told only once reported; a lock left by a killed scan counts for nothing; the context comes in each assistant's
+  shape, and none of the report to a subagent. With a stub `npx` on `PATH`, in VS Code's environment (no plugin data
+  folder): a subagent's stop scans nothing, a turn that ends while a scan runs asks it for one more, and the next
+  start reports what the first found and that the second failed. Copilot CLI was run with the plugin: the context reached the agent, the session's scan found a
   planted value, and the next session reported it. A CI job runs
   `opencastle plugin check`, which loads it as each assistant would, and checks that the marketplaces list it as it
   is. The hooks were run by hand against a running Sosie: what Claude Code would send them, and what they answer.
