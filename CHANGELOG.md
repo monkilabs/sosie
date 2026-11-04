@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- REST: a method override in the query is refused when its method is a fake
+  Sosie gave, as when a link that carried one is followed as given: Sosie
+  turned the fake back into the method, and sent it on.
 - A plugin, in `plugins/sosie`, for Claude Code, GitHub Copilot, VS Code,
   Cursor, Codex, Kiro and Devin: Sosie's MCP server, and a skill that tells the
   agent how to read through Sosie. The repository is its marketplace:
