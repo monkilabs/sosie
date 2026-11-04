@@ -846,9 +846,11 @@ Unix socket. The greeting is the version 10 handshake with the upstream's versio
 protocol 4.1 and pluggable authentication, and neither TLS nor compression. Any user is taken, with any password or
 none, which Sosie never checks: the address is this machine's. The database a client names is `USE`d. Supported:
 `COM_QUERY`, one statement each, in the text protocol, with the classic EOF packets; `COM_INIT_DB`, `COM_PING`,
-`COM_QUIT`, `COM_RESET_CONNECTION` (a new session upstream), `COM_SET_OPTION`, `COM_STATISTICS`; `COM_FIELD_LIST`
-answers no columns. Refused with a clear error: prepared statements (`COM_STMT_*`), `COM_CHANGE_USER`, and several
-statements in one query.
+`COM_QUIT`, `COM_RESET_CONNECTION` (a new session upstream, in the database the client was in, as MySQL keeps it: the
+guard reads unqualified names there), `COM_SET_OPTION`, `COM_STATISTICS`; `COM_FIELD_LIST` answers no columns.
+Refused with a clear error: prepared statements (`COM_STMT_*`), `COM_CHANGE_USER`, and several statements in one
+query. The status flags of each OK, whether the session commits each statement and is in a transaction, are the
+server's; after rows, Sosie sets the transaction's when autocommit is off and the statement read a table.
 
 ### Upstream
 
@@ -864,6 +866,11 @@ One session per client, opened with mysql2 at the handshake, and set at its star
 
 Each value comes back as the server's text bytes (mysql2's `typeCast: false`): a 64-bit id keeps its digits, a BLOB
 its bytes.
+
+`max_execution_time` stops a `SELECT` only. A statement still running a second past the timeout (a `SET @x = (SELECT
+…)`, a `SHOW`, a `SELECT` MySQL let run) is stopped by Sosie with `KILL QUERY`, from a connection of its own, and
+answered with error 3024, as MySQL answers a `SELECT`; the next statement waits for the kill. A kill that fails ends
+the session.
 
 ### Schema
 
@@ -899,14 +906,19 @@ is refused, a valid one included: a guard must not let through what it did not r
   (queries), `COLUMN_STATISTICS` (histograms of real values), the lock tables (key values), and `FILES` and the
   tablespace tables (where the files are). The rest of `information_schema` is the schema, and passes.
 - **Functions:** `LOAD_FILE()`; `GET_LOCK()` and the other named locks; waits on replication; `sys_exec()` and
-  `sys_eval()`. A stored function, or one named with its database, may read rows the guard cannot see: what it
-  returns is faked.
+  `sys_eval()`. A function that is not one of MySQL's own (the names in its help tables), or one named with its
+  database, may be stored or loadable, made since Sosie started, and read rows the guard cannot see: the statement
+  reads data, and what the function returns is faked.
 - **Settings:** `@@datadir`, `@@hostname`, `@@port` and every other setting that says where the database, its files,
   its certificates or its peers are; `SHOW VARIABLES` and `SHOW PROCESSLIST`. A `SET` changes this session only, to
   a value written in the query: copied from a row, a setting would come back real from `SELECT @@name`. Kept:
   `transaction_read_only` on, `sql_mode` without the modes that change how text is read (and not `DEFAULT`, the
   server's own), `utf8mb4` (`SET NAMES`), `max_execution_time` above zero and within the timeout, `sql_select_limit`
-  within the cap. A user variable (`@x`) may hold a row's value: what it gives back is faked.
+  within the cap. A user variable (`@x`) may hold a row's value: what it gives back is faked. An optimizer hint sets
+  for one statement what `SET` does for the session: `MAX_EXECUTION_TIME(n)` is held to the timeout, and each
+  `SET_VAR(name = value)` read as `SET SESSION name = value`. `SET GLOBAL`, `PERSIST` and `PERSIST_ONLY` are refused;
+  sqlparser reads `SET GLOBAL TRANSACTION` as `SET TRANSACTION`, so a `GLOBAL` anywhere in the statement's text, a
+  comment's included, refuses it.
 
 ### Rewriting
 
@@ -921,18 +933,32 @@ left alone. A real value is written as a number, or quoted with backslash escape
 MySQL names each result column's database, table (`org_table`) and column. A column of a table Sosie knows is faked by
 its field; of MySQL's own databases, it passes; of a table Sosie does not know, made since it started, it is faked by
 its type. A column with no table was computed, and is faked by its protocol type, unless the statement read only the
-catalog, or it is `COUNT(…)` or a literal the client wrote. A column of MySQL's data dictionary, a table with no
-database (`DESCRIBE`, `SHOW INDEX`), passes in a statement that reads only the catalog. `SHOW` and `DESCRIBE` pass
-whole. Whether a value is faked rests on what MySQL says of its column, not on how Sosie read the statement: any
-column from a table of yours makes the statement one that reads data. Bytes are faked in hex and written back as
-bytes.
+catalog, or it is `COUNT(…)` or a literal the client wrote. MySQL names no table for a `UNION`'s columns: each is a
+count or a literal only where every branch has one in its place, and is otherwise faked by type. A column of MySQL's
+data dictionary, a table with no database (`DESCRIBE`, `SHOW INDEX`), passes in a statement that reads only the
+catalog. `SHOW` and `DESCRIBE` pass whole. Bytes are faked in hex and written back as bytes.
+
+So a column MySQL names a table for is faked by what MySQL says of it, whatever the guard made of the statement, and
+any such column from a table of yours makes the statement one that reads data. A column it names no table for rests
+on the guard's reading: whether the statement reads data, and what is in its place in each branch. Where the guard
+cannot tell (a function or table it does not know), it reads the statement as reading data.
 
 ### Errors
 
 An error about the statement itself (syntax, an unknown column, table or database, access denied, read-only, the
 time limit) comes back with every value Sosie substituted turned back into its fake. Any other comes back as its code,
-`Error 1292: Sosie hides the rest of this message, which may quote a value from your rows.` `SHOW WARNINGS` and `SHOW
-ERRORS` hide each message the same way, and list first what Sosie has to say, such as a result cut at the cap.
+`Error 1292: Sosie hides the rest of this message, which may quote a value from your rows.` Two nets under that list:
+
+- A syntax error quotes the statement from where MySQL stopped reading, at most 80 characters: of what Sosie sent,
+  so it can stop inside a real value, and a part of one is not turned back. Sosie finds the quote in what it sent,
+  maps the place back over the literals it replaced, and quotes the client's own text from there.
+- Anything else in single quotes that the client did not write, that is not one of MySQL's own phrases (`'where
+  clause'`), and of which no dotted part names a database, table or column, is shown as `'…'`. A quote opens and
+  closes at a word's edge, so MySQL's "doesn't" opens none.
+
+`SHOW WARNINGS` and `SHOW ERRORS` show the warnings of the last statement sent upstream, scrubbed with what was
+substituted in that statement, and hide each message the same way. They list first what Sosie has to say, such as a
+result cut at the cap.
 
 ### Limits
 
@@ -943,7 +969,8 @@ ERRORS` hide each message the same way, and list first what Sosie has to say, su
 - `BIT`, spatial and `VECTOR` values come back `NULL`. A `tinyint` other than `tinyint(1)` is faked within a
   `smallint`'s range.
 - `SHOW CREATE VIEW` and `information_schema.VIEWS` show a view's definition, a literal in it included.
-- MySQL reports no column for a value it computes, so `MAX(id)` is faked by type, not in `users.id`'s domain.
+- MySQL reports no column for a value it computes, so `MAX(id)` is faked by type, not in `users.id`'s domain; nor for
+  a `UNION`'s columns, so they are faked by type too, a total row's label included.
 
 ## REST source
 

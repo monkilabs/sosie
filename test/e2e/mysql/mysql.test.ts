@@ -83,6 +83,33 @@ describe('reading through Sosie', () => {
     expect(typeof v).toBe('string')
   })
 
+  it('fakes a UNION column, unless every branch has a count or a literal in its place', async () => {
+    // MySQL names no table for a UNION's columns: a total row's literal must not let the cities through.
+    const totals = await query("SELECT 'All' AS city, COUNT(*) AS n FROM users UNION ALL SELECT city, COUNT(*) FROM users GROUP BY city")
+    expect(Math.max(...totals.map((r) => r.n))).toBe(40)
+    expect(totals.map((r) => r.city)).not.toContain('Springfield')
+    expect(canariesIn(JSON.stringify(await query("SELECT 'x' AS e UNION SELECT email FROM users")))).toEqual([])
+    const ids = await query('SELECT COUNT(*) AS v FROM users UNION ALL SELECT id FROM users')
+    const [real] = (await truth.query('SELECT COUNT(*) AS v FROM users UNION ALL SELECT id FROM users')) as [Row[], unknown]
+    expect(ids.map((r) => String(r.v))).not.toEqual(real.map((r) => String(r.v)))
+  })
+
+  it('fakes what a function made since Sosie started gives', async () => {
+    const admin = await mysql2.createConnection(inject('mysqlAdmin'))
+    const reader = decodeURIComponent(new URL(inject('mysqlUpstream')).username)
+    await admin.query('CREATE FUNCTION email_for(n INT) RETURNS VARCHAR(120) READS SQL DATA RETURN (SELECT email FROM users WHERE id = n)')
+    try {
+      await admin.query(`GRANT EXECUTE ON FUNCTION email_for TO '${reader}'@'%'`)
+      const [real] = (await truth.query('SELECT email_for(1) AS e')) as [Row[], unknown]
+      expect(real[0]!.e).toBe('quill.vantablack@canary-mail.test')
+      const [row] = await query('SELECT email_for(1) AS e')
+      expect(row!.e).not.toBe(real[0]!.e)
+    } finally {
+      await admin.query('DROP FUNCTION email_for')
+      await admin.end()
+    }
+  })
+
   it('shows the schema as it is: SHOW, DESCRIBE and SHOW CREATE', async () => {
     expect((await query('SHOW TABLES')).length).toBe(4)
     const described = await query('DESCRIBE users')
@@ -119,6 +146,9 @@ describe('the guard', () => {
     ["SELECT /*!50000 LOAD_FILE('/etc/passwd'), */ 1", 1227],
     ['EXPLAIN SELECT * FROM users', 1235],
     ["SET SESSION sql_mode = 'ANSI_QUOTES'", 1227],
+    ['SET GLOBAL TRANSACTION READ ONLY', 1227],
+    ['SELECT /*+ MAX_EXECUTION_TIME(100000) */ SLEEP(1)', 1227],
+    ['SELECT /*+ SET_VAR(max_execution_time = 100000) */ SLEEP(1)', 1227],
   ])('refuses %s, and says why', async (sql, code) => {
     const error = await failure(sql)
     expect(error.errno).toBe(code)
@@ -145,6 +175,28 @@ describe('the guard', () => {
     expect((await query('SELECT COUNT(*) AS n FROM TABLES WHERE TABLE_NAME = \'users\'', c))[0]!.n).toBeGreaterThan(0)
   })
 
+  it('keeps the database across a connection reset, as MySQL does', async () => {
+    const c = await sosie.client()
+    await query('USE information_schema', c)
+    await c.reset()
+    expect(await query('SELECT DATABASE() AS db', c)).toEqual([{ db: 'information_schema' }])
+    // The guard and MySQL read users in the same database: there, it is none.
+    expect((await failure('SELECT UPPER(email) AS u FROM users', c)).errno).toBe(1109)
+    await query(`USE ${sosie.database}`, c)
+    await c.reset()
+    const rows = await query('SELECT UPPER(email) AS u, CONCAT(full_name, \'\') AS n FROM users ORDER BY id LIMIT 2', c)
+    expect(canariesIn(JSON.stringify(rows))).toEqual([])
+  })
+
+  it('says in each OK whether the session commits each statement, and is in a transaction', async () => {
+    const c = await sosie.client()
+    const status = async (sql: string) => ((await c.query(sql))[0] as mysql2.ResultSetHeader).serverStatus
+    expect((await status('SET autocommit = 0')) & 2).toBe(0)
+    expect((await status('START TRANSACTION')) & 1).toBe(1)
+    expect((await status('COMMIT')) & 1).toBe(0)
+    expect((await status('SET autocommit = 1')) & 2).toBe(2)
+  })
+
   it('answers prepared statements, which come later, with an error that says so', async () => {
     await expect(client.execute('SELECT 1')).rejects.toThrow(/does not run prepared statements on MySQL yet/)
     expect(await query('SELECT 1 AS one')).toEqual([{ one: 1 }])
@@ -157,6 +209,20 @@ describe('errors and limits', () => {
     const warnings = await query('SHOW WARNINGS')
     expect(warnings.length).toBeGreaterThan(0)
     for (const w of warnings) expect(w.Message).toMatch(/Sosie hides/)
+  })
+
+  it('quotes a syntax error’s statement from the client’s text, as it fails and in SHOW WARNINGS', async () => {
+    // Quillon's row is the latest made: its fake email, which Sosie turns back into the real one upstream.
+    const [{ email }] = (await query('SELECT email FROM users ORDER BY created_at DESC LIMIT 1')) as [Row]
+    // sqlparser reads ILIKE, MySQL does not: MySQL's quote of what Sosie sent stops 80 characters on, in the real email.
+    const pad = 'x'.repeat(40)
+    const error = await failure(`SELECT id FROM users WHERE id ILIKE '${pad}' OR email = '${email}'`)
+    expect(error.errno).toBe(1064)
+    expect(error.message).toContain(`near 'ILIKE '${pad}' OR email = '${email}`.slice(0, 86))
+    const warnings = await query('SHOW WARNINGS')
+    expect(warnings.map((w) => w.Code)).toContain(1064)
+    expect(warnings.find((w) => w.Code === 1064)!.Message).toContain("near 'ILIKE")
+    expect(canariesIn(error.message + JSON.stringify(warnings))).toEqual([])
   })
 
   it('shows errors about the statement itself, scrubbed of what Sosie turned back', async () => {
@@ -176,14 +242,26 @@ describe('errors and limits', () => {
     await small.close()
   })
 
-  it('stops a statement at the time limit it was started with', async () => {
+  it('stops any statement at the time limit it was started with, a SELECT or not', async () => {
     const quick = await startSosie({ statementTimeout: 300 })
     const c = await quick.client()
-    const error = await failure('SELECT SLEEP(5) FROM users LIMIT 1', c).catch(() => undefined)
-    const rows = error ? undefined : await query('SELECT 1', c)
-    expect(error?.errno === 3024 || rows !== undefined).toBe(true)
+    const timed = async (sql: string) => {
+      const started = Date.now()
+      const errno = await c.query(sql).then(
+        () => undefined,
+        (error: { errno: number }) => error.errno,
+      )
+      return { errno, ms: Date.now() - started }
+    }
+    // MySQL stops a SELECT itself; anything else, Sosie stops, a second past the limit.
+    expect((await timed('SELECT SLEEP(5) FROM users LIMIT 1')).ms).toBeLessThan(2500)
+    for (const sql of ['SET @x = (SELECT SLEEP(5))', 'SET @y = SLEEP(5)']) {
+      const { errno, ms } = await timed(sql)
+      expect({ sql, errno, quick: ms < 3500 }).toEqual({ sql, errno: 3024, quick: true })
+    }
+    expect(await query('SELECT 1 AS one', c)).toEqual([{ one: 1 }])
     await quick.close()
-  }, 15_000)
+  }, 20_000)
 })
 
 describe('the mysql client', () => {

@@ -8,8 +8,12 @@ export type ColumnPlan = { pass: true } | { field: Field } | { type: FieldType }
 
 /**
  * Which field each result column came from. MySQL names each column's database, table and column, through
- * aliases, joins and views; a column it cannot place was computed, and is faked by its type. Whether a value is
- * faked rests on what MySQL says, not on how Sosie read the statement.
+ * aliases, joins and views: such a column is faked by its field, whatever the guard made of the statement.
+ *
+ * A column MySQL names no table for (anything computed, and every column of a UNION) rests on the guard's reading:
+ * it passes only when the statement reads no table of yours, or when it is a count or a literal in every branch.
+ * Where the guard cannot tell (a function it does not know, a table made since Sosie started), it reads the
+ * statement as reading data.
  */
 export function planColumns(columns: Column[], analysis: Analysis, catalog: Catalog): ColumnPlan[] {
   // SHOW and DESCRIBE show the schema, from MySQL's data dictionary: nothing in them is a row's value.

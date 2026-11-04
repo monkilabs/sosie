@@ -246,9 +246,10 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
 
 - **MySQL's parser is not MySQL's.** Postgres's guard reads statements with Postgres's own parser; MySQL has none
   outside the server, so its guard reads them with sqlparser's MySQL dialect. What it cannot parse is refused, valid
-  MySQL included, and whether a value is faked rests on the column MySQL names, not on the parse. A statement read
-  differently from MySQL could still be let through, or a fake not turned back: the session's read-only start, the
-  login's grants and the result metadata are the layers under it.
+  MySQL included. A column MySQL names a table for is faked by that, whatever the parse; a column it names none for
+  (anything computed, and a `UNION`'s) rests on the parse, which reads what it cannot place, an unknown function or
+  table, as data. A statement read differently from MySQL could still be let through, or a value computed from
+  rows passed: the session's read-only start, the login's grants and the result metadata are the layers under it.
 - **Driver coverage.** The extended query protocol and binary formats vary
   between drivers. Sosie is tested with `psql`, `node-postgres`, `postgres.js`,
   Drizzle and Prisma 7; its binary format byte for byte against Postgres's

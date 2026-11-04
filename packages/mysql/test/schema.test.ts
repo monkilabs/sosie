@@ -1,6 +1,6 @@
 import type { RequestScope } from '@sosie/core'
 import { describe, expect, it } from 'vitest'
-import { quote, rewriteConsts } from '../src/rewrite.js'
+import { inClientText, quote, rewriteConsts } from '../src/rewrite.js'
 import { buildCatalog, enumLabels, typeOf, typeOfColumn } from '../src/schema.js'
 
 describe('the catalog', () => {
@@ -102,10 +102,16 @@ describe('turning fakes back', () => {
       { start: sql.indexOf("'fake"), end: sql.indexOf("'fake") + 11, value: 'fake@x.io', kind: 'string' as const, near: undefined },
       { start: sql.indexOf('9'), end: sql.indexOf('9') + 1, value: '9', kind: 'number' as const, near: undefined },
     ]
-    expect(rewriteConsts(sql, consts, scope({ 'fake@x.io': "o'brien@real.io", '9': '42' }))).toBe(
-      "SELECT * FROM users WHERE email = 'o\\'brien@real.io' AND id = 42 AND note = 'keep'",
-    )
+    const rewritten = rewriteConsts(sql, consts, scope({ 'fake@x.io': "o'brien@real.io", '9': '42' }))
+    expect(rewritten?.sql).toBe("SELECT * FROM users WHERE email = 'o\\'brien@real.io' AND id = 42 AND note = 'keep'")
     expect(rewriteConsts(sql, consts, scope({}))).toBeUndefined()
+    // A place in what was sent, back in the client's text; inside a value Sosie put there, at its start.
+    const { edits } = rewritten!
+    const sent = rewritten!.sql
+    expect(inClientText(sent.indexOf('AND id'), edits)).toBe(sql.indexOf('AND id'))
+    expect(inClientText(sent.indexOf('AND note'), edits)).toBe(sql.indexOf('AND note'))
+    expect(inClientText(sent.indexOf('brien'), edits)).toBe(sql.indexOf("'fake"))
+    expect(inClientText(3, edits)).toBe(3)
   })
 
   it('quotes as MySQL reads a string with backslash escapes', () => {

@@ -42,6 +42,8 @@ export interface Result {
   affected?: number
   warnings: number
   info?: string
+  /** The server's status flags, from an OK: whether it commits each statement, and is in a transaction. */
+  status?: number
 }
 
 export interface UpstreamError {
@@ -52,12 +54,21 @@ export interface UpstreamError {
   reading: boolean
 }
 
+/** What MySQL says of a statement stopped at its time limit; Sosie says the same of one it stops. */
+export const TIMED_OUT = { code: 3024, sqlState: 'HY000', message: 'Query execution was interrupted, maximum statement execution time exceeded' }
+
+/** How long past the time limit Sosie waits for MySQL's own (max_execution_time, for SELECT) before it stops a statement. */
+const GRACE = 1000
+
 /** One read-only session upstream, per client. */
 export class Upstream {
   version = ''
+  /** A KILL QUERY on its way: the next statement waits for it, so it cannot stop that one instead. */
+  #killing: Promise<void> | undefined
 
   private constructor(
     private readonly connection: mysql.Connection,
+    private readonly upstream: URL,
     private readonly options: UpstreamOptions,
   ) {}
 
@@ -65,7 +76,7 @@ export class Upstream {
     const connection = mysql.createConnection(config(upstream))
     connection.on('error', () => {})
     await new Promise<void>((resolve, reject) => connection.connect((error) => (error ? reject(error) : resolve())))
-    const session = new Upstream(connection, options)
+    const session = new Upstream(connection, upstream, options)
     const [row] = (await session.plain('SELECT VERSION() AS v, @@SESSION.sql_mode AS mode')) as { v: string; mode: string }[]
     const modes = String(row?.mode ?? '')
       .split(',')
@@ -88,11 +99,22 @@ export class Upstream {
     return new Promise((resolve, reject) => this.connection.query(sql, (error, rows) => (error ? reject(error) : resolve(rows as unknown[]))))
   }
 
-  /** Run a statement the guard allowed, its rows as text bytes, at most the cap of them. */
-  run(sql: string): Promise<Result> {
+  /**
+   * Run a statement the guard allowed, its rows as text bytes, at most the cap of them. MySQL's max_execution_time
+   * stops only a SELECT; anything else (a SET with a subquery, a SHOW) Sosie stops itself, with KILL QUERY.
+   */
+  async run(sql: string): Promise<Result> {
+    await this.#killing
     return new Promise((resolve, reject) => {
       const result: Result = { warnings: 0 }
       let failed = false
+      let timedOut = false
+      const timer = setTimeout(() => {
+        timedOut = true
+        this.#killing = this.#kill()
+      }, this.options.statementTimeout + GRACE)
+      timer.unref()
+      const stopped = () => reject({ ...TIMED_OUT, reading: result.columns !== undefined } satisfies UpstreamError)
       this.connection
         .query({ sql, rowsAsArray: true, typeCast: false })
         .on('fields', (fields: mysql.FieldPacket[] | undefined) => {
@@ -110,11 +132,14 @@ export class Upstream {
             result.affected = header.affectedRows
             result.warnings = header.warningStatus ?? 0
             result.info = header.info
+            result.status = header.serverStatus
           }
         })
         .on('error', (error: mysql.QueryError & { sqlState?: string; errno?: number; fatal?: boolean }) => {
           failed = true
+          clearTimeout(timer)
           if (error.fatal) return reject(error)
+          if (timedOut) return stopped()
           reject({
             code: error.errno ?? 1105,
             sqlState: error.sqlState ?? 'HY000',
@@ -123,9 +148,28 @@ export class Upstream {
           } satisfies UpstreamError)
         })
         .on('end', () => {
-          if (!failed) resolve(result)
+          clearTimeout(timer)
+          if (failed) return
+          // A statement stopped part way (SLEEP returns early) may end without an error: it is stopped all the same.
+          if (timedOut) stopped()
+          else resolve(result)
         })
     })
+  }
+
+  /** Stop the statement running on this session, from a connection of its own; if that fails, end the session. */
+  async #kill(): Promise<void> {
+    const killer = mysql.createConnection(config(this.upstream))
+    killer.on('error', () => {})
+    try {
+      await new Promise<void>((resolve, reject) =>
+        killer.query(`KILL QUERY ${Number(this.connection.threadId)}`, (error) => (error ? reject(error) : resolve())),
+      )
+    } catch {
+      this.connection.destroy()
+    } finally {
+      killer.destroy()
+    }
   }
 
   async end(): Promise<void> {

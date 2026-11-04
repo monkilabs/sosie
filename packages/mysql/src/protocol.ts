@@ -41,7 +41,7 @@ export const SERVER_CAPABILITIES =
   CLIENT.CONNECT_ATTRS |
   CLIENT.PLUGIN_AUTH_LENENC_CLIENT_DATA
 
-export const STATUS = { IN_TRANS: 1, AUTOCOMMIT: 2, MORE_RESULTS: 8 } as const
+export const STATUS = { IN_TRANS: 1, AUTOCOMMIT: 2, MORE_RESULTS: 8, IN_TRANS_READONLY: 0x2000 } as const
 
 /** utf8mb4_0900_ai_ci: what Sosie speaks, whatever the client asks. */
 export const UTF8MB4 = 255

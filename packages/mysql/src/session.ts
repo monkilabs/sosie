@@ -1,6 +1,7 @@
 import { randomBytes, randomInt } from 'node:crypto'
 import type { Socket } from 'node:net'
-import type { Faker, RequestScope } from '@sosie/core'
+import type { Faker } from '@sosie/core'
+import { scrubbed, type Sent } from './errors.js'
 import { analyze, parseStatements, type Analysis } from './guard.js'
 import {
   CLIENT,
@@ -37,11 +38,8 @@ export interface SessionContext {
 
 const UNREACHABLE = 'Sosie cannot reach its upstream database. The terminal running Sosie says why.'
 
-/** Errors whose messages hold only what the client wrote and the schema: shown, with what Sosie substituted turned back. */
-const SCHEMA_ERRORS = new Set([
-  1044, 1045, 1046, 1049, 1051, 1052, 1054, 1060, 1064, 1065, 1109, 1142, 1143, 1146, 1149, 1222, 1227, 1235, 1248, 1250, 1267, 1271,
-  1295, 1305, 1317, 1356, 1370, 1449, 1630, 1792, 3024,
-])
+/** The status flags a session takes from the server: whether it commits each statement, and is in a transaction. */
+const TRANSACTION = STATUS.IN_TRANS | STATUS.AUTOCOMMIT | STATUS.IN_TRANS_READONLY
 
 /**
  * One client connection. Sosie answers the handshake itself, accepting any user without a password, then relays
@@ -57,6 +55,8 @@ export class Session {
   #status: number = STATUS.AUTOCOMMIT
   /** What Sosie has to say about the last statement, for SHOW WARNINGS. */
   #notes: string[] = []
+  /** The last statement sent upstream: SHOW WARNINGS shows its warnings, scrubbed of what was substituted in it. */
+  #last: Sent | undefined
 
   constructor(
     private readonly socket: Socket,
@@ -144,10 +144,7 @@ export class Session {
         this.#write(eof(this.#status))
         return false
       case COMMAND.RESET_CONNECTION:
-        await this.#up?.end().catch(() => {})
-        this.#up = await Upstream.open(this.ctx.upstream, { statementTimeout: this.ctx.statementTimeout, maxRows: this.ctx.maxRows })
-        this.#status = STATUS.AUTOCOMMIT
-        this.#write(ok({ status: this.#status }))
+        await this.#reset()
         return false
       case COMMAND.STMT_CLOSE:
       case COMMAND.STMT_SEND_LONG_DATA:
@@ -167,6 +164,27 @@ export class Session {
     }
   }
 
+  /**
+   * A new session upstream, as MySQL resets one: settings, variables and transaction gone, the database kept. The
+   * guard reads names in the database the session is in, so the session upstream is put in it too.
+   */
+  async #reset(): Promise<void> {
+    await this.#up?.end().catch(() => {})
+    this.#up = await Upstream.open(this.ctx.upstream, { statementTimeout: this.ctx.statementTimeout, maxRows: this.ctx.maxRows })
+    this.#status = STATUS.AUTOCOMMIT
+    this.#notes = []
+    this.#last = undefined
+    const named = decodeURIComponent(this.ctx.upstream.pathname.slice(1))
+    if (this.#database !== named) {
+      try {
+        await this.#up.run(`USE ${identifier(this.#database)}`)
+      } catch {
+        this.#database = named
+      }
+    }
+    this.#write(ok({ status: this.#status }))
+  }
+
   async #query(text: string): Promise<void> {
     const notes = this.#notes
     this.#notes = []
@@ -182,40 +200,51 @@ export class Session {
     const analysis = analyze(stmt, text, this.ctx.catalog, this.#database, { statementTimeout: this.ctx.statementTimeout, maxRows: this.ctx.maxRows })
     if (analysis.refusal) return this.#write(err(analysis.refusal.code, analysis.refusal.sqlState, analysis.refusal.message))
     const scope = this.ctx.faker.request(text)
-    const sql = analysis.catalogOnly ? text : (rewriteConsts(text, analysis.consts, scope) ?? text)
+    const rewritten = analysis.catalogOnly ? undefined : rewriteConsts(text, analysis.consts, scope)
+    const sent: Sent = { text, sql: rewritten?.sql ?? text, edits: rewritten?.edits ?? [], scope }
+    // SHOW WARNINGS shows the warnings of the statement before it, and leaves them for the next.
+    const warnings = analysis.answer === 'warnings'
+    const of = (warnings && this.#last) || sent
+    if (!warnings) this.#last = sent
     let result: Result
     try {
-      result = await this.#up!.run(sql)
+      result = await this.#up!.run(sent.sql)
     } catch (error) {
       if (!isUpstreamError(error)) throw error
-      return this.#write(err(error.code, error.sqlState, this.#scrubbed(error.code, error.message, scope)))
+      return this.#write(err(error.code, error.sqlState, scrubbed(error.code, error.message, of, this.ctx.catalog)))
     }
     this.#track(stmt)
+    if (result.status !== undefined) this.#status = (this.#status & ~TRANSACTION) | (result.status & TRANSACTION)
+    // Without autocommit, a statement that reads a table starts a transaction, as the server says at its rows' end.
+    else if (!(this.#status & STATUS.AUTOCOMMIT) && !analysis.catalogOnly) this.#status |= STATUS.IN_TRANS
     if (!result.columns) return this.#write(ok({ affected: result.affected ?? 0, status: this.#status, warnings: result.warnings }))
-    if (analysis.answer === 'warnings') return this.#warnings(result, scope, notes)
-    this.#rows(result, analysis, text, scope)
+    if (warnings) return this.#warnings(result, of, notes)
+    this.#rows(result, analysis, sent)
   }
 
-  #rows(result: Result, analysis: Analysis, text: string, scope: RequestScope): void {
+  #rows(result: Result, analysis: Analysis, sent: Sent): void {
     const columns = result.columns!
     const plans = planColumns(columns, analysis, this.ctx.catalog)
     this.#header(columns)
-    for (const row of result.rows ?? []) this.#write(textRow(fakeRow(row, plans, this.ctx.faker, text, scope)))
+    for (const row of result.rows ?? []) this.#write(textRow(fakeRow(row, plans, this.ctx.faker, sent.text, sent.scope)))
     if (result.capped) {
       this.#notes.push(`Sosie returned the first ${this.ctx.maxRows} rows; the rest were cut. Narrow the query, or start Sosie with a higher --max-rows.`)
     }
     this.#write(eof(this.#status, this.#notes.length))
   }
 
-  /** SHOW WARNINGS and SHOW ERRORS: a message that may quote a row's value is hidden; Sosie's own notes come first. */
-  #warnings(result: Result, scope: RequestScope, notes: string[]): void {
+  /**
+   * SHOW WARNINGS and SHOW ERRORS, of the statement before: a message that may quote a row's value is hidden, and
+   * the rest scrubbed of what was substituted in that statement. Sosie's own notes come first.
+   */
+  #warnings(result: Result, of: Sent, notes: string[]): void {
     const columns = result.columns!
     this.#header(columns)
     for (const note of notes) this.#write(textRow([Buffer.from('Note'), Buffer.from('1105'), Buffer.from(note)]))
     for (const row of result.rows ?? []) {
       const code = Number(row[1]?.toString() ?? 0)
       const message = row[2]?.toString() ?? ''
-      this.#write(textRow([row[0] ?? null, row[1] ?? null, Buffer.from(this.#scrubbed(code, message, scope))]))
+      this.#write(textRow([row[0] ?? null, row[1] ?? null, Buffer.from(scrubbed(code, message, of, this.ctx.catalog))]))
     }
     this.#write(eof(this.#status))
   }
@@ -226,13 +255,7 @@ export class Session {
     this.#write(eof(this.#status))
   }
 
-  /** What MySQL said, for the client: the schema's words shown, scrubbed of what Sosie substituted; anything else, its code. */
-  #scrubbed(code: number, message: string, scope: RequestScope): string {
-    if (SCHEMA_ERRORS.has(code)) return scope.scrub(message)
-    return `Error ${code}: Sosie hides the rest of this message, which may quote a value from your rows.`
-  }
-
-  /** The session's database and transaction, as the statement that just ran left them. */
+  /** The session's database, as the statement that just ran left it. */
   #track(stmt: Record<string, unknown>): void {
     const [type, body] = Object.entries(stmt)[0] ?? []
     const b = body as Record<string, unknown> | undefined
@@ -248,8 +271,7 @@ export class Session {
       }
       walk(b)
       if (names.length) this.#database = names.at(-1)!
-    } else if (type === 'StartTransaction') this.#status |= STATUS.IN_TRANS
-    else if (type === 'Commit' || type === 'Rollback') this.#status &= ~STATUS.IN_TRANS
+    }
   }
 
   #write(payload: Buffer): void {

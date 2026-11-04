@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createFaker, loadRules, Store, storeDir } from '@sosie/core'
@@ -34,6 +34,7 @@ export async function startSosie({ rules = '', maxRows = 100, statementTimeout =
       await endpoint.close()
       await connection.close()
       store.close()
+      rmSync(home, { recursive: true, force: true })
     },
   }
 }

@@ -4,7 +4,8 @@
 
 - The plugin's hooks run in Copilot CLI and VS Code as well as Claude Code:
   each session starts knowing which Sosies run, and its transcript is scanned
-  when it ends, or in VS Code after each turn. Each finding is reported once.
+  when it ends, or in VS Code after each turn. Each finding is reported once,
+  and a scan that fails keeps what earlier scans found and says so beside it.
 - Postgres: binary results and parameters, as asyncpg and pgx always use them
   and JDBC once it prepares a statement. Sosie still reads and fakes text, and
   writes each fake as Postgres would send it, byte for byte; a fake sent back
@@ -17,9 +18,11 @@
 - MySQL, a source of its own (`@sosie/mysql`): `SOSIE_UPSTREAM=mysql://…`
   starts a local MySQL endpoint in front of MySQL 8.0 and later (8.4 and 9
   tested). The `mysql` client and mysql2's `query()` read through it, every
-  value faked by the column MySQL names, fakes in literals turned back; writes,
-  `mysql`, `performance_schema`, `LOAD_FILE()` and settings that say where the
-  database is are refused. Prepared statements come later.
+  value faked by the column MySQL names, or by its type where it names none (a
+  `UNION`'s, anything computed), fakes in literals turned back; writes,
+  `mysql`, `performance_schema`, `LOAD_FILE()`, the server's settings and
+  settings that say where the database is are refused. Any statement is stopped
+  at the time limit, a `SELECT` or not. Prepared statements come later.
 
 ## 0.1.1, 4 November 2026
 

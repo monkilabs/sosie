@@ -1,6 +1,7 @@
 import * as sqlparser from '@guanmingchiu/sqlparser-ts'
 import type { Field } from '@sosie/core'
-import { SYSTEM_DATABASES, type Catalog } from './schema.js'
+import { NATIVE_FUNCTIONS } from './functions.js'
+import type { Catalog } from './schema.js'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- the parse tree is sqlparser's JSON, untyped here. */
 type Node = Record<string, any>
@@ -64,6 +65,7 @@ const DENIED = { code: 1227, sqlState: '42000' }
 const UNSUPPORTED = { code: 1235, sqlState: '42000' }
 
 const WRITE: Refusal = { ...READ_ONLY, message: 'This statement changes data. Sosie is read-only.' }
+const SERVER_SETTINGS: Refusal = { ...DENIED, message: 'Sosie does not change the server’s settings: only this session’s.' }
 
 const WHERE = 'would reveal where your database is'
 const QUERIES = 'holds queries with the real values in them'
@@ -269,8 +271,12 @@ class Analyzer {
     if (body.Select) return this.#select(body.Select, scope, onTargets)
     if (body.Query) return this.#query(body.Query, scope, onTargets)
     if (body.SetOperation) {
-      this.#setExpr(body.SetOperation.left, scope, onTargets)
-      this.#setExpr(body.SetOperation.right, scope)
+      // MySQL names no table for a UNION's columns: each is what every branch has in its place.
+      let left: Target[] | undefined
+      let right: Target[] | undefined
+      this.#setExpr(body.SetOperation.left, scope, (t) => (left = t))
+      this.#setExpr(body.SetOperation.right, scope, (t) => (right = t))
+      onTargets?.(branches(left, right))
       return
     }
     if (body.Values) return this.#expr(body.Values, scope)
@@ -288,8 +294,9 @@ class Analyzer {
     }
     for (const from of select.from ?? []) for (const join of from.joins ?? []) this.#expr(join.join_operator, scope)
     onTargets?.((select.projection ?? []).map(target))
+    for (const hint of select.optimizer_hints ?? []) this.#hint(String(hint.text ?? ''))
     for (const [key, value] of Object.entries(select)) {
-      if (key === 'from' || key === 'into' || key === 'select_token') continue
+      if (key === 'from' || key === 'into' || key === 'select_token' || key === 'optimizer_hints') continue
       this.#expr(value, scope)
     }
   }
@@ -421,8 +428,9 @@ class Analyzer {
     const name = parts.at(-1) ?? ''
     const reason = REFUSED_FUNCTIONS[name]
     if (reason) this.#refuse({ ...DENIED, message: `Sosie does not run ${name}(): it ${reason}.` })
-    // A stored function's code may read rows the guard cannot see.
-    if (parts.length > 1 || this.catalog.functions.has(name)) this.#data = true
+    // A stored or loadable function's code may read rows the guard cannot see, and one may have been made since
+    // Sosie started: any name but MySQL's own functions is read as reading data.
+    if (parts.length > 1 || this.catalog.functions.has(name) || !NATIVE_FUNCTIONS.has(name)) this.#data = true
     this.#expr(fn.args, scope)
     for (const key of ['over', 'filter', 'within_group']) if (fn[key]) this.#expr(fn[key], scope)
   }
@@ -499,7 +507,10 @@ class Analyzer {
   #set(body: Node): void {
     if (body.SetNames) return this.#charset(String(body.SetNames.charset_name?.value ?? ''))
     if (body.SetTransaction) {
-      if (body.SetTransaction.global || (body.SetTransaction.modes ?? []).some((m: Node) => m.AccessMode === 'ReadWrite')) this.#refuse(WRITE)
+      // sqlparser reads SET GLOBAL TRANSACTION as SET TRANSACTION, so the text says which it is. Nothing else in the
+      // statement is a word the client chooses: a GLOBAL anywhere in it, a comment's included, is refused.
+      if (/\b(global|persist|persist_only)\b/i.test(this.text)) return this.#refuse(SERVER_SETTINGS)
+      if ((body.SetTransaction.modes ?? []).some((m: Node) => m.AccessMode === 'ReadWrite')) this.#refuse(WRITE)
       return
     }
     const assignments: { scope?: string; name: string[]; value: Node }[] = []
@@ -521,9 +532,9 @@ class Analyzer {
     const first = name[0] ?? ''
     // A user variable: anything a query may read, which is then faked as a value wherever it comes back.
     if (first.startsWith('@') && !first.startsWith('@@')) return this.#expr(value, { relations: [], ctes: new Set() })
-    if (scope && !/^session|local$/i.test(scope)) return this.#refuse({ ...DENIED, message: 'Sosie does not change the server’s settings: only this session’s.' })
+    if (scope && !/^(session|local)$/i.test(scope)) return this.#refuse(SERVER_SETTINGS)
     const prefix = first.startsWith('@@') ? first.slice(2).toLowerCase() : ''
-    if (['global', 'persist', 'persist_only'].includes(prefix)) return this.#refuse({ ...DENIED, message: 'Sosie does not change the server’s settings: only this session’s.' })
+    if (['global', 'persist', 'persist_only'].includes(prefix)) return this.#refuse(SERVER_SETTINGS)
     const setting = (name.length > 1 && ['@@session', '@@local', '@@global', '@@persist'].includes(first.toLowerCase()) ? name.at(-1)! : first.replace(/^@@/, '')).toLowerCase()
     // A setting's value is written in the query: copied from a row, it would come back real from SELECT @@name.
     const literal = settingValue(value)
@@ -535,15 +546,36 @@ class Analyzer {
       return this.#refuse({ ...DENIED, message: 'Sosie keeps sql_mode without ANSI_QUOTES, NO_BACKSLASH_ESCAPES and PIPES_AS_CONCAT: it must read each statement as MySQL does.' })
     }
     if (CHARSETS.has(setting)) return this.#charset(literal)
-    if (setting === 'max_execution_time') {
-      const ms = Number(literal)
-      if (!Number.isInteger(ms) || ms <= 0 || ms > this.limits.statementTimeout) {
-        this.#refuse({ ...DENIED, message: `Sosie allows max_execution_time up to ${this.limits.statementTimeout} ms, the limit it was started with.` })
-      }
-    }
+    if (setting === 'max_execution_time') this.#timeout(literal)
     if (setting === 'sql_select_limit') {
       const n = Number(literal)
       if (!Number.isInteger(n) || n < 0 || n > this.limits.maxRows + 1) this.#refuse({ ...DENIED, message: `Sosie allows sql_select_limit up to ${this.limits.maxRows + 1}.` })
+    }
+  }
+
+  /** A time limit the client asks for: lower than Sosie's, never higher, nor none (0). */
+  #timeout(literal: string): void {
+    const ms = Number(literal)
+    if (!Number.isInteger(ms) || ms <= 0 || ms > this.limits.statementTimeout) {
+      this.#refuse({ ...DENIED, message: `Sosie allows max_execution_time up to ${this.limits.statementTimeout} ms, the limit it was started with.` })
+    }
+  }
+
+  /** An optimizer hint sets for one statement what SET sets for the session: MAX_EXECUTION_TIME(n), SET_VAR(name = value). */
+  #hint(text: string): void {
+    for (const [, ms] of text.matchAll(/\bMAX_EXECUTION_TIME\s*\(([^)]*)\)/gi)) this.#timeout(ms!.trim())
+    for (const [, assignment] of text.matchAll(/\bSET_VAR\s*\(([^)]*)\)/gi)) {
+      let set: Node | undefined
+      try {
+        set = parseStatements(`SET SESSION ${assignment}`)[0]?.Set
+      } catch {
+        set = undefined
+      }
+      if (!set?.SingleAssignment) {
+        this.#refuse({ ...UNSUPPORTED, message: 'Sosie does not read this SET_VAR hint: set the session’s setting with SET.' })
+        continue
+      }
+      this.#set(set)
     }
   }
 
@@ -584,6 +616,15 @@ function target(item: Node): Target {
   const fn = expr.Function
   if (fn && String(fn.name?.at(-1)?.Identifier?.value ?? '').toLowerCase() === 'count') return 'count'
   return 'other'
+}
+
+/**
+ * A set operation's select list, from its branches': a column is a count or a literal only where every branch has
+ * one in its place. A * in either, or lists that do not line up, leave every column as anything else.
+ */
+function branches(left: Target[] | undefined, right: Target[] | undefined): Target[] {
+  if (!left || !right || left.includes('star') || right.includes('star') || left.length !== right.length) return ['star']
+  return left.map((t, i) => (t === right[i] ? t : 'other'))
 }
 
 /** A column reference, through parentheses and a COLLATE: its name's parts. */

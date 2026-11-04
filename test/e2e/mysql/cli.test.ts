@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -39,6 +39,11 @@ it('starts in front of MySQL from the command, says where clients connect, and s
     expect(JSON.parse(entry)).toMatchObject({ kind: 'mysql', address })
     expect(entry).not.toContain(new URL(upstream).password)
   } finally {
-    child.kill('SIGINT')
+    if (child.exitCode === null) {
+      const exited = new Promise((resolve) => child.once('exit', resolve))
+      child.kill('SIGINT')
+      await exited
+    }
+    rmSync(home, { recursive: true, force: true })
   }
 })
