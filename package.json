@@ -1,6 +1,7 @@
 {
   "name": "sosie-workspace",
   "private": true,
+  "description": "Sosie: your AI agent sees a double of your data. Never the real thing.",
   "type": "module",
   "workspaces": [
     "packages/core",

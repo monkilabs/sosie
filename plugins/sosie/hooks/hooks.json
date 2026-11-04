@@ -1,0 +1,15 @@
+{
+  "description": "Tell the agent which Sosies are running when a session starts, and scan each session's transcript for real values when it ends.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs\"", "timeout": 10 }]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-end.mjs\"" }]
+      }
+    ]
+  }
+}

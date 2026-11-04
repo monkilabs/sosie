@@ -125,6 +125,31 @@ that writes, is the API's to guard.
 Postgres, REST and GraphQL are the first sources. More databases come next, each
 a package behind the same interface.
 
+### In your assistant
+
+Sosie is also a plugin for Claude Code, GitHub Copilot, VS Code, Cursor, Codex,
+Kiro and Devin: its MCP server, and a skill that tells the agent how to read
+through Sosie, what the fakes mean and why a result can look wrong.
+
+```sh
+claude plugin marketplace add monkilabs/sosie
+claude plugin install sosie@sosie
+```
+
+Copilot and Codex add the same marketplace (`copilot plugin marketplace add
+monkilabs/sosie`, `codex plugin marketplace add monkilabs/sosie`); Cursor
+imports it under Dashboard → Plugins → Team Marketplaces. With `--scope project`
+on both commands, Claude Code records them in the repository's
+`.claude/settings.json`, for the whole team.
+
+In Claude Code the plugin does two more things. When a session starts, it tells
+the agent which Sosies are running, or, in a project with a `sosie.yml` and none
+running, to ask you to start one. When a session ends, it scans the session's
+transcript, and the next session tells you if a real value reached it.
+
+The plugin starts no Sosie and holds no credentials: Sosie still starts in your
+own terminal, as above.
+
 ## Good to know
 
 - **Order and ranges follow the real values.** `ORDER BY id` sorts by the
