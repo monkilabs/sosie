@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.1, 4 November 2026
+
+Sosie as a plugin for the agent's assistant, and the fixes a review of 0.1.0
+against its design found. All five packages move to 0.1.1 together;
+`@sosie/postgres` is unchanged.
 
 - REST: a method override in the query is refused when its method is a fake
   Sosie gave, as when a link that carried one is followed as given: Sosie
