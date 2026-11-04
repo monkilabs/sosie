@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { crossSite, localRequest, pacer, parseJson, singular, why, type Endpoint, type Faker, type Field } from '@sosie/core'
+import { crossSite, integerOf, localRequest, pacer, parseJson, singular, why, type Endpoint, type Faker, type Field } from '@sosie/core'
 import {
   getOperationAST,
   getVariableValues,
@@ -13,6 +13,7 @@ import {
   valueFromASTUntyped,
   visit,
   visitWithTypeInfo,
+  type ConstValueNode,
   type DocumentNode,
   type DefinitionNode,
   type FieldNode,
@@ -168,7 +169,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     for (const definition of operation.variableDefinitions ?? []) {
       const name = definition.variable.name.value
       if (name in given) values[name] = given[name]
-      else if (definition.defaultValue) values[name] = valueFromASTUntyped(definition.defaultValue)
+      else if (definition.defaultValue) values[name] = literal(definition.defaultValue)
     }
     const sent = `${query}\n${JSON.stringify(values)}`
     // Sosie's own credentials: a key, or a value that passes, that holds one is faked.
@@ -430,6 +431,24 @@ function usesName(document: DocumentNode, name: string): boolean {
   let found = false
   visit(document, { Field: (node) => void (found ||= node.name.value === name || node.alias?.value === name) })
   return found
+}
+
+/**
+ * A literal the client wrote, a variable's default, as the JSON a variable would hold: an integer beyond 2^53 (a
+ * 64-bit id as a BigInt or Long) kept as its digits, as raw JSON, where graphql-js would round it.
+ */
+function literal(node: ConstValueNode): unknown {
+  switch (node.kind) {
+    case Kind.INT:
+      return Number.isSafeInteger(Number(node.value)) ? Number(node.value) : integerOf(node.value)
+    case Kind.LIST:
+      return node.values.map(literal)
+    case Kind.OBJECT:
+      // Defined, not assigned: a key __proto__ is the client's, not the object's prototype.
+      return Object.fromEntries(node.fields.map((f) => [f.name.value, literal(f.value)]))
+    default:
+      return valueFromASTUntyped(node)
+  }
 }
 
 /** A request's body as text; undefined once it passes the cap, and the rest is read and dropped. */

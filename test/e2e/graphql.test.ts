@@ -309,6 +309,9 @@ describe('a GraphQL API', () => {
     const again = await text(`{ account(id: "${id}") { id } }`)
     expect(api.received.at(-1)!.query).toContain('"1234567890123456789"')
     expect(again).toContain(`"id":${id}`)
+    // As a variable's default, written in the query, it goes as a variable, with its digits as written.
+    await text(`query ($id: Long = ${id}) { account(id: $id) { id } }`)
+    expect(api.received.at(-1)!.body).toContain('"variables":{"id":1234567890123456789}')
     // So does the MCP tool's answer.
     const running: Running = { kind: 'graphql', address: sosie.address, schema: { entities: [] }, passing: [] }
     expect(JSON.stringify(await graphql.tools![0]!.run({ query: '{ account { id } }' }, running))).toContain(`"id":${id}`)

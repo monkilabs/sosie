@@ -38,7 +38,9 @@ npx @sosie/cli
   ✓ Every value is faked; 3 fields pass (sosie.yml)
 
   Your agent, app and psql:  postgres://localhost:7674/app
-  Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp
+  Claude Code:               claude plugin marketplace add monkilabs/sosie
+                             claude plugin install sosie@sosie
+  Any MCP client:            npx @sosie/cli mcp
 ```
 
 Without `SOSIE_UPSTREAM`, Sosie asks for the connection string at a hidden

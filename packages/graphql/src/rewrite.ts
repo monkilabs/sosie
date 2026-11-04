@@ -1,4 +1,4 @@
-import { referenceOf, type Field, type RequestScope } from '@sosie/core'
+import { exactInteger, integerOf, referenceOf, type Field, type RequestScope } from '@sosie/core'
 import {
   getNamedType,
   isAbstractType,
@@ -153,6 +153,14 @@ export function rewrite(
    */
   const variable = (v: unknown, uses: Use[]): unknown => {
     if (Array.isArray(v)) return v.map((item) => variable(item, uses))
+    // An integer beyond 2^53, kept as its digits: looked up by them, and sent as digits again.
+    const exact = exactInteger(v)
+    if (exact !== undefined) {
+      const real = lookup(exact, [...new Map(uses.flatMap((use) => near(use.name, use.type)).map((f) => [f.id, f])).values()])
+      if (real === undefined || real === exact) return v
+      changed = true
+      return /^-?\d+$/.test(real) ? integerOf(real) : real
+    }
     if (v && typeof v === 'object') {
       return Object.fromEntries(Object.entries(v).map(([k, item]) => [k, variable(item, uses.map((use) => ({ ...use, name: within(k, use.name, use.type) })))]))
     }

@@ -3,7 +3,7 @@ import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
-import { createFaker, loadRules, normalize, Store, storeDir, type Running } from '@sosie/core'
+import { createFaker, loadRules, normalize, Store, storeDir, type Running, type Schema } from '@sosie/core'
 import { rest } from '@sosie/rest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startApi, startRecorder, TOKEN, type FakeApi } from './api.js'
@@ -18,7 +18,15 @@ const seen: unknown[] = []
 
 async function startRest(
   api: FakeApi,
-  { home = mkdtempSync(join(tmpdir(), 'sosie-rest-')), rules = '', env = {} as Record<string, string>, maxRows = 1000, query = '', userinfo = '' } = {},
+  {
+    home = mkdtempSync(join(tmpdir(), 'sosie-rest-')),
+    rules = '',
+    env = {} as Record<string, string>,
+    maxRows = 1000,
+    query = '',
+    userinfo = '',
+    learned = undefined as ((schema: Schema) => void) | undefined,
+  } = {},
 ) {
   const connection = await rest.connect(new URL(`${api.url.replace('//', `//${userinfo}`)}${query}`), {
     maxRows,
@@ -28,7 +36,7 @@ async function startRest(
   const store = Store.open(storeDir(home))
   const loaded = loadRules(rules, connection.schema, 'sosie.yml', { learns: !!connection.learns })
   const faker = createFaker({ schema: connection.schema, rules: loaded, store })
-  const endpoint = await connection.serve({ host: '127.0.0.1', port: 0 }, faker)
+  const endpoint = await connection.serve({ host: '127.0.0.1', port: 0 }, faker, learned)
   const get = async (path: string, init?: RequestInit): Promise<{ status: number; body: Json; notice: string | null }> => {
     const url = path.startsWith('http') ? path : path.startsWith('/v1/') ? `${new URL(endpoint.address).origin}${path}` : `${endpoint.address}${path}`
     const response = await fetch(url, init)
@@ -156,6 +164,50 @@ describe('an API without an OpenAPI document', () => {
     expect(sosie.scanned('$path').held).toBeGreaterThan(0)
     // Nor for one that follows a word that names no entity (/quillon/repos): it is a word, not that word's id.
     for (const word of ['repos', 'profile']) expect(sosie.finds(word), word).toBeUndefined()
+  })
+
+  it('tells describe the fields it has met, under the collections the API answered with a list only', async () => {
+    const schemas: Schema[] = []
+    const fresh = await startRest(api, { learned: (schema) => schemas.push(structuredClone(schema)) })
+    await fresh.get('/users')
+    const [first] = schemas
+    expect(first!.entities.map((e) => e.id)).toEqual(['user'])
+    expect(first!.entities[0]!.fields.map((f) => f.id)).toEqual(
+      expect.arrayContaining(['user.id', 'user.email', 'user.name', 'user.active', 'user.address.city']),
+    )
+    expect(first!.entities[0]!.fields.find((f) => f.id === 'user.id')).toMatchObject({ key: 'primary', type: { kind: 'integer' } })
+    // Nothing new met, nothing told.
+    await fresh.get('/users')
+    expect(schemas).toHaveLength(1)
+    // A tenant's slug (/jones/profile) names an entity, and a map is keyed by people's names (/members): neither is a
+    // collection the API answered with a list, so describe is told of neither.
+    await fresh.get('/jones/profile')
+    // Fetched past `seen`: without a document, a map's lowercase keys stay in the body, a limit of their own.
+    await (await fetch(`${fresh.address}/members`)).text()
+    expect(JSON.stringify(schemas)).not.toMatch(/jone|member|quillon|zephyrine/i)
+    expect(canariesIn(JSON.stringify(schemas))).toEqual([])
+    await fresh.close()
+    // With a document, the document is the schema: nothing is learned.
+    const documented = await startApi({ withOpenapi: true })
+    const told: Schema[] = []
+    const withDoc = await startRest(documented, { learned: (schema) => told.push(schema) })
+    await withDoc.get('/users')
+    expect(told).toEqual([])
+    await withDoc.close()
+    await documented.close()
+  })
+
+  it('follows a link back to the query names the API wrote, a word Sosie faked into another word included', async () => {
+    // A Sosie of its own: one that has seen jdoe as a key shows it as it is.
+    const fresh = await startRest(api)
+    const { body } = await fresh.get('/country-links')
+    expect(new URL(body.next).searchParams.has('jdoe')).toBe(false)
+    await fresh.get(body.next)
+    expect(api.requests.at(-1)!.path).toBe('/v1/countries?Quillon=Vantablack&jdoe=quill.vantablack%40canary-mail.test&q%5BZephyrine%5D=Orrowmoor')
+    // A name the client wrote that Sosie never gave stays as written.
+    await fresh.get('/countries?color=red')
+    expect(api.requests.at(-1)!.path).toBe('/v1/countries?color=red')
+    await fresh.close()
   })
 
   it('names no entity after a word a client typed that is no name, so no domain holds it', async () => {

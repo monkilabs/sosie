@@ -24,6 +24,8 @@ export interface FakeContext {
   pace: () => Promise<void> | undefined
   /** Told each key shown as structure: a client has seen it. */
   shown?: (key: string) => void
+  /** Told each field met that the document does not name, with its entity: the schema of an API without one. */
+  met?: (entity: string, field: Field) => void
 }
 
 /** A JSON body, every value faked by the field it is: from the OpenAPI schema, or named by where it is. `cut` says a list was cut. */
@@ -96,9 +98,13 @@ function fieldAt(entity: string, prefix: string, key: string, value: unknown, ct
   if (documented) return documented
   const type: Field['type'] =
     typeof value === 'number' ? (Number.isInteger(value) ? { kind: 'integer' } : { kind: 'decimal' }) : typeof value === 'boolean' ? { kind: 'boolean' } : { kind: 'string' }
-  if (key === 'id' && prefix === 'id.') return { ...idField(entity, String(value)), type }
   const target = referenceOf(key, (name) => ctx.entityFor(name))
-  return { id, name: key || 'value', type, ...(target && target !== entity && { references: `${target}.id`, guessed: true }) }
+  const field: Field =
+    key === 'id' && prefix === 'id.'
+      ? { ...idField(entity, String(value)), type }
+      : { id, name: key || 'value', type, ...(target && target !== entity && { references: `${target}.id`, guessed: true }) }
+  ctx.met?.(entity, field)
+  return field
 }
 
 /**

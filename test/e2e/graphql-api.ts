@@ -81,8 +81,8 @@ export interface FakeGraphql {
   url: string
   /** Operations the API ran, by kind. */
   operations: string[]
-  /** Every request the API received, as Sosie sent it. */
-  received: { query: string; variables?: Record<string, unknown> }[]
+  /** Every request the API received, as Sosie sent it; `body` as written, an integer beyond 2^53 unrounded. */
+  received: { query: string; variables?: Record<string, unknown>; body: string }[]
   close(): Promise<void>
 }
 
@@ -145,7 +145,7 @@ export async function startGraphql({ introspection = true, elsewhere = 'http://2
       }
       if (req.headers.authorization !== `Bearer ${TOKEN}`) return json(401, { errors: [{ message: 'unauthorized' }] })
       const request = JSON.parse(text || '{}')
-      received.push({ query: request.query, ...(request.variables && { variables: request.variables }) })
+      received.push({ query: request.query, ...(request.variables && { variables: request.variables }), body: text })
       if (/\bmoved\b/.test(request.query)) {
         res.writeHead(307, { location: `${elsewhere}/steal` })
         return res.end()

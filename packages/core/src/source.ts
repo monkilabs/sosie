@@ -128,8 +128,11 @@ export interface Connection {
   readonly learns?: boolean
   /** The tool a developer would point at the address, for the terminal: 'psql', 'curl'. */
   readonly client?: string
-  /** Start the endpoint clients use. Every value it returns goes through the Faker. */
-  serve(listen: { host: string; port: number }, faker: Faker): Promise<Endpoint>
+  /**
+   * Start the endpoint clients use. Every value it returns goes through the Faker. A source that `learns` its fields
+   * calls `learned` with its schema as it grows, so `sosie mcp` can describe what it has met.
+   */
+  serve(listen: { host: string; port: number }, faker: Faker, learned?: (schema: Schema) => void): Promise<Endpoint>
   close(): Promise<void>
 }
 

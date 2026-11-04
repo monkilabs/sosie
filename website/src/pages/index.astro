@@ -307,7 +307,7 @@ format:
         <p class="section__lead">In your own terminal, not the agent's, with the connection string in <code>SOSIE_UPSTREAM</code> or typed at a hidden prompt.</p>
         <div class="cta__steps">
           <div class="cta__step"><code>npx @sosie/cli</code><span>Start Sosie. It prints one local address for your agent, your app and psql.</span></div>
-          <div class="cta__step"><code>claude mcp add sosie -- npx @sosie/cli mcp</code><span>Or connect any MCP client, or point psql, your app or curl at the address.</span></div>
+          <div class="cta__step"><code>claude plugin install sosie@sosie</code><span>After <code>claude plugin marketplace add monkilabs/sosie</code>: Sosie's MCP server in Claude Code, and a skill that tells the agent how to read through it. Or connect any MCP client to <code>npx @sosie/cli mcp</code>, or point psql, your app or curl at the address.</span></div>
           <div class="cta__step"><code>npx @sosie/cli scan ~/.claude/projects</code><span>Check that nothing real reached a transcript.</span></div>
         </div>
         <div class="hero__actions">

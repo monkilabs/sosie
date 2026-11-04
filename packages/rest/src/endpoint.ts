@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { crossSite, localRequest, pacer, parseJson, why, type Endpoint, type Faker, type Field, type RequestScope } from '@sosie/core'
+import { crossSite, localRequest, pacer, parseJson, why, type Endpoint, type Faker, type Field, type RequestScope, type Schema } from '@sosie/core'
 import { ENVELOPES, fakeBody, queryField, type FakeContext } from './fake.js'
 import { referenceOf, type Api } from './openapi.js'
 import { oneSegment, PAGING, PATH_WORD, QUERY_NAME, QUERY_VALUE, route, segmentsOf, singular, VALUE_SEGMENT, valueByHabit, wordName, type Route } from './paths.js'
@@ -14,6 +14,8 @@ export interface RestContext {
   /** Sosie's own credentials for the API, as `secretParts` gives them. */
   secrets: readonly string[]
   log: (line: string) => void
+  /** Told the schema an API without a document has shown so far, as it grows. */
+  learned?: (schema: Schema) => void
 }
 
 /** A segment, as sent or as Sosie turns it back, that the API could read as more than one, or as a step up. */
@@ -61,6 +63,31 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
    * /jones/profile) is never shown to another request.
    */
   const known = new Set(operations.flatMap((op) => op.segments.filter((s) => !s.startsWith('{'))))
+  /**
+   * Without a document, the schema the API's answers show: the fields met in each entity. `describe` is told only
+   * of the entities a known collection names: an entity named after a word a client typed (a tenant's slug) is
+   * never shown to another request, there either.
+   */
+  const met = new Map<string, Map<string, Field>>()
+  const collections = new Set<string>()
+  let fieldsMet = 0
+  let grown = false
+  const meet = (entity: string, field: Field) => {
+    // A value of no entity's, or under a key that is a value (*), is no field to describe.
+    if (entity === '*' || field.id.includes('*') || fieldsMet >= MAX_KNOWN) return
+    let fields = met.get(entity)
+    if (!fields) met.set(entity, (fields = new Map()))
+    if (fields.has(field.id)) return
+    fields.set(field.id, field)
+    fieldsMet++
+    grown = true
+  }
+  const publish = () => {
+    if (!grown || !ctx.learned) return
+    grown = false
+    const entities = [...met].filter(([id]) => collections.has(id)).map(([id, fields]) => ({ id, name: id, fields: [...fields.values()] }))
+    ctx.learned({ entities })
+  }
   /** Query names a link shows as they are: common ones, the document's fields, and keys bodies have shown as structure. */
   const queryNames = new Set([...QUERY_WORDS, ...[...fields.values()].map((f) => f.name)])
   const showKey = (key: string) => void (queryNames.size < MAX_KNOWN && queryNames.add(key))
@@ -172,7 +199,10 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const query = new URLSearchParams()
     const names: string[] = []
     for (const [sentName, value] of incoming.searchParams) {
-      const name = wordName(sentName) || known.has(sentName) ? sentName : (scope.lookup(sentName, QUERY_NAME) ?? sentName)
+      // A name links show as it is stays; any other may be one Sosie faked for a link, a word into another word
+      // (jdoe into zleu) included, and turns back into the API's. One Sosie never gave stays as written.
+      const plain = queryNames.has(sentName) || known.has(sentName) || referenceOf(sentName, (word) => word) !== undefined
+      const name = plain ? sentName : (scope.lookup(sentName, QUERY_NAME) ?? sentName)
       // A number that names no field (limit=10) stays as written; other text is looked up anywhere.
       const turnedValue = lookup(value, queryField(name, value, rt, { fields, entityFor }, name !== sentName)) ?? value
       // A method override (?_method=DELETE), its name and its method as sent or as Sosie turns them back, asks a
@@ -229,6 +259,10 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const ok = answer.status >= 200 && answer.status < 300
     if (ok && word !== undefined && !rt.values.has(last) && words[last] === undefined && COLLECTION.test(word) && listOf(body, word)) {
       if (known.size < MAX_KNOWN) known.add(word)
+      if (!ctx.api && !collections.has(entityFor(word))) {
+        collections.add(entityFor(word))
+        grown = true
+      }
     }
     const fake: FakeContext = {
       faker: ctx.faker,
@@ -240,8 +274,10 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       maxItems: ctx.maxItems,
       pace: pacer(),
       shown: showKey,
+      ...(!ctx.api && { met: meet }),
     }
     const faked = await fakeBody(body, read, fake)
+    publish()
     const notice = `Sosie returned the first ${ctx.maxItems} items of a list; the rest were cut. Narrow the request, or start Sosie with a higher --max-rows.`
     return send(res, answer.status, faked.body, faked.cut ? { 'sosie-notice': notice } : {})
   }
