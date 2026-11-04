@@ -11,6 +11,12 @@
   `SET`, and one given as a parameter may set any setting but those Sosie
   checks, as asyncpg does before it reads the catalog. A value from a row is
   still refused.
+- MySQL, a source of its own (`@sosie/mysql`): `SOSIE_UPSTREAM=mysql://…`
+  starts a local MySQL endpoint in front of MySQL 8.0 and later (8.4 and 9
+  tested). The `mysql` client and mysql2's `query()` read through it, every
+  value faked by the column MySQL names, fakes in literals turned back; writes,
+  `mysql`, `performance_schema`, `LOAD_FILE()` and settings that say where the
+  database is are refused. Prepared statements come later.
 
 ## 0.1.1, 4 November 2026
 

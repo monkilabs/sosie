@@ -128,7 +128,7 @@ async function start(options: {
   const upstream = await readUpstream()
   const source = sources.find((s) => s.matches(upstream, process.env))
   if (!source) {
-    throw new Exit(2, fail(`Sosie reads postgres:// databases and http:// or https:// APIs for now, not ${upstream.protocol}//.`))
+    throw new Exit(2, fail(`Sosie reads postgres:// and mysql:// databases, and http:// or https:// APIs, for now; not ${upstream.protocol}//.`))
   }
 
   let connection

@@ -8,6 +8,7 @@ export default defineConfig({
     alias: {
       '@sosie/core': src('core'),
       '@sosie/postgres': src('postgres'),
+      '@sosie/mysql': src('mysql'),
       '@sosie/rest': src('rest'),
       '@sosie/graphql': src('graphql'),
     },
@@ -26,9 +27,21 @@ export default defineConfig({
         test: {
           name: 'e2e',
           include: ['test/e2e/**/*.test.ts'],
+          exclude: ['test/e2e/mysql/**'],
           globalSetup: ['test/e2e/database.ts'],
           testTimeout: 30_000,
           hookTimeout: 60_000,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'mysql',
+          include: ['test/e2e/mysql/**/*.test.ts'],
+          globalSetup: ['test/e2e/mysql/database.ts'],
+          testTimeout: 30_000,
+          // A first run downloads MySQL's binaries.
+          hookTimeout: 600_000,
         },
       },
     ],

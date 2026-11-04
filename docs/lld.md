@@ -18,6 +18,8 @@ Current versions as of October 2026.
 | Postgres source: upstream | [`pg`](https://github.com/brianc/node-postgres) 8.23 connects (TLS, passwords, SCRAM); Sosie then drives its connection message by message |
 | Postgres source: SQL | [`pgsql-parser`](https://github.com/constructive-io/pgsql-parser) 18: Postgres's own parser compiled to WebAssembly, parse and print |
 | GraphQL source | [`graphql`](https://github.com/graphql/graphql-js) 17: parsing, validation and introspection, as the API's own server does them |
+| MySQL source: upstream | [`mysql2`](https://github.com/sidorares/node-mysql2) 3.24, each value read as the server's text bytes |
+| MySQL source: SQL | [`@guanmingchiu/sqlparser-ts`](https://github.com/guan404ming/sqlparser-ts) 0.63, pinned: the MySQL dialect of [sqlparser](https://github.com/apache/datafusion-sqlparser-rs) compiled to WebAssembly, which reads executable comments and joins adjacent strings as MySQL does |
 | The plugin | The [Agent Plugins](https://agent-plugins.org) 1.0 format, checked and compiled for each assistant by [OpenCastle](https://github.com/monkilabs/opencastle) 1.12 |
 | Upstream databases | PostgreSQL 15 to 18, each tested in CI. 19 when it is released (release candidate 1 on 15 October 2026) and the parser supports it. 14 is out: its support ends on 12 November 2026 |
 
@@ -37,10 +39,11 @@ One repository, npm workspaces, five packages:
 | `packages/cli` | `@sosie/cli` | The CLI, run with `npx @sosie/cli` or installed as the `sosie` command, and the official sources it bundles |
 | `packages/core` | `@sosie/core` | Everything that does not depend on a source: the source interface, the neutral schema, rules, faking, the store, `scan`, the MCP server |
 | `packages/postgres` | `@sosie/postgres` | The Postgres source: endpoint, guard, rewriting, schema reading |
+| `packages/mysql` | `@sosie/mysql` | The MySQL source: endpoint, guard, rewriting, schema reading |
 | `packages/rest` | `@sosie/rest` | The REST source: an HTTP endpoint for the team's own API, OpenAPI reading, JSON faking |
 | `packages/graphql` | `@sosie/graphql` | The GraphQL source: a GraphQL endpoint for the team's own API, schema by introspection, query checking and faking |
 
-Later sources are packages of their own in the same scope: `@sosie/mysql`. The `@sosie` scope is an npm organisation,
+Later sources are packages of their own in the same scope. The `@sosie` scope is an npm organisation,
 registered on 25 October 2026, so nobody else can take a name in it. Its team
 `developers` publishes.
 
@@ -88,6 +91,16 @@ packages/
     arrays.ts        Postgres array text
     binary.ts        Postgres's binary format, for the types Sosie writes from their text
     mcp.ts           the query tool
+  mysql/src/
+    index.ts         the Source: matches mysql://, refuses MariaDB and MySQL before 8.0, reads the catalog
+    endpoint.ts      the TCP server
+    protocol.ts      packets, the handshake, the text protocol's results
+    session.ts       one client: the handshake, then each command
+    upstream.ts      one read-only session upstream per client, rows as text bytes
+    guard.ts         sqlparser's MySQL dialect: allow reads; refuse writes and some tables; find what a literal is compared with
+    rewrite.ts       fakes in literals, back to real values, where they are in the text
+    schema.ts        information_schema to the neutral schema
+    results.ts       which field each result column came from
   rest/src/
     index.ts         the Source: matches http:// and https://, finds the OpenAPI document
     endpoint.ts      the HTTP server: the guard, paths and queries back to real values
@@ -229,7 +242,7 @@ export type FieldType =
 ```
 
 **Choosing a source:** the CLI asks each source it knows whether it `matches`
-the upstream URL, in order: Postgres for `postgres://` and `postgresql://`, then GraphQL for an http(s) URL with a
+the upstream URL, in order: Postgres for `postgres://` and `postgresql://`, MySQL for `mysql://`, then GraphQL for an http(s) URL with a
 `graphql` or `graphql.json` segment in its path (`/graphql`, `/graphql/v1`; not `/mygraphql`), or any when
 `SOSIE_GRAPHQL_SCHEMA` is set, then REST for any other. Sources from other packages, listed
 in `sosie.yml`, come after v0.1, when the interface is settled; until 1.0 it may
@@ -793,6 +806,118 @@ upstream as the client wrote it.
 - `count(…)` with a filter answers yes-or-no questions about real values
   (`WHERE id <= (SELECT score …)`), as the threat model says of filters.
 
+## MySQL source
+
+For MySQL 8.0 and later; 8.4 LTS and 9 are tested. MariaDB is refused at start-up, for now. `SOSIE_UPSTREAM` is
+`mysql://user:password@host:3306/database`, its database named; `?ssl-mode=REQUIRED`, `VERIFY_CA` or
+`VERIFY_IDENTITY` makes the session upstream use TLS.
+
+### Endpoint
+
+It listens on 127.0.0.1, and on ::1 too, and its address says `127.0.0.1`: MySQL's own client takes `localhost` for its
+Unix socket. The greeting is the version 10 handshake with the upstream's version, offering `caching_sha2_password`,
+protocol 4.1 and pluggable authentication, and neither TLS nor compression. Any user is taken, with any password or
+none, which Sosie never checks: the address is this machine's. The database a client names is `USE`d. Supported:
+`COM_QUERY`, one statement each, in the text protocol, with the classic EOF packets; `COM_INIT_DB`, `COM_PING`,
+`COM_QUIT`, `COM_RESET_CONNECTION` (a new session upstream), `COM_SET_OPTION`, `COM_STATISTICS`; `COM_FIELD_LIST`
+answers no columns. Refused with a clear error: prepared statements (`COM_STMT_*`), `COM_CHANGE_USER`, and several
+statements in one query.
+
+### Upstream
+
+One session per client, opened with mysql2 at the handshake, and set at its start:
+
+| Setting | Value |
+| --- | --- |
+| `transaction_read_only` | `ON` |
+| `max_execution_time` | The statement timeout, 30 s |
+| `sql_mode` | The server's, without `ANSI_QUOTES`, `NO_BACKSLASH_ESCAPES`, `PIPES_AS_CONCAT` and `ANSI`: MySQL reads each statement's text as Sosie's parser does |
+| `sql_select_limit` | `--max-rows` plus one; a `SELECT` with a `LIMIT` of its own is read to its end, the rows past the cap dropped |
+| Character set | `utf8mb4` |
+
+Each value comes back as the server's text bytes (mysql2's `typeCast: false`): a 64-bit id keeps its digits, a BLOB
+its bytes.
+
+### Schema
+
+From `information_schema`, every database the login can see but MySQL's own (`information_schema`, `mysql`,
+`performance_schema`, `sys`): tables and views, columns and their types, an index of one column that is unique or the
+primary key, foreign keys, and stored functions. A field's id is `table.column` in the database the connection string
+names, `database.table.column` elsewhere. Types map as `tinyint(1)` to boolean; the integers by size; `decimal`,
+`float` and `double` to decimal; `char`, `varchar` and the texts to string, `char` and `varchar` with their length;
+the binaries and blobs to bytes; `enum` to an enum with its labels; `json`; the dates and times. `bit`, spatial types
+and `vector` have none: their values come back `NULL`.
+
+A view's column shares its table's values when it is named as a column of exactly one table the view reads, from
+`VIEW_TABLE_USAGE`. MySQL shows that only to a login with `SHOW VIEW`: without it, a view's column shares the values
+of a column of that name when only one table of its database has one, and Sosie says at start-up how many views it
+cannot see into.
+
+`SHOW GRANTS` says whether the login can change data, or is an administrator or may read files (`FILE`): Sosie warns
+of either.
+
+### Guard
+
+The parser is sqlparser's MySQL dialect: it reads an executable comment (`/*!50000 … */`) as MySQL runs it, joins
+`'a' 'b'` into one literal, and reads backslash escapes and introducers (`_utf8mb4'…'`). A statement it cannot parse
+is refused, a valid one included: a guard must not let through what it did not read.
+
+- **Allowed:** `SELECT`, `WITH` and `VALUES`; `SHOW` of tables, columns, databases, `CREATE TABLE` and views,
+  indexes, grants, table and routine status, collations and the like; `DESCRIBE`; `USE`; `START TRANSACTION` (not
+  `READ WRITE`), `COMMIT`, `ROLLBACK`, savepoints; `SET NAMES` and `SET` of this session's settings.
+- **Refused:** whatever changes data (`25006`, `This statement changes data. Sosie is read-only.`), `EXPLAIN`, `SELECT
+  … INTO`, row locks (`FOR UPDATE`, `FOR SHARE`), and any statement not allowed above.
+- **Databases and tables:** `mysql` (password hashes, the general and slow logs), `performance_schema` and `sys`
+  (statements with their values), and from `information_schema` the process list, `INNODB_TRX` and the optimizer trace
+  (queries), `COLUMN_STATISTICS` (histograms of real values), the lock tables (key values), and `FILES` and the
+  tablespace tables (where the files are). The rest of `information_schema` is the schema, and passes.
+- **Functions:** `LOAD_FILE()`; `GET_LOCK()` and the other named locks; waits on replication; `sys_exec()` and
+  `sys_eval()`. A stored function, or one named with its database, may read rows the guard cannot see: what it
+  returns is faked.
+- **Settings:** `@@datadir`, `@@hostname`, `@@port` and every other setting that says where the database, its files,
+  its certificates or its peers are; `SHOW VARIABLES` and `SHOW PROCESSLIST`. A `SET` changes this session only, to
+  a value written in the query: copied from a row, a setting would come back real from `SELECT @@name`. Kept:
+  `transaction_read_only` on, `sql_mode` without the modes that change how text is read (and not `DEFAULT`, the
+  server's own), `utf8mb4` (`SET NAMES`), `max_execution_time` above zero and within the timeout, `sql_select_limit`
+  within the cap. A user variable (`@x`) may hold a row's value: what it gives back is faked.
+
+### Rewriting
+
+A literal compared by `=`, `<>`, `<=>` or `IN` with a column, through aliases, databases, derived tables, CTEs,
+parentheses, an introducer and `COLLATE`, is looked up in that column's domain; a column of MySQL's own catalog is not
+a fake's. Only the literals turned back are replaced, where sqlparser places them in the text; the rest of the
+statement goes upstream as the client wrote it. A literal whose text there does not read as its value (`'a' 'b'`) is
+left alone. A real value is written as a number, or quoted with backslash escapes, which Sosie keeps on.
+
+### Results
+
+MySQL names each result column's database, table (`org_table`) and column. A column of a table Sosie knows is faked by
+its field; of MySQL's own databases, it passes; of a table Sosie does not know, made since it started, it is faked by
+its type. A column with no table was computed, and is faked by its protocol type, unless the statement read only the
+catalog, or it is `COUNT(…)` or a literal the client wrote. A column of MySQL's data dictionary, a table with no
+database (`DESCRIBE`, `SHOW INDEX`), passes in a statement that reads only the catalog. `SHOW` and `DESCRIBE` pass
+whole. Whether a value is faked rests on what MySQL says of its column, not on how Sosie read the statement: any
+column from a table of yours makes the statement one that reads data. Bytes are faked in hex and written back as
+bytes.
+
+### Errors
+
+An error about the statement itself (syntax, an unknown column, table or database, access denied, read-only, the
+time limit) comes back with every value Sosie substituted turned back into its fake. Any other comes back as its code,
+`Error 1292: Sosie hides the rest of this message, which may quote a value from your rows.` `SHOW WARNINGS` and `SHOW
+ERRORS` hide each message the same way, and list first what Sosie has to say, such as a result cut at the cap.
+
+### Limits
+
+- Prepared statements, several statements in one query, `LOCK IN SHARE MODE`, `INTO OUTFILE`, the `MOD` operator and
+  `TABLE t` are refused: the first two for now, the rest because the parser does not read them.
+- A literal compared through a function (`LOWER(email) = '…'`), or in a row (`(id, email) = (1, '…')`), is used as
+  written.
+- `BIT`, spatial and `VECTOR` values come back `NULL`. A `tinyint` other than `tinyint(1)` is faked within a
+  `smallint`'s range.
+- `SHOW CREATE VIEW` and `information_schema.VIEWS` show a view's definition, a literal in it included.
+- MySQL reports no column for a value it computes, so `MAX(id)` is faked by type, not in `users.id`'s domain.
+
 ## REST source
 
 For the team's own HTTP API, where the database's people come back as JSON.
@@ -1162,7 +1287,7 @@ returns and every value a client sends. What each planned source maps:
 | --- | --- | --- | --- |
 | REST (built, above) | A local HTTP address; paths as upstream | `GET` and `HEAD` only | The OpenAPI document when there is one; otherwise where the value sits |
 | GraphQL (built, above) | A local HTTP address, at the API's path | Queries only, no mutations | The schema, by introspection or a file |
-| MySQL | MySQL's wire protocol | Reads only, read-only session | Its result metadata, as with Postgres |
+| MySQL (built, above) | MySQL's protocol, statements as text | Reads only, read-only session | Its result metadata, as with Postgres |
 
 Rules, domains, fakes, the store, `scan` and `describe` stay as they are. Format
 domains make a person's email the same fake from the database and from the API.
@@ -1176,6 +1301,10 @@ domains make a person's email the same fake from the database and from the API.
   lookups, scrubbing, the store, `scan` and the MCP server are tested through
   it and in `packages/core/test`. This is also the proof that the core needs no
   particular source.
+- **MySQL, end to end.** An embedded MySQL 8.4 from MySQL's own binaries (`mysql-memory-server`), or the server in
+  `SOSIE_TEST_MYSQL_URL`, seeded with the same canary people, read by a login with `SELECT` and `SHOW VIEW`. mysql2 and
+  the `mysql` client read through Sosie; the built CLI starts in front of it. Every answer, error and warning is
+  searched for each canary. CI runs MySQL 8.4 and 9.
 - **Postgres, end to end.** An embedded PostgreSQL 18, or the server in
   `SOSIE_TEST_DATABASE_URL`, seeded with canary values: unique emails, names,
   phone numbers, keys and numbers; values with nothing to fake (`''`, `-`,
@@ -1238,3 +1367,5 @@ domains make a person's email the same fake from the database and from the API.
 - GraphQL: `Sosie is stopping.` is tagged `SOSIE_TOO_COSTLY`, and an `operationName` that names no operation is
   answered as if the document had several.
 - The statement timeout is 30 s, with no flag to change it.
+- MySQL: prepared statements (`COM_STMT_PREPARE`, MySQL's binary protocol), as mysql2's `execute()`, Prisma and Go's
+  driver use them; several statements in one query; an MCP tool for SQL beside Postgres's `query`; MariaDB.

@@ -4,7 +4,8 @@ Sosie is a read-only endpoint in front of a data source that fakes every value
 on the way out. An AI agent, the developer's app and their tools connect to it
 as they would to the real source, and get the real shape with fake contents.
 Postgres was its first source, the [MVP](mvp.md); the team's own REST and
-GraphQL APIs came next, and v0.1, the first release, has all three. More are packages behind the same interface. A
+GraphQL APIs came next, and v0.1, the first release, has all three; MySQL followed. More are packages behind the same
+interface. A
 [plugin](#the-plugin) brings Sosie's MCP server, and how to read through it, to the agent's assistant. The
 [low-level design](lld.md) has the details.
 
@@ -26,7 +27,7 @@ GraphQL APIs came next, and v0.1, the first release, has all three. More are pac
 
 ## Non-goals
 
-Writes, databases other than Postgres, third-party APIs (for now),
+Writes, databases other than Postgres and MySQL, third-party APIs (for now),
 shell-output filtering, team-shared mappings, and defending against an agent
 that deliberately hunts for secrets on the machine Sosie runs on (see
 [Threat model](#threat-model)).
@@ -73,7 +74,7 @@ flowchart LR
       results --> faker
       rewrite -. lookup .-> faker
       faker --> endpoint
-      later["Other sources:<br/>REST, GraphQL; later MySQL"] -.-> faker
+      later["Other sources:<br/>MySQL, REST, GraphQL"] -.-> faker
     end
   end
   upstream -->|read-only login| db[("Your database")]
@@ -93,6 +94,9 @@ flowchart LR
 | Postgres | Rewriter | Asks the core for the real value behind each fake in a query |
 | Postgres | Upstream client | One read-only session per client, with a timeout and a row cap |
 | Postgres | Results | Names the field of each result column, from the table and position Postgres reports |
+| MySQL | Endpoint | Speaks MySQL's protocol on 127.0.0.1, statements as text |
+| MySQL | Guard | MySQL's dialect of sqlparser: allows reads; refuses everything else, and the tables and settings that hold queries, password hashes or where the database is |
+| MySQL | Rewriter and results | Turns back the literals compared with a column, in place; names each result column's field from the database, table and column MySQL reports |
 | REST | Endpoint and guard | The API's paths on a local HTTP address; `GET` and `HEAD` only, with Sosie's credentials |
 | REST | Fields | Names each value's field from the OpenAPI document, or from where it sits |
 | REST | Links | Points the API's links at Sosie, with nothing real in them, and reads them back |
@@ -114,7 +118,8 @@ same for every source.
 | --- | --- | --- |
 | First, the MVP | Postgres | Most personal data lives in databases, and teams least dare give an agent access to them |
 | Next, also in v0.1 | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
-| Later | MySQL and other databases; third-party APIs | On demand; many third-party APIs already offer a test mode |
+| After v0.1 | MySQL | The other database most teams run; its result metadata names each value's column, as Postgres's does |
+| Later | Other databases, MariaDB among them; third-party APIs | On demand; many third-party APIs already offer a test mode |
 
 The core is tested through an in-memory test source, without Postgres, so
 nothing in it can come to depend on one source.
@@ -238,6 +243,11 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
 
 ## Risks
 
+- **MySQL's parser is not MySQL's.** Postgres's guard reads statements with Postgres's own parser; MySQL has none
+  outside the server, so its guard reads them with sqlparser's MySQL dialect. What it cannot parse is refused, valid
+  MySQL included, and whether a value is faked rests on the column MySQL names, not on the parse. A statement read
+  differently from MySQL could still be let through, or a fake not turned back: the session's read-only start, the
+  login's grants and the result metadata are the layers under it.
 - **Driver coverage.** The extended query protocol and binary formats vary
   between drivers. Sosie is tested with `psql`, `node-postgres`, `postgres.js`,
   Drizzle and Prisma 7; its binary format byte for byte against Postgres's
