@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- A plugin, in `plugins/sosie`, for Claude Code, GitHub Copilot, VS Code,
+  Cursor, Codex, Kiro and Devin: Sosie's MCP server, and a skill that tells the
+  agent how to read through Sosie. The repository is its marketplace:
+  `claude plugin marketplace add monkilabs/sosie`.
+- In Claude Code, the plugin tells the agent which Sosies are running when a
+  session starts, and scans each session's transcript when it ends; the next
+  session reports a real value it found.
+
 ## 0.1.0, 29 October 2026
 
 The first release: an AI agent works against a real Postgres database and the

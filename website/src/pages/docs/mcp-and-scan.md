@@ -38,6 +38,37 @@ Start Sosie first, in your own terminal. When none is running, every tool says s
 Each source's tools appear when a Sosie of that kind runs. When several of a kind run, each tool takes the `address`
 that `describe` lists; without it, the newest.
 
+## The plugin
+
+The same server as a plugin, in the open [Agent Plugins](https://agent-plugins.org) format, with a skill that tells the
+agent how to read through Sosie: start with `describe`, query by the fakes it saw, and why order, partial matches and
+computed values follow the real data. Claude Code, GitHub Copilot, VS Code, Cursor, Codex, Kiro and Devin load it.
+
+```sh
+claude plugin marketplace add monkilabs/sosie
+claude plugin install sosie@sosie
+```
+
+| Assistant | Add the marketplace |
+| --- | --- |
+| Claude Code | `claude plugin marketplace add monkilabs/sosie`, then `claude plugin install sosie@sosie` |
+| GitHub Copilot | `copilot plugin marketplace add monkilabs/sosie` |
+| Codex | `codex plugin marketplace add monkilabs/sosie` |
+| Cursor | Dashboard → Plugins → Team Marketplaces → Import, with `monkilabs/sosie` |
+
+With `--scope project` on both commands, Claude Code records them in the repository's `.claude/settings.json`, so the
+whole team gets the plugin.
+
+In Claude Code it also hooks into each session:
+
+- **When a session starts**, it tells the agent which Sosies are running and at which addresses. In a project with a
+  `sosie.yml` and no Sosie running, it tells the agent to ask you to start one, and never to ask for the connection
+  string.
+- **When a session ends**, it runs `sosie scan` on the session's transcript in the background. If a real value reached
+  it, the next session tells you the file, the line and the field, and the agent is told not to open it.
+
+The plugin starts no Sosie and holds no credentials. It runs `@sosie/cli` at its own version, the one released with it.
+
 ## sosie scan
 
 Proof, not trust: `sosie scan` searches files and folders for any real value that passed through Sosie.

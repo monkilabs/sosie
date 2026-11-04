@@ -1,0 +1,16 @@
+{
+  "name": "sosie",
+  "owner": {
+    "name": "MonkiLabs"
+  },
+  "metadata": {
+    "description": "Sosie: your AI agent sees a double of your data. Never the real thing."
+  },
+  "plugins": [
+    {
+      "name": "sosie",
+      "source": "./plugins/sosie",
+      "description": "Your AI agent sees a double of your data. Never the real thing. Sosie's MCP server, and a skill that tells the agent how to read your database or API through it."
+    }
+  ]
+}

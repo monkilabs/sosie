@@ -74,7 +74,8 @@ Other MCP clients take the same command in their configuration:
 }
 ```
 
-[MCP and scan](./mcp-and-scan/) lists its tools.
+[MCP and scan](./mcp-and-scan/) lists its tools. The [plugin](./mcp-and-scan/#the-plugin) brings the same server
+to Claude Code, Copilot, Cursor and Codex, with a skill that tells the agent how to read through Sosie.
 
 ## 3. Query by what you saw
 

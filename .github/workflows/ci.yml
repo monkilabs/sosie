@@ -44,3 +44,16 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  plugin:
+    name: The plugin loads in every assistant, and its listings are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      # Agent Plugins 1.0, and Claude Code's files compiled from it.
+      - run: npx -y opencastle@1.12.8 plugin check plugins/sosie
+      # The marketplaces of Claude Code, Copilot, Cursor and Codex.
+      - run: npx -y opencastle@1.12.8 plugin index --check --name sosie --owner MonkiLabs

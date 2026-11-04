@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "sosie": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@sosie/cli@0.1.0",
+        "mcp"
+      ]
+    }
+  }
+}

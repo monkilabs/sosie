@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "sosie",
+  "version": "0.1.0",
+  "description": "Your AI agent sees a double of your data. Never the real thing. Sosie's MCP server, and a skill that tells the agent how to read your database or API through it.",
+  "author": {
+    "name": "MonkiLabs",
+    "url": "https://github.com/monkilabs"
+  },
+  "homepage": "https://monkilabs.github.io/sosie/",
+  "repository": "https://github.com/monkilabs/sosie",
+  "license": "MIT",
+  "keywords": ["postgres", "rest", "graphql", "mcp", "privacy", "fake-data", "anonymization"]
+}
