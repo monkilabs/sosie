@@ -7,8 +7,9 @@
   agent how to read through Sosie. The repository is its marketplace:
   `claude plugin marketplace add monkilabs/sosie`.
 - In Claude Code, the plugin tells the agent which Sosies are running when a
-  session starts, and scans each session's transcript when it ends; the next
-  session reports a real value it found.
+  session starts, and scans each session's transcript when it ends, its
+  subagents' transcripts and long tool results included; the next session
+  reports a real value it found.
 
 ## 0.1.0, 29 October 2026
 

@@ -27,7 +27,9 @@ for (const scan of takeScans()) {
   if (scan.findings?.length) {
     found = true
     const n = scan.findings.length
-    const lines = scan.findings.slice(0, 5).map((f) => `  line ${f.line}, from ${f.field}`)
+    const lines = scan.findings
+      .slice(0, 5)
+      .map((f) => `  ${f.file === scan.transcript ? '' : `${f.file}, `}line ${f.line}, from ${f.field}`)
     if (n > 5) lines.push(`  and ${n - 5} more`)
     user.push(`Sosie found ${n === 1 ? 'a real value' : `${n} real values`} in the transcript of an earlier session, ${scan.transcript}:\n${lines.join('\n')}`)
   } else if (scan.failed) {
@@ -37,7 +39,7 @@ for (const scan of takeScans()) {
 if (user.length) {
   context.push(
     `Tell the developer this first, in your own words, before anything else:\n${user.join('\n')}` +
-      (found ? '\nDo not open that transcript to look: it would bring the real value into this session.' : ''),
+      (found ? '\nDo not open those files to look: it would bring the real value into this session.' : ''),
   )
 }
 
