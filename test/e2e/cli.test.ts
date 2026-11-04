@@ -13,6 +13,7 @@ import { canariesIn } from './canaries.js'
 import { SDL, startGraphql } from './graphql-api.js'
 
 const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url))
+const VERSION: string = JSON.parse(readFileSync(new URL('../../packages/cli/package.json', import.meta.url), 'utf8')).version
 if (!existsSync(CLI)) throw new Error('Build the packages first: npm run build')
 
 const env = (more: Record<string, string | undefined> = {}) => {
@@ -297,7 +298,7 @@ describe('sosie, when something is wrong', () => {
 
   it('explains its commands', () => {
     expect(run(['--help']).stdout).toContain('sosie scan <path>...')
-    expect(run(['--version']).stdout.trim()).toBe('0.1.0')
+    expect(run(['--version']).stdout.trim()).toBe(VERSION)
     expect(run(['serve']).status).toBe(2)
     expect(run(['--port', 'x'], { SOSIE_UPSTREAM: 'postgres://x' }).stderr).toContain('--port takes a whole number from 0 to 65535, not x.')
     // Refused before Sosie connects, as a usage error, not when it comes to listen.
