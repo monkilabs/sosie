@@ -1,11 +1,12 @@
-// `sosie scan` on one transcript, in the background, keeping what it found for the next session to report. It keeps
-// what `sosie scan` prints: the file, the line and the field of a real value, never the value.
+// `sosie scan` on one session's transcript and the files beside it, in the background, keeping what it found for the
+// next session to report. It keeps what `sosie scan` prints: the file, the line and the field of a real value, never
+// the value.
 import { spawnSync } from 'node:child_process'
 import { dirname } from 'node:path'
 import { cli, keep } from './sosie.mjs'
 
-const [transcript, out] = process.argv.slice(2)
-const scan = spawnSync('npx', ['-y', cli(), 'scan', transcript], {
+const [out, transcript, ...beside] = process.argv.slice(2)
+const scan = spawnSync('npx', ['-y', cli(), 'scan', transcript, ...beside], {
   // Not the project's folder: a @sosie/cli in its node_modules would run instead of the one the plugin pins.
   cwd: dirname(out),
   encoding: 'utf8',

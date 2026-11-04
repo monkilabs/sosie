@@ -64,8 +64,9 @@ In Claude Code it also hooks into each session:
 - **When a session starts**, it tells the agent which Sosies are running and at which addresses. In a project with a
   `sosie.yml` and no Sosie running, it tells the agent to ask you to start one, and never to ask for the connection
   string.
-- **When a session ends**, it runs `sosie scan` on the session's transcript in the background. If a real value reached
-  it, the next session tells you the file, the line and the field, and the agent is told not to open it.
+- **When a session ends**, it runs `sosie scan` in the background on the session's transcript, its subagents'
+  transcripts and the long tool results Claude Code keeps beside it. If a real value reached them, the next session
+  tells you the file, the line and the field, and the agent is told not to open them.
 
 The plugin starts no Sosie and holds no credentials. It runs `@sosie/cli` at its own version, the one released with it.
 

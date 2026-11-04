@@ -10,5 +10,8 @@ import { hasStore, input, root, scanFile } from './sosie.mjs'
 const { session_id: session, transcript_path: transcript } = await input()
 const out = scanFile(session ?? Date.now())
 if (transcript && existsSync(transcript) && hasStore() && out) {
-  spawn(process.execPath, [join(root, 'hooks', 'scan.mjs'), transcript, out], { detached: true, stdio: 'ignore' }).unref()
+  // The session's subagent transcripts and its long tool results are kept in a folder beside it, named the same.
+  const beside = transcript.replace(/\.jsonl$/, '')
+  const paths = beside !== transcript && existsSync(beside) ? [transcript, beside] : [transcript]
+  spawn(process.execPath, [join(root, 'hooks', 'scan.mjs'), out, ...paths], { detached: true, stdio: 'ignore' }).unref()
 }

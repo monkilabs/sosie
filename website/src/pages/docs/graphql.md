@@ -26,7 +26,7 @@ Sosie serves GraphQL at the API's own path, by `GET` and `POST`, batches include
 
 ## Which endpoints
 
-An `http(s)` URL with `graphql` in its path is GraphQL's:
+An `http(s)` URL with a `graphql` or `graphql.json` segment in its path is GraphQL's (`/mygraphql` is not):
 
 | Endpoint | Example |
 | --- | --- |

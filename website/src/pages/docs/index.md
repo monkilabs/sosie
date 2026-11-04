@@ -41,8 +41,8 @@ export SOSIE_UPSTREAM_HEADERS="$(cat ~/.config/api.headers)"   # Authorization: 
 npx @sosie/cli
 ```
 
-A URL with `graphql` in its path starts the [GraphQL source](./graphql/); any other `http(s)` URL, the
-[REST source](./rest/).
+A URL with a `graphql` segment in its path (`/graphql`, `/graphql/v1`) starts the [GraphQL source](./graphql/), and so
+does any URL when `SOSIE_GRAPHQL_SCHEMA` is set; any other `http(s)` URL, the [REST source](./rest/).
 
 ## 2. Point your agent at it
 
