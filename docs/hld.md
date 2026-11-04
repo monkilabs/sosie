@@ -105,7 +105,7 @@ flowchart LR
 | GraphQL | Fields | Names each value's field from the schema, through aliases, fragments, interfaces and unions |
 | Plugin | MCP server | `sosie mcp`, at the CLI version released with the plugin |
 | Plugin | Skill | How to read through Sosie: the tools, what a fake means, why a result can look wrong, and never to start Sosie or touch its credentials |
-| Plugin | Hooks, Claude Code | At a session's start, which Sosies run; at its end, `sosie scan` on its transcript, reported at the next start |
+| Plugin | Hooks: Claude Code, Copilot CLI, VS Code | At a session's start, which Sosies run; at its end, or each turn's in VS Code, `sosie scan` on its transcript, reported at the next start |
 
 ## How Sosie grows
 
@@ -133,10 +133,11 @@ VS Code, Cursor, Codex, Kiro and Devin. The repository is its marketplace.
 - **The skill** tells the agent what it would otherwise learn by surprise: every value is a fake, a fake it saw finds
   its record, order and partial matches follow the real data, and Sosie is started by the developer, never by the
   agent.
-- **The hooks**, in Claude Code, close the loop the MVP left to the developer. A session starts knowing which Sosies
-  run, or, in a project with a `sosie.yml` and none running, that it should ask for one. When it ends, `sosie scan`
-  checks its transcript, and the next session reports a real value it found. The MVP's "a hook per assistant comes
-  later" is this, for Claude Code first.
+- **The hooks**, in Claude Code, Copilot CLI and VS Code, close the loop the MVP left to the developer. A session
+  starts knowing which Sosies run, or, in a project with a `sosie.yml` and none running, that it should ask for one.
+  When it ends, `sosie scan` checks its transcript, and the next session reports a real value it found. The MVP's "a
+  hook per assistant comes later" is this. Agent Plugins has no place for hooks, so each assistant reads its own
+  file, and all of them run the same scripts.
 
 The plugin is a client of Sosie like any other. It starts no Sosie and holds no credentials: the connection string is
 typed in the developer's terminal, where the agent cannot read it.
@@ -262,5 +263,6 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
   readable by that machine's user; the threat model says where to run Sosie when
   that matters.
 - **The plugin follows the CLI.** It runs `@sosie/cli` at its own version, so each release moves both, and a test
-  fails until it does. Its hooks lean on Claude Code's: a session-end hook has 1.5 seconds and is not shown, so the
-  scan runs on its own and reports at the next session's start.
+  fails until it does. Its hooks lean on each assistant's own, which differ and change: Claude Code gives a
+  session-end hook 1.5 seconds and shows nothing, Copilot CLI does not say where the transcript is, and VS Code has no
+  session end at all. So the scan runs on its own and reports at the next session's start.

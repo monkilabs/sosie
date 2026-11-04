@@ -165,10 +165,11 @@ imports it under Dashboard → Plugins → Team Marketplaces. With `--scope proj
 on both commands, Claude Code records them in the repository's
 `.claude/settings.json`, for the whole team.
 
-In Claude Code the plugin does two more things. When a session starts, it tells
-the agent which Sosies are running, or, in a project with a `sosie.yml` and none
-running, to ask you to start one. When a session ends, it scans the session's
-transcript, and the next session tells you if a real value reached it.
+In Claude Code, Copilot CLI and VS Code the plugin does two more things. When a
+session starts, it tells the agent which Sosies are running, or, in a project
+with a `sosie.yml` and none running, to ask you to start one. When a session
+ends, or in VS Code after each turn, it scans the session's transcript, and the
+next session tells you if a real value reached it.
 
 The plugin starts no Sosie and holds no credentials: Sosie still starts in your
 own terminal, as above.

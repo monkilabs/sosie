@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The plugin's hooks run in Copilot CLI and VS Code as well as Claude Code:
+  each session starts knowing which Sosies run, and its transcript is scanned
+  when it ends, or in VS Code after each turn. Each finding is reported once.
 - Postgres: binary results and parameters, as asyncpg and pgx always use them
   and JDBC once it prepares a statement. Sosie still reads and fakes text, and
   writes each fake as Postgres would send it, byte for byte; a fake sent back
