@@ -511,6 +511,8 @@ describe('the guard and the credentials', () => {
     expect(name).not.toBe('X-HTTP-Method-Override')
     const asked = api.requests.length
     expect((await sosie.get(`/things?${encodeURIComponent(name)}=DELETE`)).status).toBe(400)
+    // Nor the link as Sosie gave it: its method, PATCH, is a fake too, and turns back into PATCH.
+    expect((await sosie.get(`/things${new URL(next).search}`)).status).toBe(400)
     expect(api.requests.length).toBe(asked)
   })
 

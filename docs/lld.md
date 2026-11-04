@@ -645,7 +645,7 @@ decodes `%2F` and resolves `..` would read another path than Sosie does, one
 outside the base or of another kind. A method override in the query
 (`?_method=DELETE`, `method`, `X-HTTP-Method-Override` and the like, with a
 method that writes), which some frameworks run instead of `GET`, gets `400`,
-as written or as Sosie turns a name it faked back. On
+its name and its method as written or as Sosie turns them back. On
 this machine's own
 address, a request whose `Host` is not `localhost`, a `127.` address or `[::1]`
 gets `403`: a web page that rebinds its own name to this machine cannot read the

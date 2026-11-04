@@ -173,13 +173,15 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const names: string[] = []
     for (const [sentName, value] of incoming.searchParams) {
       const name = wordName(sentName) || known.has(sentName) ? sentName : (scope.lookup(sentName, QUERY_NAME) ?? sentName)
-      // A method override (?_method=DELETE), as sent or as Sosie turns its name back, asks a framework to write: it never leaves Sosie.
-      if (OVERRIDE.test(name) && WRITE.test(value)) {
+      // A number that names no field (limit=10) stays as written; other text is looked up anywhere.
+      const turnedValue = lookup(value, queryField(name, value, rt, { fields, entityFor }, name !== sentName)) ?? value
+      // A method override (?_method=DELETE), its name and its method as sent or as Sosie turns them back, asks a
+      // framework to write: it never leaves Sosie.
+      if (OVERRIDE.test(name) && (WRITE.test(value) || WRITE.test(turnedValue))) {
         return send(res, 400, { error: 'Sosie is read-only: a method override in the query (_method=DELETE) is not sent.' })
       }
       if (name === sentName) names.push(name)
-      // A number that names no field (limit=10) stays as written; other text is looked up anywhere.
-      query.append(name, lookup(value, queryField(name, value, rt, { fields, entityFor }, name !== sentName)) ?? value)
+      query.append(name, turnedValue)
     }
     const target = new URL(`${base.origin}${basePath}/${real.join('/')}`)
     target.search = query.toString()
