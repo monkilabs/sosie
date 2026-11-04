@@ -1,6 +1,6 @@
 /**
  * The contract between the core and a source. A source knows one kind of
- * upstream (Postgres now; REST, GraphQL and other databases later): it
+ * upstream (Postgres, REST, GraphQL; other databases later): it
  * describes the upstream in the neutral schema, serves an endpoint, and hands
  * every value it returns to the core's Faker. The core never sees a protocol.
  */
@@ -106,7 +106,7 @@ export interface SourceOptions {
 }
 
 export interface Source {
-  /** 'postgres' now; 'rest', 'graphql', 'mysql' later. */
+  /** 'postgres', 'rest', 'graphql'; 'mysql' later. */
   readonly kind: string
   /** Whether this source handles this upstream, or this endpoint address; `env` can say so where the URL cannot. */
   matches(url: URL, env?: Record<string, string | undefined>): boolean

@@ -56,7 +56,8 @@ Each object schema is an entity, each property a field. `format: email` and `uri
 `id` is the entity's key, and `userId` shares the values of `User.id`.
 
 **Without a document**, Sosie learns the schema as answers come: a value's field is where it sits, in the entity its
-path names, singular. `/users/87` and `{ "data": [{ "email": … }] }` under `/users` are `user.email`. `sosie.yml` may
+path names, singular: `/users` and `/users/87` are `user`, and `{ "data": [{ "email": … }] }` under `/users` is
+`user.email`. `sosie.yml` may
 name fields not met yet: they warn instead of failing, and apply once met.
 
 ## Faking
@@ -72,8 +73,9 @@ email is the same fake from the database and from the API.
 ## Links
 
 A URL into the API (`next`, `href`, a path under the base) points at Sosie instead, with nothing real in it, so
-following it reads the record it names. Path words that are the API's own (`users`, `orders`) stay as written; values
-(ids, a slug) are faked as the id of what they follow.
+following it reads the record it names. Path words that are the API's own (`users`, `orders`) stay as written once
+Sosie knows them as such: the document declares them, or a client has asked for the list. Until then they are faked,
+and still lead back. Values (ids, a slug) are faked as the id of what they follow.
 
 ## Query by what you saw
 
@@ -90,8 +92,10 @@ reads it through its dev server's proxy.
 
 ## Limits
 
-- **JSON only.** Images, files and HTML from the API are not passed on, nor are response headers other than the content
-  type, `Link` among them: pagination works through the body.
+- **JSON only.** Images, files and HTML from the API are not passed on, nor are its response headers, `Link` among
+  them: pagination works through the body. Sosie answers `application/json`.
+- **Keys in Pascal or kebab case** (`UserName`, `x-rate`), as .NET APIs often write them, are not taken for
+  structure: without a document they are faked. Give such an API its document.
 - **Each request** has a 30 s timeout and a 20 MB body cap.
 - **Ids across sources.** An API's ids and a database's share fakes only when their names meet (a GraphQL type and a
   Prisma model both `User`, as `User.id`).

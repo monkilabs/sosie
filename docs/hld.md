@@ -4,7 +4,8 @@ Sosie is a read-only endpoint in front of a data source that fakes every value
 on the way out. An AI agent, the developer's app and their tools connect to it
 as they would to the real source, and get the real shape with fake contents.
 Postgres was its first source, the [MVP](mvp.md); the team's own REST and
-GraphQL APIs came next, and v0.1, the first release, has all three. More are packages behind the same interface. The
+GraphQL APIs came next, and v0.1, the first release, has all three. More are packages behind the same interface. A
+[plugin](#the-plugin) brings Sosie's MCP server, and how to read through it, to the agent's assistant. The
 [low-level design](lld.md) has the details.
 
 ## Goals
@@ -36,7 +37,8 @@ that deliberately hunts for secrets on the machine Sosie runs on (see
    (or typed at a hidden prompt), they run `npx @sosie/cli`.
 2. Sosie prints one local address. The agent, the app and `psql` use it.
 3. Agents that prefer MCP get `npx @sosie/cli mcp`, which talks to the same
-   endpoint.
+   endpoint. The plugin installs it in the assistant, with a skill that says how to read through Sosie, and, in
+   Claude Code, tells each session which Sosies run.
 4. When it matters, `npx @sosie/cli scan` checks transcripts and logs for any real
    value that passed through.
 5. If a fake breaks the app's logic (a status that must be a real one), the
@@ -97,6 +99,9 @@ flowchart LR
 | GraphQL | Endpoint and guard | The API's path on a local HTTP address; queries only, checked with their variables against the schema |
 | GraphQL | Introspection | Answered from the schema Sosie holds; it never reaches the API |
 | GraphQL | Fields | Names each value's field from the schema, through aliases, fragments, interfaces and unions |
+| Plugin | MCP server | `sosie mcp`, at the CLI version released with the plugin |
+| Plugin | Skill | How to read through Sosie: the tools, what a fake means, why a result can look wrong, and never to start Sosie or touch its credentials |
+| Plugin | Hooks, Claude Code | At a session's start, which Sosies run; at its end, `sosie scan` on its transcript, reported at the next start |
 
 ## How Sosie grows
 
@@ -113,6 +118,23 @@ same for every source.
 
 The core is tested through an in-memory test source, without Postgres, so
 nothing in it can come to depend on one source.
+
+## The plugin
+
+A source widens what Sosie can read; the plugin widens where agents find it. It is Sosie's MCP server and a skill,
+in the open [Agent Plugins](https://agent-plugins.org) format, so one install serves Claude Code, GitHub Copilot,
+VS Code, Cursor, Codex, Kiro and Devin. The repository is its marketplace.
+
+- **The skill** tells the agent what it would otherwise learn by surprise: every value is a fake, a fake it saw finds
+  its record, order and partial matches follow the real data, and Sosie is started by the developer, never by the
+  agent.
+- **The hooks**, in Claude Code, close the loop the MVP left to the developer. A session starts knowing which Sosies
+  run, or, in a project with a `sosie.yml` and none running, that it should ask for one. When it ends, `sosie scan`
+  checks its transcript, and the next session reports a real value it found. The MVP's "a hook per assistant comes
+  later" is this, for Claude Code first.
+
+The plugin is a client of Sosie like any other. It starts no Sosie and holds no credentials: the connection string is
+typed in the developer's terminal, where the agent cannot read it.
 
 ## A query, end to end
 
@@ -158,7 +180,8 @@ substituted, links an API returns, and transcripts kept afterwards.
 - **An agent hunting for secrets on the same machine.** An agent runs as the
   developer's user, so it can read files and processes that user can. Run
   Sosie on another host, with the credentials only there, and give the agent
-  only Sosie's address.
+  only Sosie's address. The plugin's skill tells the agent never to look for
+  them; that is advice a working agent follows, not a wall.
 - **Inference through filters.** A query filters on real data, so a careful
   sequence of queries can answer yes-or-no questions about it.
 - **Decoding by comparison.** A value a query computes is faked consistently,
@@ -210,6 +233,8 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
 | Fake, not redact | Code needs valid values to run; blanks and tokens break it | Redaction gateways between an agent and a model provider see text, not columns |
 | TypeScript 7 on Node 26, run with `npx` | One command, no install; the language of most agent tooling. Node 26 is the LTS line from 28 October 2026; Node 24 is still allowed | A Go binary installs well but loses `npx` |
 | A local mapping store | Consistent fakes across sessions, and queries by a fake | Format-preserving encryption needs no store but cannot give realistic emails or names |
+| One plugin in the open Agent Plugins format, from this repository's own marketplace | One install gives the agent the tools and how to use them, in every assistant that reads the format; the CLI stays the one thing to run | `claude mcp add` alone: the tools without the skill, one assistant at a time. A plugin per assistant: the same files, kept in step by hand |
+| The plugin starts no Sosie | The connection string stays in the developer's terminal, out of the agent's reach | An MCP server that starts Sosie when asked: the agent's own process would hold the credentials |
 
 ## Risks
 
@@ -225,3 +250,6 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
 - **The store holds sealed real values** on the machine Sosie runs on. It is
   readable by that machine's user; the threat model says where to run Sosie when
   that matters.
+- **The plugin follows the CLI.** It runs `@sosie/cli` at its own version, so each release moves both, and a test
+  fails until it does. Its hooks lean on Claude Code's: a session-end hook has 1.5 seconds and is not shown, so the
+  scan runs on its own and reports at the next session's start.
