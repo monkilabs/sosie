@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Postgres: binary results and parameters, as asyncpg and pgx always use them
+  and JDBC once it prepares a statement. Sosie still reads and fakes text, and
+  writes each fake as Postgres would send it, byte for byte; a fake sent back
+  in binary turns back like one sent as text. A type it cannot write from its
+  text (`regclass`, composites, ranges) is refused in binary, naming the column.
+- Postgres: `set_config` with its value written in the query is checked like
+  `SET`, and one given as a parameter may set any setting but those Sosie
+  checks, as asyncpg does before it reads the catalog. A value from a row is
+  still refused.
+
 ## 0.1.1, 4 November 2026
 
 Sosie as a plugin for the agent's assistant, and the fixes a review of 0.1.0

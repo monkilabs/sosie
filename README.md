@@ -90,7 +90,8 @@ Options: `--port` (7674, or the next free one), `--host` (127.0.0.1), `--rules`
 one store, so a person is the same fake in each, and `sosie mcp` serves them
 all.
 
-Tested with `psql`, `node-postgres`, `postgres.js`, Drizzle and Prisma.
+Tested with `psql`, `node-postgres`, `postgres.js`, Drizzle and Prisma, and,
+in binary, asyncpg and JDBC.
 
 ### In front of your API
 
@@ -162,8 +163,10 @@ own terminal, as above.
   unchanged.
 - **Partial matches do not find fakes.** `LIKE '%van%'` filters the real
   values, so a piece of a fake finds nothing.
-- **Results are text.** Drivers that ask for binary results get an error that
-  says so.
+- **Binary results,** as asyncpg, pgx and JDBC ask for them, are the fakes
+  written as Postgres would send them. A type Sosie cannot write that way
+  (`regclass`, composites, ranges) is refused in binary, with an error that
+  names it.
 
 ## What Sosie is not
 

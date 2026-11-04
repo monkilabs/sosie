@@ -1,6 +1,7 @@
 import type { Entity, Field, FieldType, Schema } from '@sosie/core'
 import type pg from 'pg'
 import { parseSync } from 'pgsql-parser'
+import type { TypeSend } from './binary.js'
 
 /** What the Postgres source knows about the upstream, beyond the neutral schema. */
 export interface Catalog {
@@ -11,6 +12,8 @@ export interface Catalog {
   relations: Map<string, { entity: Entity; byName: Map<string, Field> }>
   /** Labels of each enum type, by type OID: for computed values of an enum type. */
   enums: Map<number, string[]>
+  /** How each type is sent in binary, by OID: for clients that ask for binary results or send binary parameters. */
+  sends: Map<number, TypeSend>
   /** Names of functions, operators and types outside the system schemas: their code may read rows the guard cannot see. */
   functions: Set<string>
   operators: Set<string>
@@ -109,6 +112,10 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
   const system = await client.query<{ relname: string }>(`
     SELECT DISTINCT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname IN ('pg_catalog', 'information_schema')`)
+  // Every type, the system's too: a result column of any of them may be asked for in binary.
+  const sends = await client.query<TypeSend & { oid: number }>(
+    `SELECT oid::int AS oid, typname::text AS name, typsend::text AS send, typelem::int AS elem, typbasetype::int AS base FROM pg_type`,
+  )
   const types = await client.query<{ typname: string }>(`
     SELECT DISTINCT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE ${SYSTEM}`)
   const role = await client.query<{ admin: boolean }>(
@@ -124,6 +131,7 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     columns: columns.rows,
     constraints: constraints.rows,
     enums: new Map(enums.rows.map((e) => [e.oid, e.labels])),
+    sends: sends.rows,
     views: views.rows,
     functions: functions.rows.map((f) => f.proname),
     operators: operators.rows.map((o) => o.oprname),
@@ -140,6 +148,8 @@ export interface CatalogRows {
   columns: ColumnRow[]
   constraints: ConstraintRow[]
   enums: Map<number, string[]>
+  /** Every type's send function, element and base type; none in tests that build a catalog by hand. */
+  sends?: (TypeSend & { oid: number })[]
   views: ViewRow[]
   functions: string[]
   operators: string[]
@@ -162,6 +172,7 @@ export function buildCatalog(rows: CatalogRows): Catalog {
     columns: new Map(),
     relations: new Map(),
     enums: rows.enums,
+    sends: new Map((rows.sends ?? []).map((t) => [t.oid, t])),
     functions: new Set(rows.functions),
     operators: new Set(rows.operators),
     types: new Set(rows.types),

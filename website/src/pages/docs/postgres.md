@@ -42,11 +42,13 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO sosie_reader
 ## Clients
 
 Tested with `psql` (including `\d`), `node-postgres`, `postgres.js`, Drizzle over both, and Prisma 7 through its
-node-postgres adapter. The simple and extended query protocols work, with results in text format, as do cursors,
-prepared statements and cancel requests.
+node-postgres adapter, and, in binary, with asyncpg and JDBC. The simple and extended query protocols work, as do
+cursors, prepared statements and cancel requests.
 
-Not yet: drivers that ask for **binary results** (asyncpg, pgx, JDBC after its prepare threshold) get an error that says
-so. `COPY` and function calls are refused.
+**Binary results and parameters**, which asyncpg and pgx always use and JDBC once it prepares a statement, work: Sosie
+writes each fake as Postgres would send it, and reads a fake sent in binary back like one sent as text. A column of a
+type it cannot write from text, such as `regclass`, a composite value or a range, is refused in binary with an error
+that names the column; ask for it in text, or cast it. `COPY` and function calls are refused.
 
 ## What the guard allows
 
@@ -59,7 +61,8 @@ Each statement is parsed before it goes anywhere.
 - **Refused catalogs:** the ones that hold real values, queries with their values, credentials or where the database
   is: `pg_stats`, `pg_statistic`, `pg_stat_activity`, `pg_stat_statements`, `pg_settings`, `pg_authid` and the like.
 - **Refused settings and functions:** those that say where the database is (`inet_server_addr`, `SHOW port`), read
-  files, run SQL given as text, or copy a value into a setting (`set_config`).
+  files, run SQL given as text, or copy a value from your rows into a setting (`set_config` with anything but a value
+  written in the query or a parameter).
 - **Settings that keep the session safe** cannot be changed: read-only, the role, and a statement timeout above the one
   Sosie started with.
 

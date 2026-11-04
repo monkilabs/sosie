@@ -132,5 +132,5 @@ Then the command is just `sosie`: `sosie`, `sosie mcp` and `sosie scan`.
 - **Values a query computes are faked by type.** `length(email)` or `max(id)` are not the length or maximum of the
   fakes. `count(…)` passes unchanged.
 - **Partial matches do not find fakes.** `LIKE '%van%'` filters the real values, so a piece of a fake finds nothing.
-- **Results are text.** Drivers that ask for binary results (asyncpg, pgx, JDBC after its prepare threshold) get an
-  error that says so.
+- **Binary results** (asyncpg, pgx, JDBC) are the fakes written as Postgres would send them. A type Sosie cannot write
+  that way (`regclass`, composites, ranges) is refused in binary, with an error that names it.
