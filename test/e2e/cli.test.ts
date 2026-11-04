@@ -57,8 +57,8 @@ function stop(child: ChildProcess, signal: NodeJS.Signals = 'SIGINT'): Promise<n
   })
 }
 
-async function mcpClient(home: string) {
-  const transport = new StdioClientTransport({ command: process.execPath, args: [CLI, 'mcp'], env: env({ SOSIE_HOME: home }), stderr: 'pipe' })
+async function mcpClient(home: string, args = ['mcp']) {
+  const transport = new StdioClientTransport({ command: process.execPath, args: [CLI, ...args], env: env({ SOSIE_HOME: home }), stderr: 'pipe' })
   const client = new Client({ name: 'test', version: '0.0.0' })
   await client.connect(transport)
   return client
@@ -83,7 +83,10 @@ describe('sosie', () => {
     expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 5 tables, 2 views/)
     expect(out).toContain('✓ Every value is faked')
     expect(out).toMatch(/Your agent, app and psql:\s+postgres:\/\/localhost:\d+\/sosie_test_\w+/)
-    expect(out).toContain('claude mcp add sosie -- npx @sosie/cli mcp')
+    // The plugin for Claude Code, from this repository's marketplace; the bare server for any other client.
+    expect(out).toContain('claude plugin marketplace add monkilabs/sosie')
+    expect(out).toContain('claude plugin install sosie@sosie')
+    expect(out).toContain('Any MCP client:            npx @sosie/cli mcp')
     expect(out).not.toContain('reader')
     const running = readFileSync(join(home, 'running', `${sosie.child.pid}.json`), 'utf8')
     expect(running).not.toContain('reader')
@@ -113,6 +116,10 @@ describe('sosie', () => {
     transcript.push(text(result))
     const several = JSON.parse(text(await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT 1 AS a; SELECT 2 AS b' } })))
     expect(several.results.map((r: { rows: unknown[] }) => r.rows)).toEqual([[{ a: 1 }], [{ b: 2 }]])
+    // A flag before the command, as a client's configuration may write it, still serves MCP and stays.
+    const flagged = await mcpClient(home, ['--rules', 'sosie.yml', 'mcp'])
+    expect((await flagged.listTools()).tools.map((t) => t.name)).toContain('describe')
+    await flagged.close()
     const refused = await mcp.callTool({ name: 'query', arguments: { sql: 'DELETE FROM users' } })
     expect(refused.isError).toBe(true)
     expect(text(refused)).toBe('This statement changes data. Sosie is read-only.')
@@ -157,8 +164,14 @@ describe('sosie, in front of an API', () => {
     expect(out).not.toContain(TOKEN)
     const users = (await (await fetch(`${sosie.address}/users`)).json()) as { data: unknown[] }
     expect(users.data).toHaveLength(3)
+    // The running file is written again as the API's answers show fields, so describe lists them.
+    const entry = join(home, 'running', `${sosie.child.pid}.json`)
+    for (let i = 0; i < 40 && !readFileSync(entry, 'utf8').includes('user.email'); i++) await new Promise((r) => setTimeout(r, 50))
     const mcp = await mcpClient(home)
     expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'graphql', 'request'])
+    const described = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
+    expect(described.entities.map((e: { entity: string }) => e.entity)).toEqual(['user'])
+    expect(described.entities[0].fields.map((f: { field: string }) => f.field)).toEqual(expect.arrayContaining(['id', 'email', 'name']))
     const result = JSON.parse(text(await mcp.callTool({ name: 'request', arguments: { path: '/users' } })))
     expect(result.body.data).toHaveLength(3)
     expect(canariesIn(JSON.stringify([users, result]))).toEqual([])
@@ -286,7 +299,11 @@ describe('sosie, when something is wrong', () => {
     expect(run(['--help']).stdout).toContain('sosie scan <path>...')
     expect(run(['--version']).stdout.trim()).toBe('0.1.0')
     expect(run(['serve']).status).toBe(2)
-    expect(run(['--port', 'x'], { SOSIE_UPSTREAM: 'postgres://x' }).stderr).toContain('--port takes a whole number from 0, not x.')
+    expect(run(['--port', 'x'], { SOSIE_UPSTREAM: 'postgres://x' }).stderr).toContain('--port takes a whole number from 0 to 65535, not x.')
+    // Refused before Sosie connects, as a usage error, not when it comes to listen.
+    const high = run(['--port', '70000'], { SOSIE_UPSTREAM: 'postgres://x' })
+    expect(high.status).toBe(2)
+    expect(high.stderr).toContain('--port takes a whole number from 0 to 65535, not 70000.')
     expect(run(['--max-rows', '0'], { SOSIE_UPSTREAM: 'postgres://x' }).stderr).toContain('--max-rows takes a whole number from 1, not 0.')
     expect(run(['scan']).status).toBe(2)
     const empty = run(['scan', '.'], { SOSIE_HOME: mkdtempSync(join(tmpdir(), 'sosie-empty-')) })

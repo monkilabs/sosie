@@ -18,6 +18,7 @@ import {
   storeDirs,
   writeRunning,
   type Rules,
+  type Schema,
 } from '@sosie/core'
 import { loopback } from './listen.js'
 import { hiddenPrompt } from './prompt.js'
@@ -93,7 +94,7 @@ async function main(argv: string[]): Promise<void> {
   if (command === 'scan') return scanCommand(rest)
   if (command !== undefined) throw new Exit(2, `Unknown command: ${command}\n\n${USAGE}`)
   return start({
-    port: number(values.port, DEFAULT_PORT, '--port'),
+    port: number(values.port, DEFAULT_PORT, '--port', 0, 65_535),
     portChosen: values.port !== undefined,
     host: values.host ?? '127.0.0.1',
     rules: values.rules,
@@ -101,10 +102,13 @@ async function main(argv: string[]): Promise<void> {
   })
 }
 
-function number(value: string | undefined, fallback: number, name: string, min = 0): number {
+function number(value: string | undefined, fallback: number, name: string, min = 0, max = Number.MAX_SAFE_INTEGER): number {
   if (value === undefined) return fallback
   const n = Number(value)
-  if (!Number.isInteger(n) || n < min) throw new Exit(2, fail(`${name} takes a whole number from ${min}, not ${value}.`))
+  if (!Number.isInteger(n) || n < min || n > max) {
+    const range = max === Number.MAX_SAFE_INTEGER ? `from ${min}` : `from ${min} to ${max}`
+    throw new Exit(2, fail(`${name} takes a whole number ${range}, not ${value}.`))
+  }
   return n
 }
 
@@ -150,10 +154,27 @@ async function start(options: {
   const home = sosieHome()
   const store = Store.open(storeDir(home))
   const faker = createFaker({ schema: connection.schema, rules, store })
+  // What sosie mcp reads: written once the endpoint listens, and again as a source that learns its fields meets them.
+  const startedAt = Date.now()
+  let stopping = false
+  let address = ''
+  let grown: Schema | undefined
+  let rewrite: NodeJS.Timeout | undefined
+  const entry = (schema: Schema) => {
+    const passing = new Set([...rules.pass, ...schema.entities.flatMap((e) => e.fields.filter((f) => faker.passes(f)).map((f) => f.id))])
+    writeRunning(home, { kind: source.kind, address, schema, passing: [...passing] }, process.pid, startedAt)
+  }
+  const learned = (schema: Schema) => {
+    grown = schema
+    rewrite ??= setTimeout(() => {
+      rewrite = undefined
+      if (!stopping && grown) entry(grown)
+    }, 200)
+  }
   let endpoint
   for (let port = options.port; !endpoint; port++) {
     try {
-      endpoint = await connection.serve({ host: options.host, port }, faker)
+      endpoint = await connection.serve({ host: options.host, port }, faker, connection.learns ? learned : undefined)
     } catch (error) {
       const busy = (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
       if (busy && !options.portChosen && port < options.port + PORTS_TO_TRY - 1) continue
@@ -167,6 +188,8 @@ async function start(options: {
   // the file is written and the address printed, so a client that starts on the address can stop it too.
   const stopped = new Promise<void>((done) => {
     const stop = async () => {
+      stopping = true
+      clearTimeout(rewrite)
       clearRunning(home)
       await endpoint.close()
       await connection.close()
@@ -177,7 +200,8 @@ async function start(options: {
     process.once('SIGTERM', stop)
     process.once('SIGHUP', stop)
   })
-  writeRunning(home, { kind: source.kind, address: endpoint.address, schema: connection.schema, passing: [...rules.pass] })
+  address = endpoint.address
+  entry(connection.schema)
 
   const passing = rules.pass.size
   const lines = [
@@ -191,7 +215,9 @@ async function start(options: {
       : [warn(`Listening on ${options.host}, with no password: anyone who can reach it can query the fakes and filter on the real values.`)]),
     '',
     `  Your agent, app and ${(connection.client ?? 'tools') + ':'}`.padEnd(29) + endpoint.address,
-    `  Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp`,
+    `  Claude Code:               claude plugin marketplace add monkilabs/sosie`,
+    `                             claude plugin install sosie@sosie`,
+    `  Any MCP client:            npx @sosie/cli mcp`,
     '',
   ]
   process.stdout.write(lines.join('\n') + '\n')
@@ -223,7 +249,11 @@ async function readUpstream(): Promise<URL> {
 
 /* sosie mcp */
 
+/** Set once the MCP server serves: it runs on stdio until its client closes, so main's end is not the process's. */
+let serving = false
+
 async function mcp(): Promise<void> {
+  serving = true
   const home = sosieHome()
   await serveMcp({
     version: VERSION,
@@ -259,7 +289,8 @@ async function scanCommand(paths: string[]): Promise<void> {
 
 main(process.argv.slice(2)).then(
   () => {
-    if (process.argv[2] !== 'mcp') process.exit(0)
+    // By the command parsed, not by the first argument: `sosie --rules x mcp` serves MCP too.
+    if (!serving) process.exit(0)
   },
   (error) => {
     if (error instanceof Exit) {

@@ -18,8 +18,9 @@ the hostnames stay on the developer's side. That is the point of it: keep it tha
   for REST (a `GET` path, or a link Sosie returned) and `graphql` for GraphQL (a query and its variables). When several
   Sosies of a kind run, pass the `address` that `describe` lists. Use the tool of the Sosie's kind: `query` reaches
   only a Postgres Sosie.
-- **A REST Sosie without an OpenAPI document** learns its fields from the API's answers, so `describe` lists no
-  entities for it. `request` the paths the API serves, such as `/users`, and read the fields from what comes back.
+- **A REST Sosie without an OpenAPI document** learns its fields from the API's answers, so `describe` lists only
+  what it has met so far, and may list nothing. `request` the paths the API serves, such as `/users`, and read the
+  fields from what comes back.
 - **Its address**, for `psql`, `curl`, the app and its tests: the one Sosie printed when it started, on 127.0.0.1 from
   port 7674 up, such as `postgres://localhost:7674/app`. Point code at it as it would point at the real thing.
 

@@ -26,7 +26,9 @@ npx @sosie/cli
   ✓ Every value is faked
 
   Your agent, app and psql:  postgres://localhost:7674/app
-  Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp
+  Claude Code:               claude plugin marketplace add monkilabs/sosie
+                             claude plugin install sosie@sosie
+  Any MCP client:            npx @sosie/cli mcp
 ```
 
 Without `SOSIE_UPSTREAM`, Sosie asks for the connection string at a hidden prompt. It is never an argument:
@@ -58,13 +60,15 @@ $ psql postgres://localhost:7674/app -c 'SELECT u.full_name, o.status, o.total F
  Cristian Kuhlman | shipped   | 8274.94
 ```
 
-Agents that prefer MCP get Sosie's own server, which talks to the running Sosie and never to your database:
+Agents that prefer MCP get Sosie's own server, which talks to the running Sosie and never to your database. In Claude
+Code, the [plugin](./mcp-and-scan/#the-plugin) brings it with a skill that tells the agent how to read through Sosie:
 
 ```sh
-claude mcp add sosie -- npx @sosie/cli mcp
+claude plugin marketplace add monkilabs/sosie
+claude plugin install sosie@sosie
 ```
 
-Other MCP clients take the same command in their configuration:
+Copilot, Cursor and Codex add the same marketplace. Any other MCP client takes the server in its configuration:
 
 ```json
 {
@@ -74,8 +78,7 @@ Other MCP clients take the same command in their configuration:
 }
 ```
 
-[MCP and scan](./mcp-and-scan/) lists its tools. The [plugin](./mcp-and-scan/#the-plugin) brings the same server
-to Claude Code, Copilot, Cursor and Codex, with a skill that tells the agent how to read through Sosie.
+[MCP and scan](./mcp-and-scan/) lists its tools.
 
 ## 3. Query by what you saw
 

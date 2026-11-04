@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Running } from './source.js'
 
@@ -9,9 +9,13 @@ import type { Running } from './source.js'
  */
 const DIR = 'running'
 
-export function writeRunning(home: string, running: Running, pid = process.pid): void {
+/** Write this Sosie's entry; written again as its schema grows, with the time it started, so the newest stays the newest. */
+export function writeRunning(home: string, running: Running, pid = process.pid, startedAt = Date.now()): void {
   mkdirSync(join(home, DIR), { recursive: true, mode: 0o700 })
-  writeFileSync(join(home, DIR, `${pid}.json`), JSON.stringify({ ...running, pid, startedAt: Date.now() }, null, 2), { mode: 0o600 })
+  // Whole or not at all: sosie mcp may read it while it is written again.
+  const file = join(home, DIR, `${pid}.json`)
+  writeFileSync(`${file}.draft`, JSON.stringify({ ...running, pid, startedAt }, null, 2), { mode: 0o600 })
+  renameSync(`${file}.draft`, file)
 }
 
 /** Every Sosie running on this machine, the newest first. Throws a message for the agent when none is. */

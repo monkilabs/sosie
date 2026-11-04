@@ -8,7 +8,8 @@ lead: An MCP server for agents that prefer tools to psql, and a scan that checks
 ## sosie mcp
 
 An MCP server over stdio. It talks to the Sosies running on this machine, never to your database or API, so the MCP
-process holds no credentials and no real values.
+process holds no credentials and no real values. In Claude Code, [the plugin](#the-plugin) adds it, with a skill;
+without the skill:
 
 ```sh
 claude mcp add sosie -- npx @sosie/cli mcp

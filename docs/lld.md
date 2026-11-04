@@ -155,8 +155,8 @@ export interface Connection {
   readonly learns?: boolean
   /** The tool a developer would point at the address, for the terminal: 'psql', 'curl'. */
   readonly client?: string
-  /** Start the endpoint clients use. Every value it returns goes through the Faker. */
-  serve(listen: { host: string; port: number }, faker: Faker): Promise<Endpoint>
+  /** Start the endpoint clients use. Every value it returns goes through the Faker. One that `learns` tells `learned` its schema as it grows. */
+  serve(listen: { host: string; port: number }, faker: Faker, learned?: (schema: Schema) => void): Promise<Endpoint>
   close(): Promise<void>
 }
 
@@ -243,13 +243,15 @@ change between minor versions.
 | `sosie scan <path>…` | Search files and folders for real values; exit 1 if one is found |
 
 `--help` (`-h`) and `--version` (`-v`) for each. Flags for `sosie`: `--port` (7674; without it, a Sosie whose port is taken tries
-the next nine, so a second Sosie, for another upstream, just starts; `0` lets the system pick), `--host`
+the next nine, so a second Sosie, for another upstream, just starts; `0` lets the system pick; at most 65535), `--host`
 (127.0.0.1), `--rules` (`./sosie.yml` when present), `--max-rows` (1000, at
 least 1). A `--host` other than this
 machine is allowed, for running Sosie on a host of its own, with a warning:
 the endpoint has no password, so anyone who can reach it can query the fakes. Exit codes: 0, 1 for a failure (cannot
 connect, a problem in `sosie.yml`, a port in use, a real value found), 2 for a usage error: an unknown flag or
-scheme, a `--rules` file that is not there, and a `scan` with nothing to scan or no store to compare with.
+scheme, a flag's number out of its range, a `--rules` file that is not there, and a `scan` with nothing to scan or no
+store to compare with. A usage error stops Sosie before it connects. The command is the first word that is no flag's
+value, so `sosie --rules x mcp` serves MCP.
 
 The connection string is never an argument: arguments show in shell history and
 in the process list, where an agent can read them. Without a terminal to type
@@ -262,13 +264,17 @@ it in, `sosie` says to set `SOSIE_UPSTREAM`.
   ! The login can write to 12 tables. Sosie's session is read-only, but a read-only login is safer.
 
   Your agent, app and psql:  postgres://localhost:7674/app
-  Claude Code:               claude mcp add sosie -- npx @sosie/cli mcp
+  Claude Code:               claude plugin marketplace add monkilabs/sosie
+                             claude plugin install sosie@sosie
+  Any MCP client:            npx @sosie/cli mcp
 ```
 
 Each `sosie` writes `$SOSIE_HOME/running/<pid>.json` (default `~/.sosie`) for
-`sosie mcp` and the plugin's hooks, once, at start-up: the local address, the source kind, the neutral schema, the
-fields that pass, its pid and when it started; the newest is the one a tool uses without an `address`. Nothing real:
-no upstream, no credentials, no values. The folder is 0700 and the file 0600. It is
+`sosie mcp` and the plugin's hooks, at start-up, and again, at most every 200 ms, as a source that learns its fields
+meets them: the local address, the source kind, the neutral schema, the
+fields that pass, its pid and when it started; the newest is the one a tool uses without an `address`, and an entry
+written again keeps when its Sosie started. Each is written to a draft and renamed into place, so it is read whole.
+Nothing real: no upstream, no credentials, no values. The folder is 0700 and the file 0600. It is
 removed on Ctrl+C, a kill, or the terminal closing, and `sosie mcp` skips, and
 removes, the entry of a process that is gone. A Sosie stopped by `kill -9`
 leaves its entry, and if another process takes its pid before `sosie mcp`
@@ -462,8 +468,11 @@ lists it, for when several Sosies of a kind run; without it, the newest.
 | `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list, within 50 s |
 
 When Sosie is not running, every tool says so, and how to start it. A tool for a kind that is not running says which
-kinds are. Every tool is marked read-only. A REST Sosie without a document learns its fields from the answers, after
-its entry under `running/` is written, so `describe` lists none of them: an agent reads such an API by its paths.
+kinds are. Every tool is marked read-only. A REST Sosie without a document learns its fields from the answers, and
+writes its entry again as it does: `describe` lists each entity a collection names that the API answered with a list,
+with the fields met in it so far. An entity named after another word a client typed (a tenant's slug in
+`/jones/profile`) is not listed: such a word is never shown to another request. Until the agent has listed a
+collection, such an API is read by its paths.
 
 ## The plugin
 
@@ -922,7 +931,8 @@ but never a bare number, is looked up anywhere too. A query parameter is looked
 up in the field it names (`?email=` in `user.email`, `?userId=` in `user.id`,
 `?role=` by the document's enum, `?active=false` as the boolean it shows);
 other text anywhere; a number that names no field (`limit=10`, `page=2`) stays
-as written. A value compared with a field that passes is real already, and
+as written. A query name links show as it is stays; any other that is a name Sosie faked for a link turns back into
+the API's, a word faked into another word (`?jdoe=` as `?zleu=`) included. A value compared with a field that passes is real already, and
 stays as written, in a path too: looked up anywhere, a fake of another field
 would turn into that field's real value, which the passing field would show.
 
@@ -1107,7 +1117,7 @@ uses, count; only the variables it declares are sent.
   API's to guard: Sosie sends every query on, as REST sends every `GET`.
 - A variable sent as a JSON number beyond 2^53 is read as JavaScript reads it,
   rounded: a 64-bit id goes as a string (`"id": "4809558151065630052"`), or
-  written in the query as an argument. As a variable's default it is rounded too (an open item).
+  written in the query, as an argument or as a variable's default, whose digits go as written.
 - `@defer` and `@stream` are not read: an API that answers with `multipart/mixed` gets a `502`.
 - A batch answers `200`, whatever each operation's status.
 
@@ -1190,13 +1200,7 @@ domains make a person's email the same fake from the database and from the API.
   migrations write, and `db pull` reads the catalogs, which pass.
 - Postgres types without a neutral type come back `NULL`: `interval`, `xml`, `bit`, `tsvector`, ranges, and a domain
   over an enum, an array or another domain.
-- REST: a link's query name that looks like a word (`?jdoe=1`) is faked into another word, which does not turn back
-  when the link is followed.
 - REST: a collection named in kebab case (`/line-items`) is never learned as the API's word, so links fake it.
-- REST: `describe` shows none of the fields a Sosie without a document learns, since its entry under `running/` is
-  written once, at start-up.
-- GraphQL: a 64-bit id as a variable's default is rounded, as JavaScript reads it.
 - GraphQL: `Sosie is stopping.` is tagged `SOSIE_TOO_COSTLY`, and an `operationName` that names no operation is
   answered as if the document had several.
 - The statement timeout is 30 s, with no flag to change it.
-- `--port` above 65535 fails only when Sosie listens, after it has connected, and exits 1 rather than 2.

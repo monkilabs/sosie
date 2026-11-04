@@ -697,7 +697,7 @@ kbd {
   font-weight: 700;
   font-size: 0.85rem;
 }
-.cta__step code {
+.cta__step > code {
   font-size: 0.88rem;
   overflow-x: auto;
   white-space: nowrap;
@@ -706,6 +706,9 @@ kbd {
   grid-column: 2;
   color: var(--text-3);
   font-size: 0.85rem;
+}
+.cta__step span code {
+  overflow-wrap: anywhere;
 }
 
 .aside {

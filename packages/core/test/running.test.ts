@@ -31,6 +31,20 @@ describe('the running Sosies', () => {
     expect(existsSync(file)).toBe(false)
   })
 
+  it('is written again as a schema grows, whole, and stays as old as the Sosie that wrote it', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'sosie-running-'))
+    const startedAt = Date.now()
+    writeRunning(home, entry('http://localhost:7674/v1'), process.pid, startedAt)
+    await new Promise((r) => setTimeout(r, 5))
+    writeRunning(home, entry('http://localhost:7675/v1'), process.ppid)
+    const grown: Running = { ...entry('http://localhost:7674/v1'), schema: { entities: [{ id: 'user', name: 'user', fields: [] }] } }
+    writeRunning(home, grown, process.pid, startedAt)
+    // The second Sosie is still the newest: the first one's entry, written again, kept when it started.
+    expect(readRunning(home).map((r) => r.address)).toEqual(['http://localhost:7675/v1', 'http://localhost:7674/v1'])
+    expect(readRunning(home)[1]!.schema.entities.map((e) => e.id)).toEqual(['user'])
+    expect(readdirSync(join(home, 'running')).filter((f) => f.endsWith('.draft'))).toEqual([])
+  })
+
   it('says how to start Sosie when none runs', () => {
     expect(() => readRunning(mkdtempSync(join(tmpdir(), 'sosie-running-')))).toThrow(/^Sosie is not running\./)
   })

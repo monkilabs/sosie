@@ -74,7 +74,16 @@ export const rest: Source = {
       warnings,
       learns: !doc,
       client: 'curl',
-      serve: (listen, faker) => startEndpoint(listen, { upstream: api, api: doc, faker, maxItems: options.maxRows, secrets, log: (line) => process.stderr.write(`  ! ${line}\n`) }),
+      serve: (listen, faker, learned) =>
+        startEndpoint(listen, {
+          upstream: api,
+          api: doc,
+          faker,
+          maxItems: options.maxRows,
+          secrets,
+          log: (line) => process.stderr.write(`  ! ${line}\n`),
+          ...(learned && { learned }),
+        }),
       async close() {},
     }
   },

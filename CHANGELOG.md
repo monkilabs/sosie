@@ -13,6 +13,16 @@
   session starts, and scans each session's transcript when it ends, its
   subagents' transcripts and long tool results included; the next session
   reports a real value it found.
+- `sosie` suggests the plugin for Claude Code when it starts, and
+  `npx @sosie/cli mcp` for any other MCP client.
+- REST without an OpenAPI document: `describe` lists the fields Sosie has met,
+  under each collection the API answered with a list.
+- REST: a link whose query name Sosie faked into another word (`?jdoe=` as
+  `?zleu=`) leads back to the API's own name when followed.
+- GraphQL: a 64-bit id written as a variable's default goes with its digits as
+  written, turned back, rather than rounded.
+- `--port` above 65535 is a usage error, before Sosie connects; and
+  `sosie mcp` serves with a flag before the command too (`sosie --rules x mcp`).
 
 ## 0.1.0, 29 October 2026
 
