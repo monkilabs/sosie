@@ -478,8 +478,8 @@ collection, such an API is read by its paths.
 ## The plugin
 
 `plugins/sosie`, in the [Agent Plugins](https://agent-plugins.org) 1.0 format: Sosie's MCP server and a skill, for
-Claude Code, GitHub Copilot, VS Code, Cursor, Codex, Kiro and Devin, and two hooks for Claude Code. It starts no Sosie
-and holds no credentials; it is a client of a running Sosie, like `sosie mcp`.
+Claude Code, GitHub Copilot, VS Code, Cursor, Codex, Kiro and Devin, and hooks for Claude Code, Copilot CLI and VS
+Code. It starts no Sosie and holds no credentials; it is a client of a running Sosie, like `sosie mcp`.
 
 ```
 plugins/sosie/
@@ -488,11 +488,13 @@ plugins/sosie/
   skills/sosie/
     SKILL.md           how to read through Sosie
   hooks/
-    hooks.json         Claude Code's SessionStart and SessionEnd
-    sosie.mjs          what the hooks read of Sosie: running/, the stores, the CLI the plugin pins
-    session-start.mjs  which Sosies run; what the scan of an earlier session found
+    hooks.json         SessionStart and SessionEnd, for Claude Code and Copilot CLI
+    sosie.mjs          what the hooks read of Sosie, and where a session's files are
+    session-start.mjs  which Sosies run; what a session's scan found that no session has reported
     session-end.mjs    starts the scan, and returns
     scan.mjs           sosie scan on one session, in a process of its own
+  com.github.copilot/hooks/
+    hooks.json         SessionStart and Stop, for VS Code
   .claude-plugin/plugin.json, .mcp.json
                        Claude Code's own files, built from plugin.json and mcp.json
 .claude-plugin/marketplace.json, .cursor-plugin/marketplace.json, .agents/plugins/marketplace.json
@@ -519,23 +521,36 @@ localhost from port 7674, or data looks like consistent fakes. It says:
   the connection string, `SOSIE_UPSTREAM`, `SOSIE_UPSTREAM_HEADERS` or `.env`, and never connect to the upstream
   directly.
 
-**The hooks** are Claude Code's; other assistants load the server and the skill.
+**The hooks.** Agent Plugins 1.0 has no place for hooks, so each assistant reads its own file, in its own place,
+and runs the same scripts. Each finds the plugin's folder by the token it replaces in a command.
+
+| Assistant | Reads | Session start | Session end | Plugin's data |
+| --- | --- | --- | --- | --- |
+| Claude Code | `hooks/hooks.json`, `${CLAUDE_PLUGIN_ROOT}` | `SessionStart`; context in `hookSpecificOutput.additionalContext`, the report in `systemMessage` too | `SessionEnd`, with `transcript_path`; 1.5 s, nothing it prints shown | `CLAUDE_PLUGIN_DATA` |
+| Copilot CLI | the same file, `${CLAUDE_PLUGIN_ROOT}` | `sessionStart`; context in a top-level `additionalContext` | `sessionEnd`, with the session's id only: its files are in `$COPILOT_HOME`, or `~/.copilot`, under `session-state/<id>`, a folder, or `<id>.jsonl` before | `CLAUDE_PLUGIN_DATA` |
+| VS Code | `com.github.copilot/hooks/hooks.json`, `${PLUGIN_ROOT}` | `SessionStart`, as Claude Code; also run when a subagent starts | none: `Stop`, after each turn, with `transcript_path`; also run when a subagent stops | none: `$SOSIE_HOME/plugin` |
+
+Copilot CLI is told apart by the `COPILOT_PLUGIN_DATA` it sets beside `CLAUDE_PLUGIN_DATA`. VS Code reads only the
+file in its namespace, for an Agent Plugin, and Copilot CLI only `hooks/hooks.json`, so no hook runs twice.
 
 | Hook | Reads | Does |
 | --- | --- | --- |
-| SessionStart, within 10 s | `$SOSIE_HOME/running/`, keeping the entries whose process is alive; `sosie.yml` in the session's folder; `$CLAUDE_PLUGIN_DATA/scans/` | Tells the agent each running Sosie's kind and address, or, with a `sosie.yml` and none running, to ask the developer to start one. Reports what each waiting scan found, then deletes it. Says nothing when there is nothing to say |
-| SessionEnd | The session's `transcript_path`, and the folder beside it, named the same, where Claude Code keeps the session's subagent transcripts and long tool results | When a store exists, starts `scan.mjs` in a process of its own, and returns |
+| Session start, within 10 s | `$SOSIE_HOME/running/`, keeping the entries whose process is alive; `sosie.yml` in the session's folder; `scans/` in the plugin's data | Tells the agent each running Sosie's kind and address, or, with a `sosie.yml` and none running, to ask the developer to start one. Reports what scans found that no session has reported yet. Says nothing when there is nothing to say. For a subagent, only which Sosies run: the report is the developer's |
+| Session end, or VS Code's `Stop` | The session's files: its transcript, and the folder beside it, named the same, where Claude Code keeps subagent transcripts and long tool results; or Copilot CLI's session folder | When a store exists, starts `scan.mjs` in a process of its own, and returns. While a scan of the session runs, asks it to run once more instead. Nothing for a subagent |
 
-Claude Code gives a plugin's SessionEnd hook 1.5 seconds and shows nothing it prints, and a scan reads the whole
-store, so the scan runs on its own and the next session reports it. `scan.mjs` runs
-`npx -y @sosie/cli@<version> scan <transcript> <folder>` with `NO_COLOR`, within 10 minutes, from the plugin's data
-folder rather than the project's, so a `@sosie/cli` in the project's `node_modules` never runs in its place. It reads
-the [lines `sosie scan` prints](#core-sosie-scan) and keeps, in `$CLAUDE_PLUGIN_DATA/scans/<session>.json` (mode
-0600), each finding's file, line and field: never the value. A scan that fails keeps the last line of its error; a
-clean one keeps nothing.
+A hook gets little time, and a scan reads the whole store, so the scan runs on its own and the next session reports
+it. `scan.mjs` runs `npx -y @sosie/cli@<version> scan <files>` with `NO_COLOR`, within 10 minutes, from the plugin's
+data folder rather than the project's, so a `@sosie/cli` in the project's `node_modules` never runs in its place. It
+holds `scans/<session>.lock` while it runs, and runs again while `<session>.again` is there. It reads the
+[lines `sosie scan` prints](#core-sosie-scan) and keeps, in `scans/<session>.json` (mode 0600), each finding's file,
+line and field: never the value. A scan that fails keeps the last line of its error; a clean one keeps nothing.
 
-The next session's agent is told to tell the developer first and, when something was found, not to open those files:
-reading one would bring the real value into the new session. The same text goes in the hook's `systemMessage`, for
+A session start takes each result, reports only the findings not in `seen/<session>.json`, and adds them there: VS
+Code scans a session after each turn, and finds the same lines again. A month after its last change, a session's
+`seen` is forgotten.
+
+The agent is told to tell the developer first and, when something was found, not to open those files: reading one
+would bring the real value into the new session. In Claude Code the same text goes in the hook's `systemMessage`, for
 Claude Code to show the developer.
 
 **A release** of `@sosie/cli` sets its version in `plugin.json` and in `mcp.json`, then runs `opencastle plugin
@@ -548,7 +563,12 @@ build`. `test/plugin.test.ts` fails until both agree with `packages/cli/package.
   to say it first either way.
 - The skill is advice. A working agent follows it; it is no wall against one that hunts for the credentials (see the
   [threat model](hld.md#threat-model)).
-- Copilot, Cursor and Codex get no hooks: their transcripts are for `sosie scan` by hand.
+- Cursor and Codex get no hooks yet: their transcripts are for `sosie scan` by hand. Cursor runs a plugin's hooks
+  only from its own package format (`.cursor-plugin/plugin.json`), in a hooks format of its own, and reads an Agent
+  Plugin for its skills and MCP servers alone. Codex reads hooks as Claude Code writes them, but its code loads none
+  from an Agent Plugin (November 2026, Codex 0.166), and asks the developer to trust each plugin's hooks. Either
+  would take a package of its own beside this one; neither could be run here to check one.
+- In VS Code, a finding is reported at the start of a session, while the session it was found in may still be open.
 
 ## Postgres source
 
@@ -977,6 +997,9 @@ would turn into that field's real value, which the passing field would show.
   .NET's often do, want a document.
 - Answers under another JSON type than `application/json` in the document (`application/hal+json`,
   `application/vnd.api+json`, `*/*`) have no schema there: their entity is named by the path, as without a document.
+- A word of the API's that a client types where a path starts (`/deep`), when it is also the fake Sosie gave a
+  value, is read as that value, as a client that saw the fake would mean it: a single word is faked as a word. A word
+  the document declares, or the API has answered with a list, is the API's, and stays.
 - Paths are matched against the document's templates from `SOSIE_UPSTREAM`'s path, not from the document's
   `servers` or `basePath`: when they differ, no path matches, every answer is no entity's, and no rule passes.
 - JSON only: images, files and HTML from the API are not passed on.
@@ -1211,7 +1234,11 @@ domains make a person's email the same fake from the database and from the API.
   over stdio, `scan`, Ctrl+C, and the errors a developer meets first.
 - **The dependency rule.** A test reads the imports and manifests.
 - **The plugin.** `test/plugin.test.ts`: the plugin's version and the CLI its server runs are `@sosie/cli`'s, in its
-  source and in Claude Code's files, and its hooks read the `running/` entries the core writes. A CI job runs
+  source and in Claude Code's files, and its hooks read the `running/` entries the core writes. Each assistant's hooks
+  file names scripts that are there, by the token it replaces; a session's files are found from a transcript or a
+  Copilot CLI session id; a finding is reported once; the context comes in each assistant's shape, and none of the
+  report to a subagent. Copilot CLI was run with the plugin: the context reached the agent, the session's scan found a
+  planted value, and the next session reported it. A CI job runs
   `opencastle plugin check`, which loads it as each assistant would, and checks that the marketplaces list it as it
   is. The hooks were run by hand against a running Sosie: what Claude Code would send them, and what they answer.
 - **CI.** PostgreSQL 15, 16, 17 and 18 on Node 26; 18 on Node 24.
