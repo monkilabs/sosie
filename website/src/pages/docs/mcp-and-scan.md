@@ -60,14 +60,17 @@ claude plugin install sosie@sosie
 With `--scope project` on both commands, Claude Code records them in the repository's `.claude/settings.json`, so the
 whole team gets the plugin.
 
-In Claude Code it also hooks into each session:
+In Claude Code, Copilot CLI and VS Code it also hooks into each session:
 
 - **When a session starts**, it tells the agent which Sosies are running and at which addresses. In a project with a
   `sosie.yml` and no Sosie running, it tells the agent to ask you to start one, and never to ask for the connection
   string.
-- **When a session ends**, it runs `sosie scan` in the background on the session's transcript, its subagents'
-  transcripts and the long tool results Claude Code keeps beside it. If a real value reached them, the next session
-  tells you the file, the line and the field, and the agent is told not to open them.
+- **When a session ends**, it runs `sosie scan` in the background on everything the assistant keeps of the session: in
+  Claude Code the transcript, its subagents' transcripts and long tool results; in Copilot CLI the session's folder.
+  VS Code has no session end: it scans after each turn, one scan at a time. If a real value reached the session, the
+  next session to start tells you the file, the line and the field, once, and the agent is told not to open them.
+
+Cursor and Codex load the MCP server and the skill; their transcripts are for `sosie scan` by hand.
 
 The plugin starts no Sosie and holds no credentials. It runs `@sosie/cli` at its own version, the one released with it.
 
