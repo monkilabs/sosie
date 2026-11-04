@@ -223,27 +223,29 @@ export const backend = {
   emptyQuery: () => message('I'),
   commandComplete: (tag: string) => message('C', cstring(tag)),
   parameterDescription: (types: number[]) => message('t', int16(types.length), ...types.map(int32)),
-  rowDescription: (columns: ColumnDescription[]) =>
+  /** Each column's format: 0, text, unless a portal's Bind asked for 1, binary. */
+  rowDescription: (columns: ColumnDescription[], formats: readonly number[] = []) =>
     message(
       'T',
       int16(columns.length),
-      ...columns.flatMap((c) => [
+      ...columns.flatMap((c, i) => [
         cstring(c.name),
         int32(c.tableID),
         int16(c.columnID),
         int32(c.dataTypeID),
         int16(c.dataTypeSize),
         int32(c.dataTypeModifier),
-        int16(0),
+        int16(formats[i] ?? 0),
       ]),
     ),
-  dataRow: (values: (string | null)[]) =>
+  /** A value as text, or as bytes already in binary. */
+  dataRow: (values: (string | Buffer | null)[]) =>
     message(
       'D',
       int16(values.length),
       ...values.flatMap((v) => {
         if (v === null) return [int32(-1)]
-        const bytes = Buffer.from(v, 'utf8')
+        const bytes = typeof v === 'string' ? Buffer.from(v, 'utf8') : v
         return [int32(bytes.length), bytes]
       }),
     ),

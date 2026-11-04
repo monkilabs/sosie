@@ -57,8 +57,9 @@ This is how Sosie works, not a bug, and not a reason to work around it.
 - **A bare boolean filters the real value.** `WHERE active` filters the real ones, while the fakes may show flipped
   ones. Write `active = true`, which is turned back.
 - **A value Sosie never showed** is used as written, and matches whatever real value it happens to be.
-- **Postgres results are text.** A driver that asks for binary results gets an error that says so. Composite values
-  (`SELECT u FROM users u`) and types Sosie does not know come back as `NULL`.
+- **Composite values** (`SELECT u FROM users u`) and types Sosie does not know come back as `NULL`. A driver that asks
+  for binary results gets them, except for such types and `regclass`, which are refused in binary: ask for the column
+  in text, or cast it. An older Sosie refuses binary results altogether: ask the developer to update it.
 - **An error raised while rows are read** comes back as its code only. Sosie hides the rest, which could quote a value.
 
 ## What Sosie refuses
@@ -66,7 +67,7 @@ This is how Sosie works, not a bug, and not a reason to work around it.
 - **Writes.** `INSERT`, `UPDATE`, `DELETE`, schema changes and `EXPLAIN`, whose plan would print real values; GraphQL
   mutations and subscriptions; every HTTP method but `GET` and `HEAD`.
 - **What would show the real data or the server:** catalogs such as `pg_stats`, `pg_stat_activity` and `pg_settings`,
-  and functions and settings such as `inet_server_addr`, `SHOW port` and `set_config`.
+  and functions and settings such as `inet_server_addr`, `SHOW port`, and `set_config` with a value from a row.
 
 Do not look for a way around a refusal or a fake, and do not use filters or computed values to work out a real value.
 That defeats the reason the developer put Sosie there.

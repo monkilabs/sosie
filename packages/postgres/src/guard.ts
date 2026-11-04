@@ -341,6 +341,29 @@ class Analyzer {
     }
   }
 
+  /**
+   * set_config(setting, value, is_local), as asyncpg runs it around reading the catalog. With the setting named in
+   * the query, it is a SET: a value written there is checked as one; a parameter is the client's own text, which Sosie
+   * turns back only where it is compared with a column, so it may set any setting but those Sosie checks. A value
+   * from anywhere else could copy one from your rows into a setting that shows it.
+   */
+  #setConfig(args: Node[]): void {
+    const literal = (node: Node | undefined) => uncast(node)?.A_Const
+    const param = (node: Node | undefined) => uncast(node)?.ParamRef
+    const [setting, value, local] = args
+    const name = literal(setting) ? String(constValue(literal(setting))).toLowerCase() : undefined
+    if (args.length !== 3 || !name || !(literal(value) || param(value)) || !(literal(local) || param(local))) {
+      return this.#refuse({
+        code: '42501',
+        message: 'Sosie runs set_config() with the setting named in the query, and its value written there or given as a parameter: a value from your rows could reach a setting. Use SET.',
+      })
+    }
+    if (literal(value)) return this.#set({ kind: 'VAR_SET_VALUE', name, args: [{ A_Const: literal(value) }] })
+    if (PROTECTED.has(name) || name in PINNED || name in TIMEOUTS(this.limits)) {
+      this.#refuse({ code: '42501', message: `Sosie checks ${name} before it is set: write its value in the query.` })
+    }
+  }
+
   /** Reading a setting: where the database is, refused; a setting code may have written, faked. */
   #setting(name: string | undefined): void {
     if (name === undefined) {
@@ -512,9 +535,7 @@ class Analyzer {
     const reason = REFUSED_FUNCTIONS[name] ?? (READERS.test(name) ? READS : undefined)
     if (reason) this.#refuse({ code: '42501', message: `Sosie does not run ${name}(): it ${reason}.` })
     if (ADMIN.test(name)) this.#refuse({ code: '25006', message: `Sosie does not run ${name}(): it changes the server. Sosie is read-only.` })
-    if (name === 'set_config') {
-      this.#refuse({ code: '42501', message: 'Sosie does not run set_config(): it can copy a value from your rows into a setting. Use SET.' })
-    }
+    if (name === 'set_config') this.#setConfig(body.args ?? [])
     if (name === 'current_setting') {
       const setting = body.args?.[0]?.A_Const?.sval?.sval
       this.#setting(typeof setting === 'string' ? setting.toLowerCase() : undefined)

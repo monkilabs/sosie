@@ -239,10 +239,11 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
 ## Risks
 
 - **Driver coverage.** The extended query protocol and binary formats vary
-  between drivers. v0.1 is tested with `psql`, `node-postgres`, `postgres.js`,
-  Drizzle and Prisma 7. Drivers that ask for binary results (asyncpg, pgx,
-  JDBC after its prepare threshold) get a clear error until binary formats
-  come.
+  between drivers. Sosie is tested with `psql`, `node-postgres`, `postgres.js`,
+  Drizzle and Prisma 7; its binary format byte for byte against Postgres's
+  own, and by hand with asyncpg and pgJDBC. pgx is not checked yet. A type
+  Sosie cannot write in binary from its text (`regclass`, composites, ranges)
+  is refused in binary, with an error that names it.
 - **Computed values.** A value a query computes (`length(email)`) has no
   column, so it is faked by type, which can surprise. `count(...)` passes.
 - **Real order.** Sorting and ranges run upstream, on the real values, so

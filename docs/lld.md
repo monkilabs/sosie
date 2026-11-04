@@ -86,6 +86,7 @@ packages/
     schema.ts        pg_catalog to the neutral schema
     results.ts       which field each result column came from
     arrays.ts        Postgres array text
+    binary.ts        Postgres's binary format, for the types Sosie writes from their text
     mcp.ts           the query tool
   rest/src/
     index.ts         the Source: matches http:// and https://, finds the OpenAPI document
@@ -512,7 +513,7 @@ localhost from port 7674, or data looks like consistent fakes. It says:
 - Start with `describe`, and use the tool of the Sosie's kind; a REST Sosie without a document is read by its paths.
 - Every value is a fake; a fake the agent saw finds its record again.
 - Why a result can look wrong: order and ranges follow the real values, `LIKE` finds no fake, computed values are
-  faked by type, `count` passes, results are text.
+  faked by type, `count` passes.
 - What Sosie refuses, and that code written against it never hard-codes a fake.
 - With no Sosie running: ask the developer to start one in their own terminal. Never start it, never ask for or touch
   the connection string, `SOSIE_UPSTREAM`, `SOSIE_UPSTREAM_HEADERS` or `.env`, and never connect to the upstream
@@ -557,9 +558,9 @@ It listens on 127.0.0.1, and on ::1 too, since the address it prints says
 `localhost`. Supported: start-up without TLS (SSL and GSS requests are
 answered no), any user and database name, no password; protocol 3.0 (a client
 asking for 3.2 is told 3.0); the simple query protocol; the extended protocol
-(Parse, Bind, Describe, Execute, Close, Sync, Flush) with results in text
-format; cancel requests, forwarded upstream. Refused with a clear error:
-binary result formats, COPY, function calls (answered with an error and
+(Parse, Bind, Describe, Execute, Close, Sync, Flush), with results and
+parameters in text or [binary format](#binary-format); cancel requests, forwarded upstream. Refused with a clear error:
+COPY, function calls (answered with an error and
 ReadyForQuery, as Postgres answers them). After an error, every message up to
 the next Sync is discarded, a simple Query too, as Postgres does. A message
 that does not parse closes its own connection, never the process; a malformed
@@ -649,9 +650,12 @@ read-only is refused like `SET`. Refused functions: those that reveal where the
 database is (`inet_server_addr`), read files or raw pages, run SQL given as
 text (`query_to_xml` and its family, `ts_stat`, `ts_rewrite`, `dblink`), read
 logical decoding or WAL, return other sessions' queries or real key values
-(`pg_sequence_last_value`); and `set_config`,
-which could copy a value from the rows into a setting: `SET` takes only what
-the client writes. Refused too, because a superuser or replication login
+(`pg_sequence_last_value`); and `set_config` with a value from anywhere but
+the query or a parameter, which could copy a value from the rows into a
+setting. Written in the query, its setting and value are checked as `SET`'s
+are; a parameter, which Sosie turns back only where it is compared with a
+column, may set any setting but those Sosie checks, as asyncpg does around
+reading the catalog. A setting named by a parameter is refused. Refused too, because a superuser or replication login
 could run them: functions that change the server (replication slots,
 `pg_switch_wal`, `pg_reload_conf`, statistics resets and imports, large
 objects, `pg_notify`) or hold locks other sessions wait on (advisory locks).
@@ -678,7 +682,9 @@ of a catalog is left alone. `LIMIT`, `OFFSET` and other constants are never
 looked up. A real value found replaces the fake, and the statement is printed
 back to SQL; a statement with nothing to replace goes upstream exactly as the
 client wrote it. Booleans and enum labels are turned back by their domain's
-flip and shuffle. Parameters a client sends in binary format are used as
+flip and shuffle. A parameter a client sends in binary format is read back
+to text by its type first, and goes upstream as text when it was turned back,
+as the client sent it when not; one of a type Sosie cannot read is used as
 written.
 
 ### Results
@@ -699,6 +705,28 @@ views.
 | A column of `UNION`, `INTERSECT` or `EXCEPT` | `Faker.computed` with its type: Postgres reports no source for it, and the arms differ |
 | Anything else a query computes | `Faker.computed` with the type of its OID |
 | From a catalog-only read | Unchanged |
+
+### Binary format
+
+Sosie reads every value upstream as text, which is what it fakes, and writes
+the faked text in binary for each column a client's Bind asks for that way
+(asyncpg and pgx always, JDBC once it prepares a statement), as Postgres's own
+send function would; RowDescription says which. A parameter sent in binary is
+read back to text by its type, from Parse or from Describe, which Sosie asks
+upstream for when the client did not.
+
+A type is known by its send function, read from `pg_type` at start-up: a
+domain sends as its base type, an enum as its label, an array by its element.
+Written: every type Sosie fakes, and the catalog's own a driver reads: the
+integers, `oid`, `xid`, `float4` and `float8`, `numeric`, the text types,
+`name`, `"char"`, `bytea`, `bool`, `uuid`, `json` and `jsonb`, `date`, `time`,
+`timetz`, `timestamp`, `timestamptz`, `interval`, `inet`, `cidr`, `pg_lsn`,
+`int2vector`, `oidvector`, `void`, and arrays of them. A column of another
+type asked for in binary is refused before its rows, naming the column and
+its type (`0A000`): `regclass` and its family, whose text is a name and
+whose binary is an OID; composite values, ranges, geometry, `money`. Text a
+codec cannot read, as after a client's `SET DateStyle`, ends the statement
+with `22P03` once upstream has finished it.
 
 ### Errors
 
@@ -756,9 +784,12 @@ upstream as the client wrote it.
   not by field: consistent, but not in the field's domain or format.
 - A json column keyed by lowercase words that are data (usernames) keeps those
   keys, since they look like structure.
-- A value a function in the database copies into a setting, readable through
-  `pg_settings`: Sosie refuses `set_config` from clients, but not what the
-  database's own code does.
+- A value a function in the database copies into a setting, readable with
+  `SHOW` or `current_setting()`: Sosie checks `set_config` from clients, but
+  not what the database's own code does.
+- A `timestamptz` parameter sent in binary is not turned back: Sosie reads it
+  in UTC, and knows a fake as it wrote it, in the session's time zone. It is
+  used as the client sent it.
 - `count(…)` with a filter answers yes-or-no questions about real values
   (`WHERE id <= (SELECT score …)`), as the threat model says of filters.
 
@@ -1157,6 +1188,11 @@ domains make a person's email the same fake from the database and from the API.
 - **Drivers.** `psql` (with `\d`), `node-postgres`, `postgres.js`, Drizzle over
   both, and Prisma 7 through its node-postgres adapter. The psql tests skip
   where psql is missing, except in CI.
+- **Binary format.** A wire client asks for every type in binary, constants and
+  each faked column of the test database, and each value must be, byte for
+  byte, what Postgres's own send function gives for the text Sosie faked; fakes
+  sent back as binary parameters must find their rows. asyncpg 0.32 and
+  pgJDBC 42.7 (`prepareThreshold=-1`, `binaryTransfer=true`) were run by hand.
 - **REST, end to end.** A fake API under `/v1` wants a bearer token and serves
   the database's canary people as JSON: an envelope, a map keyed by email, a
   map the document declares, links with canaries in every part, an image, a
@@ -1192,8 +1228,6 @@ domains make a person's email the same fake from the database and from the API.
 
 ## Open items
 
-- Binary result formats, for drivers that ask for them (asyncpg, pgx, JDBC
-  after its prepare threshold).
 - Enum arrays a query computes come back as `NULL`; enum array columns are
   faked.
 - Prisma's own schema engine (`prisma db pull`, migrations) is not checked:

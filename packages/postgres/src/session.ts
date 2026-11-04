@@ -1,6 +1,7 @@
 import { randomInt } from 'node:crypto'
 import type { Socket } from 'node:net'
 import type { Faker, RequestScope } from '@sosie/core'
+import { codecFor, type Codec } from './binary.js'
 import { analyze, parseStatements, type Analysis, type Parsed } from './guard.js'
 import { backend, Reader, type ColumnDescription, type FrontendMessage, type Report } from './protocol.js'
 import { fakeRow, planColumns, type ColumnPlan } from './results.js'
@@ -27,6 +28,8 @@ interface Prepared {
   text: string
   analysis: Analysis
   scope: RequestScope
+  /** Each parameter's type, as Parse declared it or Describe told; 0 or missing until known. */
+  paramTypes: number[]
 }
 
 interface Portal {
@@ -37,6 +40,10 @@ interface Portal {
   /** Rows returned so far, against the cap. */
   returned: number
   capped: boolean
+  /** The result formats Bind asked for: none (all text), one for every column, or one per column. */
+  formats: number[]
+  /** Per column, the codec of one asked for in binary: its faked text is written as Postgres sends that type. */
+  binary?: (Codec | undefined)[]
 }
 
 /** Stops a request: Sosie's own refusal, or an upstream error already relayed. */
@@ -187,7 +194,7 @@ export class Session {
         up.flush()
         await this.#expect('parseComplete', prepared.scope, prepared)
         await this.#expect('bindComplete', prepared.scope, prepared)
-        const portal: Portal = { prepared, scope: prepared.scope, returned: 0, capped: false }
+        const portal: Portal = { prepared, scope: prepared.scope, returned: 0, capped: false, formats: [] }
         const description = await this.#expect(['rowDescription', 'noData'], prepared.scope, prepared)
         if (description.name === 'rowDescription') {
           this.#describePortal(portal, description)
@@ -211,7 +218,10 @@ export class Session {
       return this.#refuse(syntax(error))
     }
     if (statements.length > 1) return this.#refuse({ code: '42601', message: 'cannot insert multiple commands into a prepared statement' })
-    const prepared = statements[0] ? this.#prepare(statements[0].stmt, text) : { sent: text, text, analysis: EMPTY, scope: this.#ctx.faker.request(text) }
+    const prepared = statements[0]
+      ? this.#prepare(statements[0].stmt, text)
+      : { sent: text, text, analysis: EMPTY, scope: this.#ctx.faker.request(text), paramTypes: [] }
+    prepared.paramTypes = [...types]
     this.#up!.parse(name, prepared.text, types)
     this.#up!.flush()
     await this.#expect('parseComplete', prepared.scope, prepared)
@@ -222,25 +232,44 @@ export class Session {
   async #bind(message: Extract<FrontendMessage, { type: 'bind' }>): Promise<void> {
     const prepared = this.#statements.get(message.statement)
     if (!prepared) return this.#refuse({ code: '26000', message: `prepared statement "${message.statement}" does not exist` })
-    if (message.results.some((f) => f !== 0)) {
-      return this.#refuse({
-        code: '0A000',
-        message: 'Sosie returns results in text format only. Set your driver to text results.',
-      })
-    }
+    const bad = [...message.formats, ...message.results].find((f) => f !== 0 && f !== 1)
+    if (bad !== undefined) return this.#refuse({ code: '22023', message: `unsupported format code: ${bad}` })
     const format = (i: number) => (message.formats.length === 1 ? message.formats[0] : (message.formats[i] ?? 0))
-    const texts = message.params.map((p, i) => (p && format(i) === 0 ? p.toString('utf8') : null))
+    // A parameter sent in binary is read back to text by its type, so a fake in it turns back like one sent as text.
+    if (message.params.some((p, i) => p !== null && format(i) === 1 && !prepared.paramTypes[i])) await this.#describeParams(message.statement, prepared)
+    const texts = message.params.map((p, i) => {
+      if (p === null) return null
+      if (format(i) === 0) return p.toString('utf8')
+      try {
+        return codecFor(prepared.paramTypes[i] ?? 0, this.#ctx.catalog.sends)?.decode(p) ?? null
+      } catch {
+        return null
+      }
+    })
     const scope = this.#ctx.faker.request([prepared.sent, ...texts.filter((t) => t !== null)].join('\n'), prepared.scope)
     const values = message.params.map((p, i) => {
       const text = texts[i]
       if (p === null || text === null || text === undefined) return p
-      return prepared.analysis.catalogOnly ? text : rewriteParam(text, prepared.analysis.params.get(i + 1), scope)
+      const binary = format(i) === 1
+      if (prepared.analysis.catalogOnly) return binary ? p : text
+      const real = rewriteParam(text, prepared.analysis.params.get(i + 1), scope)
+      // Unchanged, a binary parameter goes upstream as the client sent it; turned back, as text, which Postgres reads by the same type.
+      return binary && real === text ? p : real
     })
     this.#up!.bind(message.portal, message.statement, values)
     this.#up!.flush()
     await this.#expect('bindComplete', scope, prepared)
-    this.#portals.set(message.portal, { prepared, scope, returned: 0, capped: false })
+    this.#portals.set(message.portal, { prepared, scope, returned: 0, capped: false, formats: message.results })
     this.#write(backend.bindComplete())
+  }
+
+  /** The types of a statement's parameters, from upstream: for those sent in binary that Parse did not declare. */
+  async #describeParams(statement: string, prepared: Prepared): Promise<void> {
+    this.#up!.describe('S', statement)
+    this.#up!.flush()
+    const parameters = await this.#expect('parameterDescription', prepared.scope, prepared)
+    await this.#expect(['rowDescription', 'noData'], prepared.scope, prepared)
+    prepared.paramTypes = parameters.dataTypeIDs as number[]
   }
 
   async #describe(kind: 'S' | 'P', name: string): Promise<void> {
@@ -250,6 +279,7 @@ export class Session {
       this.#up!.describe('S', name)
       this.#up!.flush()
       const parameters = await this.#expect('parameterDescription', prepared.scope, prepared)
+      prepared.paramTypes = parameters.dataTypeIDs as number[]
       this.#write(backend.parameterDescription(parameters.dataTypeIDs as number[]))
       const rows = await this.#expect(['rowDescription', 'noData'], prepared.scope, prepared)
       this.#write(rows.name === 'noData' ? backend.noData() : backend.rowDescription(columns(rows)))
@@ -265,7 +295,7 @@ export class Session {
       return this.#write(backend.noData())
     }
     this.#describePortal(portal, rows)
-    this.#write(backend.rowDescription(portal.columns!))
+    this.#write(backend.rowDescription(portal.columns!, portal.binary?.map((codec) => (codec ? 1 : 0))))
   }
 
   async #execute(name: string, maxRows: number): Promise<void> {
@@ -315,12 +345,29 @@ export class Session {
     if (analysis.refusal) this.#refuse(analysis.refusal)
     const scope = this.#ctx.faker.request(sent)
     const changed = !analysis.catalogOnly && rewriteConsts(analysis, scope)
-    return { sent, text: changed ? print(stmt) : sent, analysis, scope }
+    return { sent, text: changed ? print(stmt) : sent, analysis, scope, paramTypes: [] }
   }
 
+  /** The portal's columns, how each is faked, and the codec of each the client asked for in binary. */
   #describePortal(portal: Portal, message: UpstreamMessage): void {
     portal.columns = columns(message)
     portal.plans = planColumns(portal.columns, portal.prepared.analysis, this.#ctx.catalog)
+    const { formats, columns: described } = portal
+    if (formats.length > 1 && formats.length !== described.length) {
+      this.#refuse({ code: '08P01', message: `bind message has ${formats.length} result formats but query has ${described.length} columns` })
+    }
+    if (!formats.includes(1)) return
+    // Sosie reads upstream as text, which is what it fakes, and writes each such column as Postgres would send it.
+    portal.binary = described.map((column, i) => {
+      if ((formats.length === 1 ? formats[0] : formats[i]) !== 1) return undefined
+      const codec = codecFor(column.dataTypeID, this.#ctx.catalog.sends)
+      if (codec) return codec
+      const type = this.#ctx.catalog.sends.get(column.dataTypeID)?.name ?? `type ${column.dataTypeID}`
+      return this.#refuse({
+        code: '0A000',
+        message: `Sosie cannot send column "${column.name}" (${type}) in binary. Ask for it in text format, or cast it to text.`,
+      })
+    })
   }
 
   /** Execute a portal upstream and relay its rows, faked, up to the row cap. */
@@ -332,6 +379,8 @@ export class Session {
     this.#up!.execute(name, want)
     this.#up!.flush()
     let count = 0
+    // A value Sosie cannot write in binary: the rest are read and dropped, so upstream ends where Postgres would.
+    let unwritable: string | undefined
     for (;;) {
       const message = await this.#expect(
         ['dataRow', 'commandComplete', 'portalSuspended', 'emptyQuery'],
@@ -340,8 +389,24 @@ export class Session {
         !portal.prepared.analysis.catalogOnly,
       )
       if (message.name === 'dataRow') {
-        if (count++ < allowed) this.#write(backend.dataRow(fakeRow(message.fields as (string | null)[], portal.plans ?? [], this.#ctx.faker, portal.prepared.sent, portal.scope)))
+        if (count++ >= allowed || unwritable) continue
+        const row = fakeRow(message.fields as (string | null)[], portal.plans ?? [], this.#ctx.faker, portal.prepared.sent, portal.scope)
+        const binary = portal.binary
+        if (!binary) {
+          this.#write(backend.dataRow(row))
+          continue
+        }
+        let i = 0
+        try {
+          const encoded = row.map((value, at) => ((i = at), value === null || !binary[at] ? value : binary[at]!.encode(value)))
+          this.#write(backend.dataRow(encoded))
+        } catch {
+          unwritable = portal.columns![i]!.name
+        }
         continue
+      }
+      if (unwritable) {
+        this.#refuse({ code: '22P03', message: `Sosie could not write a value of column "${unwritable}" in binary. Ask for it in text format.` })
       }
       portal.returned += Math.min(count, allowed)
       if (count > allowed) {
