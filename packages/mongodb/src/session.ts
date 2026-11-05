@@ -326,12 +326,14 @@ export class Session {
     cursor.served += kept.length
     ;(reply.cursor as Document)[key] = out
     const exhausted = String((reply.cursor as Document).id) === '0'
+    // Cut here, or with more to come upstream: the cap ends it, and the terminal says so, as MongoDB has no warning to.
+    const cut = kept.length < batch.length || (!exhausted && cursor.served >= this.ctx.maxRows)
     if (exhausted) this.ctx.upstream.cursors.delete(id)
     else if (cursor.served >= this.ctx.maxRows) {
       await this.ctx.upstream.kill([Long.fromString(id)])
       ;(reply.cursor as Document).id = Long.fromNumber(0)
-      this.ctx.log(`A cursor on ${cursor.collection} was cut at --max-rows (${this.ctx.maxRows}).`)
     }
+    if (cut) this.ctx.log(`A cursor on ${cursor.collection} was cut at --max-rows (${this.ctx.maxRows}).`)
     return reply
   }
 

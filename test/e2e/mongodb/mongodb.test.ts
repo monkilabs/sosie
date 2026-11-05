@@ -1,6 +1,6 @@
 import { Binary, BSON, Decimal128, Double, Int32, Long, MongoClient, ObjectId, type Db, type Document } from 'mongodb'
 import { connect } from 'node:net'
-import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, inject, it, vi } from 'vitest'
 import { canariesIn } from '../canaries.js'
 import { IDS } from './seed.js'
 import { startSosie } from './sosie.js'
@@ -302,11 +302,20 @@ describe('cursors and limits', () => {
     await db.command({ killCursors: 'users', cursors: [id] })
   })
 
-  it('cuts a cursor at the cap on rows', async () => {
+  it('cuts a cursor at the cap on rows, and says so in the terminal, in its first batch too', async () => {
     const capped = await startSosie({ maxRows: 5 })
-    const docs = keep(await (await capped.client()).db().collection('users').find().batchSize(2).toArray())
-    expect(docs).toHaveLength(5)
-    await capped.close()
+    const said = vi.spyOn(process.stderr, 'write')
+    try {
+      const docs = keep(await (await capped.client()).db().collection('users').find().batchSize(2).toArray())
+      expect(docs).toHaveLength(5)
+      const first = keep(await (await capped.client()).db().collection('users').find().batchSize(100).toArray())
+      expect(first).toHaveLength(5)
+      const cuts = said.mock.calls.filter(([line]) => String(line).includes('was cut at --max-rows (5)'))
+      expect(cuts).toHaveLength(2)
+    } finally {
+      said.mockRestore()
+      await capped.close()
+    }
   })
 })
 
