@@ -1175,8 +1175,9 @@ document a stage built (its named keys, and what any other key was before), or o
 ### Rewriting
 
 A value compared by equality with a field is looked up in that field's domain: `{ path: value }`, `$eq`, `$ne`, `$in`,
-`$nin`, `$all`, inside `$and`, `$or`, `$nor`, `$not` and `$elemMatch` (of values or of documents), and a document or
-an array compared whole, leaf by leaf. A filter is read against the shape of the documents it filters: a `find`'s,
+`$nin`, `$all`, inside `$and`, `$or`, `$nor`, `$not` and `$elemMatch` (of values or of documents), a document or
+an array compared whole, leaf by leaf, and in `$expr` a field path (`$email`, `$$ROOT.email`) compared by `$eq` or
+`$ne` with a value, either way round, or by `$in` with an array of them, inside its `$and`, `$or` and `$not` too. A filter is read against the shape of the documents it filters: a `find`'s,
 `count`'s and `distinct`'s against the collection's (a view's through its pipeline), each `$match` of a pipeline
 against the documents before it, so one after a `$group` compares with what the group made; a `$lookup`'s and a
 `$unionWith`'s own pipelines, and a `$graphLookup`'s `restrictSearchWithMatch`, against the collection each reads. A real value goes back in the BSON type of the fake: an ObjectId as an
@@ -1207,7 +1208,7 @@ this message, which may quote a value from your documents.` An upstream that can
 
 ### Limits
 
-- Order and ranges follow the real values; a regular expression, `$text` and `$expr` filter on them.
+- Order and ranges follow the real values; a regular expression, `$text` and what `$expr` computes filter on them.
 - A cursor cut at `--max-rows` says so in the terminal only: MongoDB has no warnings to carry it.
 - `listIndexes` and `listCollections` show an index's `partialFilterExpression` and a view's pipeline as written,
   a value in them included.
@@ -1700,6 +1701,6 @@ source learns. Format domains make a person's email the same fake from the datab
 - Postgres types without a neutral type come back `NULL`: `xml`, `bit` and `tsvector`. An array of ranges is shaped,
   not faked bound by bound; a range compared in a query is used as written.
 - MySQL: MariaDB, refused at start-up.
-- MongoDB: a fake in `$expr`, a `$lookup`'s `let`, or an index bound (`min`, `max`, `hint` by value) is used as
+- MongoDB: a fake in a `$lookup`'s `let`, an index bound (`min`, `max`, `hint` by value), or what `$expr` computes is used as
   written; Compass and the drivers other than Node's are not checked; a cursor cut at `--max-rows` says so only in the
   terminal.

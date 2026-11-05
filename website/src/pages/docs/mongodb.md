@@ -129,7 +129,8 @@ ObjectId, a UUID and binary data their own. Sosie learns each field as documents
 ## Limits
 
 - Order and ranges follow the real values: `sort` orders by them, and `$gt` or `$lt` compare them.
-- A regular expression, `$text` and `$expr` filter on the real values, so a piece of a fake finds nothing.
+- A regular expression, `$text` and what `$expr` computes filter on the real values, so a piece of a fake finds
+  nothing.
 - A value Sosie never showed is used as written, so it filters on the real value it happens to be.
 - A stage Sosie does not know the shape of is refused, as is anything it cannot read: change streams, JavaScript.
 - A cursor cut at `--max-rows` ends with nothing to say so: MongoDB has no warnings for Sosie to add one to. The
@@ -137,7 +138,8 @@ ObjectId, a UUID and binary data their own. Sosie learns each field as documents
 - A timestamp (BSON's internal type) is faked as a date, to the second. `MinKey` and `MaxKey` pass.
 - `listIndexes` and `listCollections` show an index's filter and a view's pipeline as they were written, a value in
   them included.
-- A fake in `$expr`, in a `$lookup`'s `let`, or in an index bound is used as written.
+- A fake in a `$lookup`'s `let`, in an index bound, or in what `$expr` computes (anything but a field compared by
+  `$eq`, `$ne` or `$in`) is used as written.
 - A key that looks like a word, in a collection's own documents, is taken for a field's name and shown: a map stored
   keyed by lowercase words (`{ prefs: { quillon: … } }`) shows them. A key a pipeline makes from values is faked,
   unless you wrote it.
