@@ -122,6 +122,10 @@ describe('the guard', () => {
     expect(check('SELECT * FROM users').catalogOnly).toBe(false)
     expect(check('SELECT user_email(1)').catalogOnly).toBe(false)
     expect(check('SELECT (SELECT email FROM users LIMIT 1)').catalogOnly).toBe(false)
+    // A CTE named like a table reads the table in its own query, and so does the statement.
+    expect(check("WITH users AS (SELECT * FROM users) SELECT email || '' FROM users").catalogOnly).toBe(false)
+    expect(check('WITH a AS (SELECT 1 AS x), users AS (SELECT * FROM users) SELECT * FROM a, users').catalogOnly).toBe(false)
+    expect(check('WITH x AS (SELECT 1 AS n) SELECT n FROM x').catalogOnly).toBe(true)
     expect(check('FETCH 1 FROM c').catalogOnly).toBe(false)
     // Settings code may have written a row value into are faked; server settings pass.
     expect(check('SHOW app.owner').catalogOnly).toBe(false)

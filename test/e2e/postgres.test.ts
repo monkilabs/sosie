@@ -122,6 +122,13 @@ describe('reading through Sosie', () => {
     expect(direct.e).not.toBe('quill.vantablack@canary-mail.test')
   })
 
+  it('fakes what a query computes through a CTE named like the table it reads', async () => {
+    // Every value here is computed: only knowing the statement reads users keeps them faked.
+    const rows = await query("WITH users AS (SELECT * FROM users) SELECT email || '' AS e, users::text AS r FROM users ORDER BY id")
+    expect(rows.length).toBeGreaterThan(2)
+    expect(canariesIn(JSON.stringify(rows))).toEqual([])
+  })
+
   it('fakes JSON built from rows, keys included', async () => {
     const [{ map }] = await query('SELECT json_object_agg(email, full_name) AS map FROM users WHERE email IS NOT NULL')
     expect(Object.keys(map)).toHaveLength(40)

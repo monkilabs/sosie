@@ -468,14 +468,21 @@ class Analyzer {
     )
   }
 
-  /** The scope of a WITH clause: its CTEs are checked, and their names hide tables of the same name. */
+  /**
+   * The scope of a WITH clause: its CTEs are checked, and their names hide tables of the same name. A CTE's own query
+   * sees only the CTEs before it, as Postgres reads it: in WITH users AS (SELECT * FROM users), the inner users is the
+   * table. With RECURSIVE, every CTE of the clause is in scope, itself included.
+   */
   #with(body: Node, outer: Scope | undefined): Scope {
-    if (body.withClause?.recursive) this.#rowsFromValues = true
+    const recursive = !!body.withClause?.recursive
+    if (recursive) this.#rowsFromValues = true
     const ctes = new Set<string>()
     const scope: Scope = { relations: [], ctes, ...(outer && { parent: outer }) }
-    for (const cte of body.withClause?.ctes ?? []) {
-      ctes.add(cte.CommonTableExpr.ctename)
+    const list = (body.withClause?.ctes ?? []) as Node[]
+    if (recursive) for (const cte of list) ctes.add(cte.CommonTableExpr.ctename)
+    for (const cte of list) {
       this.#walk(cte.CommonTableExpr.ctequery, scope)
+      ctes.add(cte.CommonTableExpr.ctename)
     }
     return scope
   }
