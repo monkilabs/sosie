@@ -12,9 +12,9 @@ const DISCOVER = ['openapi.json', 'openapi.yaml', 'swagger.json', 'v3/api-docs',
 export const rest: Source = {
   kind: 'rest',
   matches: (url) => url.protocol === 'http:' || url.protocol === 'https:',
+  settings: ['headers', 'schema'],
   async connect(upstream, options): Promise<Connection> {
-    const env = options.env ?? {}
-    const headers = upstreamHeaders(env.SOSIE_UPSTREAM_HEADERS)
+    const headers = upstreamHeaders(options.headers)
     const user = decodeURIComponent(upstream.username)
     const password = decodeURIComponent(upstream.password)
     if (user) headers.authorization ??= `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
@@ -29,11 +29,11 @@ export const rest: Source = {
 
     const warnings: string[] = []
     let doc: Api | undefined
-    if (env.SOSIE_OPENAPI) {
+    if (options.schema) {
       try {
-        doc = readApi(parseDocument(await readDocument(env.SOSIE_OPENAPI, api)))
+        doc = readApi(parseDocument(await readDocument(options.schema, api)))
       } catch (error) {
-        throw new Error(`SOSIE_OPENAPI: ${(error as Error).message}`)
+        throw new Error(`Cannot read its schema: ${(error as Error).message}`)
       }
     } else {
       let reached = false
@@ -62,7 +62,7 @@ export const rest: Source = {
         warnings.push(
           unreadable
             ? `The OpenAPI document at ${unreadable} cannot be read: fields are named by where values sit (user.email).`
-            : 'No OpenAPI document found: fields are named by where values sit (user.email). Set SOSIE_OPENAPI to a file or URL to name them from one.',
+            : 'No OpenAPI document found: fields are named by where values sit (user.email). Give the source a schema, a file or URL of its OpenAPI document, to name them from one.',
         )
       }
     }

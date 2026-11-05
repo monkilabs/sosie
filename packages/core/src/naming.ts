@@ -36,23 +36,18 @@ export function linkByName(entities: Entity[]): void {
 }
 
 /**
- * SOSIE_UPSTREAM_HEADERS: one `Name: value` per line, for the credentials an HTTP upstream wants.
- * A line that is no valid header is refused by its number, never quoted: it may hold a secret.
+ * The headers an HTTP upstream wants, as a source's `headers` give them, by lowercase name. One that is no valid
+ * header is refused by its name, its value never quoted: it may hold a secret.
  */
-export function upstreamHeaders(text: string | undefined): Record<string, string> {
+export function upstreamHeaders(given: Record<string, string> | undefined): Record<string, string> {
   const headers: Record<string, string> = {}
-  ;(text ?? '').split(/\r?\n|\\n/).forEach((line, i) => {
-    const at = line.indexOf(':')
-    if (!line.trim()) return
-    const name = line.slice(0, at).trim().toLowerCase()
-    const value = line.slice(at + 1).trim()
+  for (const [name, value] of Object.entries(given ?? {})) {
     try {
-      if (at <= 0) throw new Error()
-      new Headers([[name, value]])
+      new Headers([[name, value.trim()]])
     } catch {
-      throw new Error(`SOSIE_UPSTREAM_HEADERS: line ${i + 1} is not a header. Write one Name: value per line.`)
+      throw new Error(`The header ${/^[\w-]{1,64}$/.test(name) ? name : 'named in headers'} is not a valid one: a name of letters, digits and dashes, and a value on one line.`)
     }
-    headers[name] = value
-  })
+    headers[name.toLowerCase()] = value.trim()
+  }
   return headers
 }

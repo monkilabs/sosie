@@ -20,12 +20,19 @@ const seen: unknown[] = []
 
 async function startGraphqlSosie(
   api: FakeGraphql,
-  { home = mkdtempSync(join(tmpdir(), 'sosie-gql-')), env = {} as Record<string, string>, rules = '', maxRows = 1000 } = {},
+  {
+    home = mkdtempSync(join(tmpdir(), 'sosie-gql-')),
+    headers = { Authorization: `Bearer ${TOKEN}` } as Record<string, string>,
+    schema = undefined as string | undefined,
+    rules = '',
+    maxRows = 1000,
+  } = {},
 ) {
   const connection = await graphql.connect(new URL(api.url), {
     maxRows,
     statementTimeout: 5000,
-    env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, ...env },
+    headers,
+    ...(schema && { schema }),
   })
   const store = Store.open(storeDir(home))
   const faker = createFaker({ schema: connection.schema, rules: loadRules(rules, connection.schema), store })
@@ -78,12 +85,10 @@ afterAll(async () => {
 })
 
 describe('a GraphQL API', () => {
-  it('is the source for a path with graphql in it, or for any path with a schema in SOSIE_GRAPHQL_SCHEMA', () => {
+  it('is the source for a path with graphql in it; any other path is kind: graphql in sosie.yml', () => {
     for (const path of ['/graphql', '/api/graphql/', '/v1/graphql', '/graphql/v1', '/admin/api/2025-07/graphql.json'])
       expect(graphql.matches(new URL(`https://api.internal${path}`)), path).toBe(true)
     for (const path of ['/v1/users', '/graphqlish', '/query']) expect(graphql.matches(new URL(`https://api.internal${path}`)), path).toBe(false)
-    expect(graphql.matches(new URL('https://api.internal/query'), { SOSIE_GRAPHQL_SCHEMA: 'schema.graphql' })).toBe(true)
-    expect(graphql.matches(new URL('postgres://db.internal/app'), { SOSIE_GRAPHQL_SCHEMA: 'schema.graphql' })).toBe(false)
   })
 
   it('is read by introspection, and its types become entities', () => {
@@ -270,7 +275,7 @@ describe('a GraphQL API', () => {
     const taken = createServer()
     await new Promise<void>((resolve) => taken.listen(0, '127.0.0.1', resolve))
     const { port } = taken.address() as { port: number }
-    const connection = await graphql.connect(new URL(api.url), { maxRows: 10, statementTimeout: 5000, env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}` } })
+    const connection = await graphql.connect(new URL(api.url), { maxRows: 10, statementTimeout: 5000, headers: { Authorization: `Bearer ${TOKEN}` } })
     const store = Store.open(storeDir(mkdtempSync(join(tmpdir(), 'sosie-gql-'))))
     const close = vi.spyOn(Checker.prototype, 'close')
     try {
@@ -302,7 +307,7 @@ describe('a GraphQL API', () => {
 
   it('fakes a JSON key that holds its own credentials, even one that looks like a word', async () => {
     // A Rails-style header writes its token in quotes.
-    const s = await startGraphqlSosie(api, { env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Api-Key: Token token="sesamesecretword"` } })
+    const s = await startGraphqlSosie(api, { headers: { Authorization: `Bearer ${TOKEN}`, 'X-Api-Key': 'Token token="sesamesecretword"' } })
     const { body } = await s.ask('{ debug }')
     expect(Object.keys(body.data.debug)).toHaveLength(2)
     expect(body.data.debug.theme).toBeDefined()
@@ -571,17 +576,17 @@ describe('a schema that is not valid GraphQL', () => {
   it('stops Sosie at start, saying why, instead of failing every query', async () => {
     const file = join(mkdtempSync(join(tmpdir(), 'sosie-sdl-')), 'schema.graphql')
     writeFileSync(file, 'type Query { a: Empty }\ntype Empty\n')
-    await expect(startGraphqlSosie(api, { env: { SOSIE_GRAPHQL_SCHEMA: file } })).rejects.toThrow(/is not valid GraphQL: Type Empty must define one or more fields/)
+    await expect(startGraphqlSosie(api, { schema: file })).rejects.toThrow(/is not valid GraphQL: Type Empty must define one or more fields/)
   })
 })
 
 describe('without introspection', () => {
   it('says to name a schema file, and reads one', async () => {
     const closed = await startGraphql({ introspection: false })
-    await expect(startGraphqlSosie(closed)).rejects.toThrow(/by introspection \(GraphQL introspection is not allowed\)\. Set SOSIE_GRAPHQL_SCHEMA/)
+    await expect(startGraphqlSosie(closed)).rejects.toThrow(/by introspection \(GraphQL introspection is not allowed\)\. Give the source a schema/)
     const file = join(mkdtempSync(join(tmpdir(), 'sosie-sdl-')), 'schema.graphql')
     writeFileSync(file, SDL)
-    const s = await startGraphqlSosie(closed, { env: { SOSIE_GRAPHQL_SCHEMA: file } })
+    const s = await startGraphqlSosie(closed, { schema: file })
     expect((await s.ask('{ users { email } }')).body.data.users).toHaveLength(3)
     // Clients introspect Sosie, which answers from the file.
     expect((await s.ask('{ __type(name: "User") { name } }')).body.data).toEqual({ __type: { name: 'User' } })

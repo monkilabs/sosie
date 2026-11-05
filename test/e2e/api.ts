@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http'
 
-/** The token the fake API wants: what a developer puts in SOSIE_UPSTREAM_HEADERS. */
+/** The token the fake API wants: what a developer puts in a source's headers. */
 export const TOKEN = 'test-token-7c1f'
 
 /** The same people as the database seed, so a person's fakes can be compared across sources. */

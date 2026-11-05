@@ -18,7 +18,7 @@ export class RestUpstream {
     readonly base: URL,
     readonly headers: Record<string, string>,
     readonly timeout: number,
-    /** Query parameters SOSIE_UPSTREAM carries, such as an api_key: sent with every request, never shown. */
+    /** Query parameters the upstream's URL carries, such as an api_key: sent with every request, never shown. */
     readonly params = new URLSearchParams(),
   ) {}
 

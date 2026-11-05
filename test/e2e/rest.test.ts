@@ -22,7 +22,7 @@ async function startRest(
   {
     home = mkdtempSync(join(tmpdir(), 'sosie-rest-')),
     rules = '',
-    env = {} as Record<string, string>,
+    headers = { Authorization: `Bearer ${TOKEN}` } as Record<string, string>,
     maxRows = 1000,
     query = '',
     userinfo = '',
@@ -32,7 +32,7 @@ async function startRest(
   const connection = await rest.connect(new URL(`${api.url.replace('//', `//${userinfo}`)}${query}`), {
     maxRows,
     statementTimeout: 5000,
-    env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, ...env },
+    headers,
   })
   // The same key on every run, so the same fakes. With a key of its own each run, a value's fake could by chance be
   // one of the API's own words: a single word is faked as a word, and a value Sosie gave, typed where a path starts
@@ -364,7 +364,7 @@ describe('the guard and the credentials', () => {
   })
 
   it('passes a refusal on, with its body faked', async () => {
-    const without = await startRest(api, { env: { SOSIE_UPSTREAM_HEADERS: '' } })
+    const without = await startRest(api, { headers: {} })
     const refused = await without.get('/users')
     expect(refused.status).toBe(401)
     expect(Object.keys(refused.body)).toEqual(['error'])
@@ -412,7 +412,7 @@ describe('the guard and the credentials', () => {
       userinfo: 'robot:sunshine99@',
       rules: 'pass:\n  - echo-credential.note\n',
       // A Rails-style header writes its token in quotes; a header that is no credential (X-Tenant) holds none.
-      env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Api-Key: Token token="sesamesecretword"\nX-Tenant: production` },
+      headers: { Authorization: `Bearer ${TOKEN}`, 'X-Api-Key': 'Token token="sesamesecretword"', 'X-Tenant': 'production' },
     })
     const { body } = await s.get('/echo-credentials')
     expect(api.requests.at(-1)!.path).toBe('/v1/echo-credentials?api_key=opensesame')

@@ -139,7 +139,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     })
     const query = new URLSearchParams()
     for (const [name, value] of url.searchParams) {
-      // Sosie's own credentials in the query (SOSIE_UPSTREAM's ?api_key=) are never shown.
+      // Sosie's own credentials in the query (the upstream's ?api_key=) are never shown.
       if (ctx.upstream.params.has(name)) continue
       const plain = queryNames.has(name) || mine.has(name) || referenceOf(name, (word) => word) !== undefined
       const hidden = !(plain && wordName(name) && !scope.turnedBack(name))
@@ -224,7 +224,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
 
     const answer = await ctx.upstream.get(target, req.method === 'HEAD' ? 'HEAD' : 'GET')
     if (answer.status === 401 || answer.status === 403) {
-      ctx.log(`The API answered ${answer.status} to ${incoming.pathname}: check SOSIE_UPSTREAM_HEADERS.`)
+      ctx.log(`The API answered ${answer.status} to ${incoming.pathname}: check the source's headers.`)
     }
     const json = /[/+]json\b/i.test(answer.type)
     // Words the client wrote itself: links in this answer may show them.

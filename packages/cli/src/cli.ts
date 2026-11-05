@@ -131,7 +131,13 @@ async function start(options: {
   timeout: number
 }): Promise<void> {
   const upstream = await readUpstream()
-  const source = sources.find((s) => s.matches(upstream, process.env))
+  // Until sosie.yml names the sources: the variables earlier versions read, as the settings sources now take.
+  const env = process.env
+  const headers = Object.fromEntries(
+    (env.SOSIE_UPSTREAM_HEADERS ?? '').split(/\r?\n|\\n/).filter((l) => l.trim()).map((l) => [l.slice(0, Math.max(0, l.indexOf(':'))).trim(), l.slice(l.indexOf(':') + 1)]),
+  )
+  const schema = env.SOSIE_OPENAPI || env.SOSIE_GRAPHQL_SCHEMA || undefined
+  const source = env.SOSIE_GRAPHQL_SCHEMA && /^https?:$/.test(upstream.protocol) ? sources.find((s) => s.kind === 'graphql') : sources.find((s) => s.matches(upstream))
   if (!source) {
     throw new Exit(2, fail(`Sosie reads postgres://, mysql:// and mongodb:// databases, and http:// or https:// APIs, for now; not ${upstream.protocol}//.`))
   }
@@ -143,7 +149,7 @@ async function start(options: {
 
   let connection
   try {
-    connection = await source.connect(upstream, { maxRows: options.maxRows, statementTimeout: options.timeout * 1000, env: process.env })
+    connection = await source.connect(upstream, { maxRows: options.maxRows, statementTimeout: options.timeout * 1000, headers, ...(schema && { schema }) })
   } catch (error) {
     throw new Exit(1, fail((error as Error).message))
   }
