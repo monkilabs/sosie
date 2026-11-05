@@ -11,16 +11,17 @@ permissions:
 jobs:
   test:
     name: Node ${{ matrix.node }}, PostgreSQL ${{ matrix.postgres }}, MySQL ${{ matrix.mysql }}, MongoDB ${{ matrix.mongodb }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { node: 26, postgres: 18, mysql: '8.4', mongodb: '8.0' }
-          - { node: 26, postgres: 17, mysql: '9', mongodb: '8.0' }
+          # MongoDB 8 will not start on Linux 6.19 and later (SERVER-121912): it runs where the kernel is older.
+          - { node: 26, postgres: 18, mysql: '8.4', mongodb: '8.0', os: ubuntu-22.04 }
+          - { node: 26, postgres: 17, mysql: '9', mongodb: '7.0' }
           - { node: 26, postgres: 16, mysql: '8.4', mongodb: '7.0' }
           - { node: 26, postgres: 15, mysql: '8.4', mongodb: '6.0' }
-          - { node: 24, postgres: 18, mysql: '8.4', mongodb: '8.0' }
+          - { node: 24, postgres: 18, mysql: '8.4', mongodb: '7.0' }
     services:
       postgres:
         image: postgres:${{ matrix.postgres }}
