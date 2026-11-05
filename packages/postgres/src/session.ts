@@ -53,6 +53,16 @@ const EMPTY: Analysis = { catalogOnly: true, command: 'SELECT', consts: [], para
 const FATAL_UNREACHABLE = 'Sosie cannot reach its upstream database. The terminal running Sosie says why.'
 
 /**
+ * Settings Postgres reports whose values it checks: an encoding, a date style, a time zone, a version, a flag. They
+ * hold no value a row could have put there, and are relayed as they are. Any other it reports (application_name,
+ * search_path) a function may set from a row: shown when the client wrote that value itself, faked otherwise.
+ */
+const REPORTED = new Set([
+  'client_encoding', 'DateStyle', 'default_transaction_read_only', 'in_hot_standby', 'integer_datetimes', 'IntervalStyle',
+  'is_superuser', 'scram_iterations', 'server_encoding', 'server_version', 'standard_conforming_strings', 'TimeZone',
+])
+
+/**
  * One client connection. Sosie answers the start-up itself, then relays each
  * message to a read-only session upstream: statements are checked and their
  * fakes turned back into real values on the way in, and every value is faked
@@ -65,6 +75,10 @@ export class Session {
   readonly #reader: Reader
   readonly #ctx: SessionContext
   #up: Upstream | undefined
+  /** The client's own application_name, from its startup: what Postgres reports of it is the client's. */
+  #appName = ''
+  /** The text of the statement the client sent last: a setting Postgres reports with a value written there is the client's. */
+  #lastSent = ''
   readonly #statements = new Map<string, Prepared>()
   readonly #portals = new Map<string, Portal>()
   #skipping = false
@@ -124,9 +138,10 @@ export class Session {
     const unrecognized = Object.keys(startup.params).filter((k) => k.startsWith('_pq_.'))
     if (startup.minor > 0 || unrecognized.length) this.#write(backend.negotiateProtocolVersion(0, unrecognized))
     this.#write(backend.authenticationOk())
-    const parameters = new Map(this.#up.parameters)
+    const parameters = new Map([...this.#up.parameters].filter(([name]) => REPORTED.has(name)))
     parameters.set('session_authorization', startup.params.user ?? 'sosie')
-    if (startup.params.application_name) parameters.set('application_name', startup.params.application_name)
+    this.#appName = startup.params.application_name ?? ''
+    parameters.set('application_name', this.#appName)
     for (const [name, value] of parameters) this.#write(backend.parameterStatus(name, value))
     this.#write(backend.backendKeyData(this.pid, this.secret))
     this.#write(backend.readyForQuery('I'))
@@ -341,6 +356,7 @@ export class Session {
 
   /** Check a statement and turn the fakes in it back into real values. */
   #prepare(stmt: Parsed['stmt'], sent: string): Prepared {
+    this.#lastSent = sent
     const analysis = analyze(stmt, this.#ctx.catalog, { statementTimeout: this.#ctx.statementTimeout })
     if (analysis.refusal) this.#refuse(analysis.refusal)
     const scope = this.#ctx.faker.request(sent)
@@ -447,7 +463,8 @@ export class Session {
           continue
         case 'parameterStatus':
           if (message.parameterName !== 'session_authorization') {
-            this.#write(backend.parameterStatus(message.parameterName as string, message.parameterValue as string))
+            const name = message.parameterName as string
+            this.#write(backend.parameterStatus(name, this.#reported(name, String(message.parameterValue ?? ''), scope, prepared)))
           }
           continue
         case 'notification':
@@ -472,6 +489,12 @@ export class Session {
    * its code and what the code means come back. So it is with a function's
    * message (RAISE in PL/pgSQL, anything with a context).
    */
+  /** A setting Postgres reports, as the client may see it: see REPORTED. */
+  #reported(name: string, value: string, scope: RequestScope, prepared: Prepared | undefined): string {
+    if (REPORTED.has(name) || value === '' || value === this.#appName || this.#lastSent.includes(value)) return value
+    return String(this.#ctx.faker.computed(value, { kind: 'string' }, prepared?.sent ?? this.#lastSent, scope))
+  }
+
   #scrubbed(message: UpstreamMessage, scope: RequestScope, prepared: Prepared | undefined, reading = false): Report {
     const severity = String(message.severity ?? 'ERROR')
     const code = String(message.code ?? 'XX000')

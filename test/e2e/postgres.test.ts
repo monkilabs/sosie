@@ -122,6 +122,19 @@ describe('reading through Sosie', () => {
     expect(direct.e).not.toBe('quill.vantablack@canary-mail.test')
   })
 
+  it('fakes a setting a function set from a row, as Postgres reports it', async () => {
+    const c = await sosie.client()
+    const reported: Record<string, string> = {}
+    const connection = (c as unknown as { connection: { on(e: string, f: (m: { parameterName: string; parameterValue: string }) => void): void } }).connection
+    connection.on('parameterStatus', (m) => (reported[m.parameterName] = m.parameterValue))
+    await c.query('SELECT tag_session(1)')
+    expect(reported.application_name).toBeDefined()
+    expect(canariesIn(reported.application_name!)).toEqual([])
+    // What the client set itself is its own.
+    await c.query("SET application_name = 'my app'")
+    expect(reported.application_name).toBe('my app')
+  })
+
   it('fakes what a query computes through a CTE named like the table it reads', async () => {
     // Every value here is computed: only knowing the statement reads users keeps them faked.
     const rows = await query("WITH users AS (SELECT * FROM users) SELECT email || '' AS e, users::text AS r FROM users ORDER BY id")
