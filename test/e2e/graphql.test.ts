@@ -328,7 +328,7 @@ describe('a GraphQL API', () => {
     await text(`query ($id: Long = ${id}) { account(id: $id) { id } }`)
     expect(api.received.at(-1)!.body).toContain('"variables":{"id":1234567890123456789}')
     // So does the MCP tool's answer.
-    const running: Running = { kind: 'graphql', address: sosie.address, schema: { entities: [] }, passing: [] }
+    const running: Running = { name: 'api', kind: 'graphql', address: sosie.address, schema: { entities: [] }, passing: [] }
     expect(JSON.stringify(await graphql.tools![0]!.run({ query: '{ account { id } }' }, running))).toContain(`"id":${id}`)
   })
 
@@ -613,7 +613,7 @@ describe('one store for every source', () => {
 
 describe('the MCP tool', () => {
   it('runs a query through the running endpoint', async () => {
-    const running: Running = { kind: 'graphql', address: sosie.address, schema: { entities: [] }, passing: [] }
+    const running: Running = { name: 'api', kind: 'graphql', address: sosie.address, schema: { entities: [] }, passing: [] }
     const result = (await graphql.tools![0]!.run({ query: 'query ($e: String) { users(email: $e) { id } }', variables: '{"e": null}' }, running)) as Json
     expect(result.data.users).toHaveLength(3)
     seen.push(result)

@@ -401,7 +401,7 @@ describe('the guard and the credentials', () => {
     expect(one.status).toBe(200)
     expect(await one.text()).toMatch(new RegExp(`"id":\\s*${id}\\b`))
     // So does the MCP tool's answer.
-    const running: Running = { kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
+    const running: Running = { name: 'api', kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
     const result = await rest.tools![0]!.run({ path: `/big-ids/${id}` }, running)
     expect(JSON.stringify(result)).toMatch(new RegExp(`"id":${id}\\b`))
   })
@@ -701,7 +701,7 @@ describe('one store for every source', () => {
 
 describe('the MCP tool', () => {
   it('sends a GET through the running endpoint', async () => {
-    const running: Running = { kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
+    const running: Running = { name: 'api', kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
     const result = (await rest.tools![0]!.run({ path: '/users' }, running)) as Json
     expect(result.status).toBe(200)
     expect(result.body.data).toHaveLength(3)
@@ -709,7 +709,7 @@ describe('the MCP tool', () => {
   })
 
   it('follows a link Sosie returned', async () => {
-    const running: Running = { kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
+    const running: Running = { name: 'api', kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
     const { href } = (await sosie.get('/self')).body
     expect(href.startsWith(`${new URL(sosie.address).origin}/v1/`)).toBe(true)
     const result = (await rest.tools![0]!.run({ path: href }, running)) as Json
@@ -721,7 +721,7 @@ describe('the MCP tool', () => {
 
   it('reaches Sosie only, whatever the path says', async () => {
     const root = await startApi()
-    const running: Running = { kind: 'rest', address: `http://localhost:${new URL(sosie.address).port}`, schema: { entities: [] }, passing: [] }
+    const running: Running = { name: 'api', kind: 'rest', address: `http://localhost:${new URL(sosie.address).port}`, schema: { entities: [] }, passing: [] }
     const before = root.requests.length
     for (const path of [`//${new URL(root.url).host}/v1/users`, `/\\${new URL(root.url).host}/v1/users`]) {
       await expect(rest.tools![0]!.run({ path }, running)).rejects.toThrow('The path must be a path of the API, such as /users?limit=10.')

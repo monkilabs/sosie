@@ -40,7 +40,7 @@ it('starts in front of MongoDB from the command, says where clients connect, and
     expect(users).toHaveLength(40)
     expect(canariesIn(JSON.stringify(users))).toEqual([])
     const entry = readFileSync(join(home, 'running', `${child.pid}.json`), 'utf8')
-    expect(JSON.parse(entry)).toMatchObject({ kind: 'mongodb', address })
+    expect(JSON.parse(entry).sources[0]).toMatchObject({ kind: 'mongodb', address })
     expect(entry).not.toContain(new URL(upstream).password)
 
     const mcp = new Client({ name: 'test', version: '0.0.0' })
@@ -51,7 +51,7 @@ it('starts in front of MongoDB from the command, says where clients connect, and
       // The fields met so far are in describe, written to the running entry as documents came.
       for (let i = 0; i < 40 && !readFileSync(join(home, 'running', `${child.pid}.json`), 'utf8').includes('users.email'); i++) await new Promise((r) => setTimeout(r, 50))
       const described = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
-      expect(described.entities[0].fields).toContainEqual({ field: 'email', type: 'string' })
+      expect(described.sources[0].entities[0].fields).toContainEqual({ field: 'email', type: 'string' })
       const found = await mcp.callTool({ name: 'find', arguments: { collection: 'users', filter: '{"active": true}', projection: '{"email": 1}', limit: '3' } })
       expect(found.isError).toBeFalsy()
       expect(canariesIn(text(found))).toEqual([])

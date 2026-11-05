@@ -96,7 +96,7 @@ describe('sosie', () => {
     expect(out).not.toContain('reader')
     const running = readFileSync(join(home, 'running', `${sosie.child.pid}.json`), 'utf8')
     expect(running).not.toContain('reader')
-    expect(JSON.parse(running).address).toBe(sosie.address)
+    expect(JSON.parse(running).sources[0].address).toBe(sosie.address)
   })
 
   it('serves fakes to node-postgres', async () => {
@@ -113,7 +113,7 @@ describe('sosie', () => {
     const mcp = await mcpClient(home)
     expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'find', 'aggregate', 'graphql', 'request'])
     const users = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
-    expect(users.entities[0].fields).toContainEqual({ field: 'email', type: 'string', key: 'unique' })
+    expect(users.sources[0].entities[0].fields).toContainEqual({ field: 'email', type: 'string', key: 'unique' })
     const result = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT * FROM users u JOIN orders o ON o.user_id = u.id' } })
     expect(result.isError).toBeFalsy()
     const body = JSON.parse(text(result))
@@ -176,8 +176,8 @@ describe('sosie, in front of an API', () => {
     const mcp = await mcpClient(home)
     expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'find', 'aggregate', 'graphql', 'request'])
     const described = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
-    expect(described.entities.map((e: { entity: string }) => e.entity)).toEqual(['user'])
-    expect(described.entities[0].fields.map((f: { field: string }) => f.field)).toEqual(expect.arrayContaining(['id', 'email', 'name']))
+    expect(described.sources[0].entities.map((e: { entity: string }) => e.entity)).toEqual(['user'])
+    expect(described.sources[0].entities[0].fields.map((f: { field: string }) => f.field)).toEqual(expect.arrayContaining(['id', 'email', 'name']))
     const result = JSON.parse(text(await mcp.callTool({ name: 'request', arguments: { path: '/users' } })))
     expect(result.body.data).toHaveLength(3)
     expect(canariesIn(JSON.stringify([users, result]))).toEqual([])

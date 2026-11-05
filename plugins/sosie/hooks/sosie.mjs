@@ -38,15 +38,17 @@ export async function input() {
   }
 }
 
-/** Every Sosie running on this machine, from $SOSIE_HOME/running/: its kind and address. */
+/** Every source of every Sosie running on this machine, from $SOSIE_HOME/running/: its name, kind and address. */
 export function running() {
   const dir = join(home, 'running')
   if (!existsSync(dir)) return []
   const found = []
   for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
     try {
-      const { kind, address, pid } = JSON.parse(readFileSync(join(dir, file), 'utf8'))
-      if (alive(pid)) found.push({ kind, address })
+      const entry = JSON.parse(readFileSync(join(dir, file), 'utf8'))
+      // An earlier version's entry is one source, named by its kind.
+      const sources = entry.sources ?? [{ name: entry.kind, kind: entry.kind, address: entry.address }]
+      if (alive(entry.pid)) for (const { name, kind, address } of sources) found.push({ name, kind, address })
     } catch {
       // Being written, or not Sosie's.
     }

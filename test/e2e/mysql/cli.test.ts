@@ -38,7 +38,7 @@ it('starts in front of MySQL from the command, says where clients connect, and s
     await client.end()
     // Its entry for sosie mcp says what it is, and holds nothing real.
     const entry = readFileSync(join(home, 'running', `${child.pid}.json`), 'utf8')
-    expect(JSON.parse(entry)).toMatchObject({ kind: 'mysql', address })
+    expect(JSON.parse(entry).sources[0]).toMatchObject({ kind: 'mysql', address })
     expect(entry).not.toContain(new URL(upstream).password)
     // The query tool runs SQL through the running Sosie, several statements at once.
     const mcp = new Client({ name: 'test', version: '0.0.0' })

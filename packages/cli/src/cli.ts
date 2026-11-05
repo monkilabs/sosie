@@ -176,7 +176,7 @@ async function start(options: {
   let rewrite: NodeJS.Timeout | undefined
   const entry = (schema: Schema) => {
     const passing = new Set([...rules.pass, ...schema.entities.flatMap((e) => e.fields.filter((f) => faker.passes(f)).map((f) => f.id))])
-    writeRunning(home, { kind: source.kind, address, schema, passing: [...passing] }, process.pid, startedAt)
+    writeRunning(home, [{ name: source.kind, kind: source.kind, address, schema, passing: [...passing] }], process.pid, startedAt)
   }
   const learned = (schema: Schema) => {
     grown = schema

@@ -110,8 +110,14 @@ describe('the plugin', () => {
 
     it('read the Sosies running as the core writes them', () => {
       expect(hooks.running()).toEqual([])
-      writeRunning(home, { kind: 'postgres', address: 'postgres://localhost:7674/app', schema: { entities: [] }, passing: [] })
-      expect(hooks.running()).toEqual([{ kind: 'postgres', address: 'postgres://localhost:7674/app' }])
+      writeRunning(home, [
+        { name: 'shop', kind: 'postgres', address: 'postgres://localhost:7674/shop', schema: { entities: [] }, passing: [] },
+        { name: 'billing', kind: 'rest', address: 'http://localhost:7675/v1', schema: { entities: [] }, passing: [] },
+      ])
+      expect(hooks.running()).toEqual([
+        { name: 'shop', kind: 'postgres', address: 'postgres://localhost:7674/shop' },
+        { name: 'billing', kind: 'rest', address: 'http://localhost:7675/v1' },
+      ])
       expect(hooks.cli()).toBe(`@sosie/cli@${cli}`)
     })
 
@@ -198,7 +204,7 @@ describe('the plugin', () => {
 
     it('give the context where each assistant reads it, and none to a subagent', () => {
       const own = mkdtempSync(join(tmpdir(), 'sosie-plugin-data-'))
-      writeRunning(home, { kind: 'postgres', address: 'postgres://localhost:7674/app', schema: { entities: [] }, passing: [] })
+      writeRunning(home, [{ name: 'app', kind: 'postgres', address: 'postgres://localhost:7674/app', schema: { entities: [] }, passing: [] }])
       const start = (event: Record<string, string>, env: Record<string, string> = {}) =>
         hook('session-start.mjs', event, { ...bare(), SOSIE_HOME: home, CLAUDE_PLUGIN_DATA: own, ...env }).stdout
       const result = (session: string, scan: Scan) => {

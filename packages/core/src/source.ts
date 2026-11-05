@@ -153,8 +153,10 @@ export interface Endpoint {
   close(): Promise<void>
 }
 
-/** What `sosie mcp` knows about the running endpoint. */
+/** What `sosie mcp` knows about a source a running Sosie serves. */
 export interface Running {
+  /** Its name in sosie.yml. */
+  name: string
   kind: string
   address: string
   schema: Schema
