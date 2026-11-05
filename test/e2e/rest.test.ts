@@ -434,6 +434,15 @@ describe('the guard and the credentials', () => {
     await recorder.close()
   })
 
+  it('sends a page’s number as written, even where a body showed a page of its own', async () => {
+    const own = await startRest(api)
+    // A page number the body showed is a fake of the body's page: sent back, it is still the page asked for.
+    const first = (await (await fetch(`${own.address}/pages`)).json()) as { page: number }
+    await fetch(`${own.address}/pages?page=${first.page}`)
+    expect(api.requests.at(-1)!.path).toBe(`/v1/pages?page=${first.page}`)
+    await own.close()
+  })
+
   it('never shows in a link a paging value the request turned back', async () => {
     const own = await startRest(api)
     // A fake under a paging name turns back, so the API gets the real 48213; the link it answers with shows a fake.
