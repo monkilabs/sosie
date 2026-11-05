@@ -104,6 +104,8 @@ describe('the guard', () => {
     ['SELECT * FROM pg_hba_file_rules()', '42501'],
     ['SELECT * FROM pg_show_all_file_settings()', '42501'],
     ['SELECT setconfig FROM pg_db_role_setting', '42501'],
+    ['SELECT rolname, rolconfig FROM pg_roles WHERE rolconfig IS NOT NULL', '42501'],
+    ['SELECT u::text FROM pg_catalog.pg_user u', '42501'],
     ['SELECT * FROM information_schema._pg_user_mappings', '42501'],
     ['SELECT * FROM pg_config()', '42501'],
     ['SHOW archive_command', '42501'],

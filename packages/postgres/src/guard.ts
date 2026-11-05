@@ -93,6 +93,9 @@ const REFUSED_RELATIONS: Record<string, string> = {
   pg_sequences: 'holds real key values',
   pg_settings: WHERE,
   pg_db_role_setting: 'holds settings, which may hold secrets',
+  // Each role's settings again, in rolconfig and useconfig: a * or a whole row shows them too.
+  pg_roles: 'holds each role’s settings, which may hold secrets',
+  pg_user: 'holds each role’s settings, which may hold secrets',
   _pg_foreign_servers: WHERE,
   _pg_user_mappings: 'holds credentials',
   pg_foreign_server: WHERE,
