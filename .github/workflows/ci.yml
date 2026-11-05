@@ -12,6 +12,8 @@ jobs:
   test:
     name: Node ${{ matrix.node }}, PostgreSQL ${{ matrix.postgres }}, MySQL ${{ matrix.mysql }}, MongoDB ${{ matrix.mongodb }}
     runs-on: ${{ matrix.os || 'ubuntu-latest' }}
+    # A run takes about two minutes: a test that hangs fails the job here, not at GitHub's six hours.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -70,6 +72,7 @@ jobs:
   plugin:
     name: The plugin loads in every assistant, and its listings are current
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
