@@ -215,6 +215,17 @@ describe('the guard', () => {
     }
   })
 
+  it('passes every field of a collection sosie.yml names with .*, as they are met', async () => {
+    const lenient = await startSosie({ rules: 'pass:\n  - countries.*\n' })
+    const countries = keep(await (await lenient.client()).db().collection('countries').find({}, { sort: { _id: 1 } }).toArray())
+    expect(countries).toEqual([
+      { _id: 'AT', name: 'Austria' },
+      { _id: 'CZ', name: 'Czechia' },
+      { _id: 'SK', name: 'Slovakia' },
+    ])
+    await lenient.close()
+  })
+
   it('warns of a login that can write, and still writes nothing', async () => {
     const admin = await startSosie({ upstream: inject('mongodbAdmin') })
     expect(admin.warnings.join(' ')).toMatch(/administrator|can change data/)

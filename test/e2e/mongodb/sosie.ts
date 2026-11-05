@@ -11,7 +11,7 @@ export async function startSosie({ rules = '', maxRows = 100, statementTimeout =
   const home = mkdtempSync(join(tmpdir(), 'sosie-mongodb-'))
   const connection = await mongodb.connect(new URL(upstream), { maxRows, statementTimeout })
   const store = Store.open(storeDir(home))
-  const faker = createFaker({ schema: connection.schema, rules: loadRules(rules, connection.schema), store })
+  const faker = createFaker({ schema: connection.schema, rules: loadRules(rules, connection.schema, 'sosie.yml', { learns: !!connection.learns }), store })
   const learned: Schema[] = []
   const endpoint = await connection.serve({ host: '127.0.0.1', port: 0 }, faker, (schema) => learned.push(schema))
   const clients: MongoClient[] = []
