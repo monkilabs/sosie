@@ -168,10 +168,12 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     // Only the variables the operation declares go; a variable's default is a value the client wrote too: it goes
     // as a variable, so it is turned back like one.
     const values: Record<string, unknown> = {}
+    // Defined, not assigned: a variable named __proto__ is the client's value, not the object's prototype.
+    const set = (name: string, value: unknown) => Object.defineProperty(values, name, { value, enumerable: true, writable: true, configurable: true })
     for (const definition of operation.variableDefinitions ?? []) {
       const name = definition.variable.name.value
-      if (name in given) values[name] = given[name]
-      else if (definition.defaultValue) values[name] = literal(definition.defaultValue)
+      if (Object.hasOwn(given, name)) set(name, given[name])
+      else if (definition.defaultValue) set(name, literal(definition.defaultValue))
     }
     const sent = `${query}\n${JSON.stringify(values)}`
     // Sosie's own credentials: a key, or a value that passes, that holds one is faked.

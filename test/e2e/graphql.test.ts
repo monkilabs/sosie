@@ -359,6 +359,12 @@ describe('a GraphQL API', () => {
     expect(api.operations.slice(before)).toEqual([])
   })
 
+  it('sends a variable named __proto__ as the client’s value, not as an object’s prototype', async () => {
+    const [quill] = (await sosie.ask('{ users { email } }')).body.data.users
+    const { body } = await sosie.ask('query Q($__proto__: String) { users(email: $__proto__) { email } }', JSON.parse(`{"__proto__": ${JSON.stringify(quill.email)}}`))
+    expect(body.data.users.map((u: { email: string }) => u.email)).toEqual([quill.email])
+  })
+
   it('keeps an alias that names an object’s own machinery, and adds none the API left out', async () => {
     const { body } = await sosie.ask('{ __proto__: motd constructor: motd @skip(if: true) toString: motd }')
     expect(Object.keys(body.data)).toEqual(['__proto__', 'toString'])
