@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { writeRunning } from '@sosie/core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * version, so a release that forgets the plugin fails here. Its hooks run in Claude Code, Copilot CLI and VS Code,
  * each with its own events and payloads.
  */
-const root = new URL('..', import.meta.url).pathname
+const root = fileURLToPath(new URL('..', import.meta.url))
 const json = (path: string) => JSON.parse(readFileSync(join(root, path), 'utf8'))
 const cli = json('packages/cli/package.json').version as string
 const hooksDir = join(root, 'plugins/sosie/hooks')

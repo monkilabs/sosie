@@ -1,12 +1,13 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 /**
  * The dependency rule: the core depends on no source; a source depends on the
  * core only, never on another source; the CLI brings them together.
  */
-const root = new URL('..', import.meta.url).pathname
+const root = fileURLToPath(new URL('..', import.meta.url))
 const SOURCES = ['@sosie/postgres', '@sosie/mysql', '@sosie/mongodb', '@sosie/rest', '@sosie/graphql']
 
 function imports(pkg: string): string[] {
