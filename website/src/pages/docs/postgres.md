@@ -59,8 +59,10 @@ Each statement is parsed before it goes anywhere.
 - **Refused:** everything else, including `EXPLAIN`, whose plan would print the real values Sosie substituted. A
   statement that changes data gets `This statement changes data. Sosie is read-only.`
 - **Refused catalogs:** the ones that hold real values, queries with their values, credentials or where the database
-  is: `pg_stats`, `pg_statistic`, `pg_stat_activity`, `pg_stat_statements`, `pg_settings`, `pg_authid` and the like;
-  and `pg_roles` and `pg_user`, whose role settings may hold secrets, so `\du` in psql is refused too.
+  is: `pg_stats`, `pg_statistic`, `pg_stat_activity`, `pg_stat_statements`, `pg_settings`, `pg_authid`,
+  `pg_db_role_setting` and the like. `pg_roles` and `pg_user` are read only by their columns other than the role
+  settings, which may hold secrets (`rolconfig`, `useconfig`), each named: psql's `\d` and `\du` work, and
+  `SELECT *` from them is refused.
 - **Refused settings and functions:** those that say where the database is (`inet_server_addr`, `SHOW port`), read
   files, run SQL given as text, or copy a value from your rows into a setting (`set_config` with anything but a value
   written in the query or a parameter).

@@ -709,8 +709,8 @@ credentials, or where the database is: `pg_stats`, `pg_stats_ext`,
 `pg_backend_memory_contexts`, `pg_authid`, `pg_shadow`, `pg_user_mapping`, `pg_user_mappings`,
 `pg_stat_wal_receiver`, `pg_stat_replication`, `pg_stat_ssl`, `pg_stat_gssapi`, `pg_hba_file_rules`,
 `pg_ident_file_mappings`, `pg_file_settings`, `pg_settings`, `pg_config`, `pg_sequences`,
-`pg_subscription`, `pg_foreign_server`, `pg_db_role_setting`, `pg_roles` and `pg_user` (per-database and per-role
-settings may hold secrets: psql's `\du` reads `pg_roles`, and does not run through Sosie), and in `information_schema`
+`pg_subscription`, `pg_foreign_server`, `pg_db_role_setting` (per-database and per-role settings may hold secrets),
+and in `information_schema`
 `foreign_server_options`, `user_mapping_options` and the `_pg_` views behind
 them; and the functions behind the refused views. `SHOW` and
 `current_setting()` refuse the settings that say where the database is
@@ -734,6 +734,11 @@ could run them: functions that change the server (replication slots,
 objects, `pg_notify`) or hold locks other sessions wait on (advisory locks).
 The session is read-only too, so a statement the guard misses still cannot
 write.
+
+`pg_roles` and `pg_user` hold the same settings, in `rolconfig` and `useconfig`, beside what psql's `\d` (a
+table's policies) and `\du` read of each role: they are read by their other columns, each named. A statement that
+reads one is refused when it names the settings column, or could show it: a `*`, a whole row (`r::text`,
+`row_to_json(r)`, `r.text`, which calls a function on it), an alias that renames columns, or a named join.
 
 A CTE's query sees only the CTEs before it, and with `RECURSIVE` every one,
 itself included, as Postgres reads it: in `WITH users AS (SELECT * FROM users)`

@@ -254,6 +254,23 @@ describe('the guard', () => {
     expect((await query('SELECT 1 AS ok'))[0].ok).toBe(1)
   })
 
+  it('reads the role views by their other columns, as psql does, and never a role’s settings', async () => {
+    // psql's \d lists a table's policies, with the roles each applies to, from pg_roles.
+    const policies = await query(
+      "SELECT pol.polname, CASE WHEN pol.polroles = '{0}' THEN NULL ELSE pg_catalog.array_to_string(array(select rolname from pg_catalog.pg_roles where oid = any (pol.polroles) order by 1),',') END AS roles FROM pg_catalog.pg_policy pol WHERE pol.polrelid = 'users'::regclass ORDER BY 1",
+    )
+    expect(policies).toEqual([{ polname: 'readers', roles: expect.stringMatching(/^sosie_reader_/) }])
+    for (const sql of [
+      'SELECT * FROM pg_roles',
+      'SELECT rolname, rolconfig FROM pg_roles',
+      'SELECT row_to_json(r) FROM pg_roles r',
+      'SELECT u::text FROM pg_catalog.pg_user u',
+      'SELECT setconfig FROM pg_db_role_setting',
+    ]) {
+      expect((await failure(sql)).code).toBe('42501')
+    }
+  })
+
   it('explains a refusal', async () => {
     expect((await failure('DELETE FROM orders')).message).toBe('This statement changes data. Sosie is read-only.')
     expect((await failure('SELECT * FROM pg_stats')).message).toBe('pg_stats holds real values from your tables, so Sosie does not read it.')

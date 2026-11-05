@@ -51,8 +51,10 @@ in that release and the ones after it; upgrade.
   back for the API, which repeated the real value in its next link, and the
   link kept it as written. A link now keeps a paging value only when the
   request did not turn it back.
-- Postgres (0.1): `pg_roles` and `pg_user` are refused: their `rolconfig` and
-  `useconfig` hold the role settings `pg_db_role_setting` was refused for.
+- Postgres (0.1): `pg_roles.rolconfig` and `pg_user.useconfig` showed the role
+  settings `pg_db_role_setting` was refused for, secrets included. The two
+  views are now read only by their other columns, each named, as psql's `\d`
+  and `\du` read them; a `*` or a whole row of either is refused.
 - Postgres (0.1): a setting Postgres reports when it changes
   (`application_name`, `search_path`) is relayed only when the client wrote
   that value, and faked otherwise; a function could set one from a row.

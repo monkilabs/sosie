@@ -73,8 +73,8 @@ This is how Sosie works, not a bug, and not a reason to work around it.
 
 - **Writes.** `INSERT`, `UPDATE`, `DELETE`, schema changes and `EXPLAIN`, whose plan would print real values; GraphQL
   mutations and subscriptions; every HTTP method but `GET` and `HEAD`.
-- **What would show the real data or the server:** catalogs such as `pg_stats`, `pg_stat_activity`, `pg_settings` and
-  `pg_roles`, MySQL's `mysql` database and `SHOW STATUS`, MongoDB's `admin`, `local` and `config` databases; functions
+- **What would show the real data or the server:** catalogs such as `pg_stats`, `pg_stat_activity` and `pg_settings`,
+  and `pg_roles` read by `*` or its `rolconfig`, MySQL's `mysql` database and `SHOW STATUS`, MongoDB's `admin`, `local` and `config` databases; functions
   and settings such as `inet_server_addr`, `SHOW port`, `@@datadir` and `set_config` with a value from a row; and
   JavaScript on a MongoDB server (`$where`, `$function`).
 

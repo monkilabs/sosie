@@ -46,6 +46,11 @@ describe('the guard', () => {
     'SET client_encoding TO DEFAULT',
     'RESET ALL',
     'RESET statement_timeout',
+    // psql's \d, for a table's row-level policies, and \du: each role view by its other columns, named.
+    "SELECT pol.polname, pol.polpermissive, CASE WHEN pol.polroles = '{0}' THEN NULL ELSE pg_catalog.array_to_string(array(select rolname from pg_catalog.pg_roles where oid = any (pol.polroles) order by 1),',') END, pg_catalog.pg_get_expr(pol.polqual, pol.polrelid), pg_catalog.pg_get_expr(pol.polwithcheck, pol.polrelid) FROM pg_catalog.pg_policy pol WHERE pol.polrelid = '16385' ORDER BY 1",
+    "SELECT r.rolname, r.rolsuper, r.rolinherit, r.rolcreaterole, r.rolcreatedb, r.rolcanlogin, r.rolconnlimit, r.rolvaliduntil, ARRAY(SELECT b.rolname FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles b ON (m.roleid = b.oid) WHERE m.member = r.oid) as memberof, r.rolreplication, r.rolbypassrls FROM pg_catalog.pg_roles r WHERE r.rolname !~ '^pg_' ORDER BY 1",
+    'SELECT count(*) FROM pg_roles',
+    'SELECT usename, usesuper FROM pg_user',
   ])('allows %s', (sql) => {
     expect(check(sql).refusal).toBeUndefined()
   })
@@ -106,6 +111,19 @@ describe('the guard', () => {
     ['SELECT setconfig FROM pg_db_role_setting', '42501'],
     ['SELECT rolname, rolconfig FROM pg_roles WHERE rolconfig IS NOT NULL', '42501'],
     ['SELECT u::text FROM pg_catalog.pg_user u', '42501'],
+    // Each way a role's settings would show: a *, a whole row, a function called on it, a renaming alias, a named join.
+    ['SELECT * FROM pg_roles', '42501'],
+    ['TABLE pg_roles', '42501'],
+    ['SELECT r.* FROM pg_roles r', '42501'],
+    ['SELECT s FROM (SELECT * FROM pg_catalog.pg_roles) s', '42501'],
+    ['SELECT row_to_json(r) FROM pg_roles r', '42501'],
+    ['SELECT pg_roles FROM pg_roles', '42501'],
+    ['SELECT (r).rolconfig FROM pg_roles r', '42501'],
+    ['SELECT r.text FROM pg_roles r', '42501'],
+    ['SELECT pg_catalog.pg_roles.rolconfig FROM pg_catalog.pg_roles', '42501'],
+    ['SELECT x FROM pg_roles AS r(a, b, c, d, e, f, g, h, i, j, k, x)', '42501'],
+    ['SELECT j FROM (pg_roles r JOIN pg_auth_members m ON m.member = r.oid) AS j', '42501'],
+    ["SELECT (SELECT useconfig) FROM pg_user", '42501'],
     ['SELECT * FROM pg_config', '42501'],
     ['SELECT pg_stat_get_backend_client_addr(1)', '42501'],
     ['SHOW ssl_crl_dir', '42501'],

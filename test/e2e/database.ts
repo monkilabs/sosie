@@ -63,6 +63,10 @@ export default async function setup(project: TestProject) {
   await seed.query(`
     GRANT USAGE ON SCHEMA public, billing TO ${reader};
     GRANT SELECT ON ALL TABLES IN SCHEMA public, billing TO ${reader};
+    -- A secret in a role's settings, which pg_roles shows in rolconfig; and a policy, whose roles psql's \\d lists
+    -- from pg_roles. Row security stays off, so the policy changes no read.
+    ALTER ROLE ${reader} SET app.token = 'sk_live_9Qv7Xc2Lm8Rt';
+    CREATE POLICY readers ON users TO ${reader} USING (true);
   `)
   await seed.end()
 
