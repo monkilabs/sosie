@@ -38,6 +38,15 @@ type Use = { type: GraphQLNamedType | undefined; name: string }
 /** `sosieTypename_: __typename`, asked of every object of an interface or a union, so Sosie knows how to fake it. */
 const ASK_TYPENAME: FieldNode = { kind: Kind.FIELD, alias: { kind: Kind.NAME, value: TYPENAME }, name: { kind: Kind.NAME, value: '__typename' } }
 
+/** Arguments that page a list. */
+const PAGING = new Set(['page', 'limit', 'offset', 'per_page', 'perPage', 'page_size', 'pageSize', 'size', 'skip', 'take', 'first', 'last'])
+
+/**
+ * A page's number is the client's own, sent as written: a body that says which page it is (UserPage.page) has its
+ * number faked, and turned back it would send the client to another page than the one it asked for.
+ */
+const paging = (name: string, text: string) => PAGING.has(name) && /^\d{1,5}$/.test(text)
+
 /**
  * Turn the fakes in a request's arguments and variables back into real
  * values. An argument is looked up in the field it names on the type its
@@ -90,6 +99,7 @@ export function rewrite(
       case Kind.STRING:
       case Kind.INT:
       case Kind.FLOAT: {
+        if (node.kind === Kind.INT && paging(name, node.value)) return node
         const real = lookup(node.value, near(name, type))
         if (real === undefined || real === node.value) return node
         changed = true
@@ -172,6 +182,7 @@ export function rewrite(
       return real === 'true'
     }
     if (typeof v !== 'string' && typeof v !== 'number') return v
+    if (typeof v === 'number' && uses.every((use) => paging(use.name, String(v)))) return v
     const real = lookup(String(v), fields)
     if (real === undefined || real === String(v)) return v
     changed = true

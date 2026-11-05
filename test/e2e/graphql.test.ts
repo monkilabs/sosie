@@ -87,7 +87,7 @@ describe('a GraphQL API', () => {
   })
 
   it('is read by introspection, and its types become entities', () => {
-    expect(sosie.connection.summary).toBe('9 types, 18 queries')
+    expect(sosie.connection.summary).toBe('10 types, 19 queries')
     const user = sosie.connection.schema.entities.find((e) => e.id === 'User')!
     expect(user.fields.find((f) => f.name === 'email')).toMatchObject({ format: 'email' })
     expect(sosie.connection.schema.entities.find((e) => e.id === 'Order')!.fields.find((f) => f.name === 'userId')!.references).toBe('User.id')
@@ -335,6 +335,14 @@ describe('a GraphQL API', () => {
     await lenient.ask({ query, operationName: 'A' }, { v: quill.email, extra: 'quill.vantablack@canary-mail.test' })
     expect(api.received.at(-1)!.variables).toEqual({ v: 'quill.vantablack@canary-mail.test' })
     await lenient.close()
+  })
+
+  it('sends a page’s number as written, even where the answer says which page it is', async () => {
+    const shown = (await sosie.ask('{ pagedUsers(page: 1) { page users { email } } }')).body.data.pagedUsers.page as number
+    await sosie.ask(`{ pagedUsers(page: ${shown}) { page } }`)
+    expect(api.received.at(-1)!.query).toContain(`pagedUsers(page: ${shown})`)
+    await sosie.ask('query P($p: Int) { pagedUsers(page: $p) { page } }', { p: shown })
+    expect(api.received.at(-1)!.variables).toEqual({ p: shown })
   })
 
   it('sends no field of the mutation type, under a query field either, nor through an interface it implements', async () => {

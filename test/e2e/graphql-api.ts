@@ -56,8 +56,14 @@ type Query {
   query: Query!
   admin: Mutation
   operator: Operator
+  pagedUsers(page: Int): UserPage
   debug: JSON
   account(id: Long): Account
+}
+"""A page of users that says which page it is."""
+type UserPage {
+  page: Int!
+  users: [User!]!
 }
 """An interface the mutation type implements: its fields are the mutation type's, wherever they are reached."""
 interface Operator {
@@ -120,6 +126,7 @@ export async function startGraphql({ introspection = true, elsewhere = 'http://2
     admin: () => root,
     // The same, through an interface it implements.
     operator: () => ({ ...root, __typename: 'Mutation' }),
+    pagedUsers: ({ page }: { page?: number }) => ({ page: page ?? 1, users: people.slice((page ?? 1) - 1, page ?? 1).map(user) }),
     // What a debugging endpoint echoes: the credential it was sent, as a key.
     debug: () => ({ sesamesecretword: 1, theme: 2 }),
     // A 64-bit id, which no JavaScript number holds: written as its digits (see json below).
