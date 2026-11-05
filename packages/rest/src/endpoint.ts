@@ -140,8 +140,8 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       const plain = queryNames.has(name) || mine.has(name) || referenceOf(name, (word) => word) !== undefined
       const hidden = !(plain && wordName(name) && !scope.turnedBack(name))
       const named = hidden ? String(ctx.faker.value(name, QUERY_NAME)) : name
-      // A page's number stays; a long number under such a name may be an id, and is faked.
-      const keep = PAGING.has(name) && /^\d{1,5}$/.test(value)
+      // A page's number stays, unless the request turned it back; a long number under such a name may be an id, and is faked.
+      const keep = PAGING.has(name) && /^\d{1,5}$/.test(value) && !scope.turnedBack(value)
       query.append(named, keep ? value : String(ctx.faker.value(value, queryField(name, value, rt, { fields, entityFor }, hidden), scope)))
     }
     const search = query.toString()

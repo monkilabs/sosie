@@ -434,6 +434,17 @@ describe('the guard and the credentials', () => {
     await recorder.close()
   })
 
+  it('never shows in a link a paging value the request turned back', async () => {
+    const own = await startRest(api)
+    // A fake under a paging name turns back, so the API gets the real 48213; the link it answers with shows a fake.
+    const { data: [member] } = (await (await fetch(`${own.address}/logins`)).json()) as { data: { username: string }[] }
+    expect(member!.username).not.toBe('48213')
+    const body = (await (await fetch(`${own.address}/users?limit=${encodeURIComponent(member!.username)}`)).json()) as { next: string }
+    expect(api.requests.at(-1)!.path).toContain('limit=48213')
+    expect(body.next).not.toContain('48213')
+    await own.close()
+  })
+
   it('answers requests for localhost only, so a web page cannot rebind its name to Sosie', async () => {
     const { port } = new URL(sosie.address)
     const status = (host: string) =>
