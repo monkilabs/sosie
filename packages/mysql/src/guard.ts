@@ -148,11 +148,20 @@ interface Relation {
   /** MySQL's own catalog: its columns are not fields, and what is compared with them is not a fake. */
   system?: boolean
   byName?: Map<string, Field>
+  /** A derived table's or a CTE's column names, each of its byName or computed. */
+  columns?: Set<string>
+}
+
+/** The columns a derived table or a CTE gives: every name, and the field each is where it is one. */
+interface Columns {
+  names: Set<string>
+  byName: Map<string, Field>
 }
 
 interface Scope {
   relations: Relation[]
-  ctes: Set<string>
+  /** CTEs in scope, by name, with their columns where Sosie can tell them. */
+  ctes: Map<string, Columns | undefined>
   parent?: Scope
 }
 
@@ -273,22 +282,24 @@ class Analyzer {
 
   /* Queries and their scopes. */
 
-  #query(q: Node, outer: Scope | undefined, onTargets?: (t: Target[]) => void): void {
-    const scope: Scope = { relations: [], ctes: new Set(outer?.ctes ?? []), ...(outer && { parent: outer }) }
+  #query(q: Node, outer: Scope | undefined, onTargets?: (t: Target[]) => void, onColumns?: (c: Columns | undefined) => void): void {
+    const scope: Scope = { relations: [], ctes: new Map(outer?.ctes ?? []), ...(outer && { parent: outer }) }
     for (const cte of q.with?.cte_tables ?? []) {
-      this.#query(cte.query, scope)
-      scope.ctes.add(String(cte.alias?.name?.value ?? '').toLowerCase())
+      let columns: Columns | undefined
+      this.#query(cte.query, scope, undefined, (c) => (columns = c))
+      // A column list (WITH c (a, b) AS …) renames the columns: Sosie does not follow it.
+      scope.ctes.set(String(cte.alias?.name?.value ?? '').toLowerCase(), cte.alias?.columns?.length ? undefined : columns)
     }
     if (q.locks?.length) {
       this.#refuse({ ...DENIED, message: 'Sosie does not lock rows (FOR UPDATE, FOR SHARE): other sessions would wait on them.' })
     }
-    this.#setExpr(q.body, scope, onTargets)
+    this.#setExpr(q.body, scope, onTargets, onColumns)
     for (const key of ['order_by', 'limit_clause', 'limit', 'offset', 'fetch']) if (q[key]) this.#expr(q[key], scope)
   }
 
-  #setExpr(body: Node, scope: Scope, onTargets?: (t: Target[]) => void): void {
-    if (body.Select) return this.#select(body.Select, scope, onTargets)
-    if (body.Query) return this.#query(body.Query, scope, onTargets)
+  #setExpr(body: Node, scope: Scope, onTargets?: (t: Target[]) => void, onColumns?: (c: Columns | undefined) => void): void {
+    if (body.Select) return this.#select(body.Select, scope, onTargets, onColumns)
+    if (body.Query) return this.#query(body.Query, scope, onTargets, onColumns)
     if (body.SetOperation) {
       // MySQL names no table for a UNION's columns: each is what every branch has in its place.
       let left: Target[] | undefined
@@ -302,7 +313,7 @@ class Analyzer {
     this.#refuse(WRITE)
   }
 
-  #select(select: Node, outer: Scope, onTargets?: (t: Target[]) => void): void {
+  #select(select: Node, outer: Scope, onTargets?: (t: Target[]) => void, onColumns?: (c: Columns | undefined) => void): void {
     const scope: Scope = { relations: [], ctes: outer.ctes, parent: outer }
     if (select.into) {
       this.#refuse({ ...DENIED, message: 'Sosie does not run SELECT … INTO: it puts values where Sosie cannot fake them.' })
@@ -313,11 +324,42 @@ class Analyzer {
     }
     for (const from of select.from ?? []) for (const join of from.joins ?? []) this.#expr(join.join_operator, scope)
     onTargets?.((select.projection ?? []).map(target))
+    onColumns?.(this.#columns(select.projection ?? [], scope))
     for (const hint of select.optimizer_hints ?? []) this.#hint(String(hint.text ?? ''))
     for (const [key, value] of Object.entries(select)) {
       if (key === 'from' || key === 'into' || key === 'select_token' || key === 'optimizer_hints') continue
       this.#expr(value, scope)
     }
+  }
+
+  /**
+   * The columns a select list gives, for a derived table or a CTE that holds it: a column that is a column of a table
+   * keeps its field, so a literal compared with it outside turns back there. A * over a table Sosie does not know
+   * leaves them unknown.
+   */
+  #columns(items: Node[], scope: Scope): Columns | undefined {
+    const given = new Set<string>()
+    const byName = new Map<string, Field>()
+    for (const item of items) {
+      if (item.Wildcard || item.QualifiedWildcard) {
+        // t.* names its relation last: ObjectName's parts, as names().
+        const qualifier = item.QualifiedWildcard ? names(item.QualifiedWildcard[0]?.ObjectName).at(-1)?.toLowerCase() : undefined
+        for (const r of scope.relations.filter((r) => !qualifier || r.alias.toLowerCase() === qualifier)) {
+          if (!r.byName) return undefined
+          for (const name of r.columns ?? r.byName.keys()) given.add(name)
+          for (const [name, field] of r.byName) byName.set(name, field)
+        }
+        continue
+      }
+      const expr = item.UnnamedExpr ?? item.ExprWithAlias?.expr
+      const ref = unwrapColumn(expr)
+      const name = (item.ExprWithAlias ? String(item.ExprWithAlias.alias?.value ?? '') : (ref?.at(-1) ?? '')).toLowerCase()
+      if (!name) continue
+      given.add(name)
+      const near = ref ? this.#resolve(expr, scope) : undefined
+      if (near && near !== 'catalog') byName.set(name, near)
+    }
+    return { names: given, byName }
   }
 
   #relation(relation: Node | undefined, scope: Scope): void {
@@ -328,7 +370,8 @@ class Analyzer {
       const alias = String(table.alias?.name?.value ?? parts.at(-1) ?? '')
       if (table.args) this.#expr(table.args, scope)
       if (parts.length === 1 && hasCte(scope, parts[0]!.toLowerCase())) {
-        scope.relations.push({ alias })
+        const columns = cteColumns(scope, parts[0]!.toLowerCase())
+        scope.relations.push({ alias, ...(columns && { byName: columns.byName, columns: columns.names }) })
         return
       }
       const db = (parts.length > 1 ? parts.at(-2)! : this.database).toLowerCase()
@@ -348,8 +391,11 @@ class Analyzer {
       return
     }
     if (relation.Derived) {
-      this.#query(relation.Derived.subquery, relation.Derived.lateral ? scope : (scope.parent ?? scope))
-      scope.relations.push({ alias: String(relation.Derived.alias?.name?.value ?? '') })
+      let columns: Columns | undefined
+      this.#query(relation.Derived.subquery, relation.Derived.lateral ? scope : (scope.parent ?? scope), undefined, (c) => (columns = c))
+      const renamed = relation.Derived.alias?.columns?.length
+      const known = !renamed && columns ? { byName: columns.byName, columns: columns.names } : {}
+      scope.relations.push({ alias: String(relation.Derived.alias?.name?.value ?? ''), ...known })
       return
     }
     if (relation.NestedJoin) {
@@ -510,7 +556,7 @@ class Analyzer {
     for (let s: Scope | undefined = scope; s; s = s.parent) {
       const candidates =
         parts.length === 1
-          ? s.relations.filter((r) => !r.byName || r.byName.has(column) || r.system)
+          ? s.relations.filter((r) => !r.byName || r.byName.has(column) || r.columns?.has(column) || r.system)
           : s.relations.filter((r) => r.alias.toLowerCase() === parts.at(-2) && (parts.length < 3 || r.db === parts.at(-3)))
       if (!candidates.length) continue
       if (candidates.length > 1) return undefined
@@ -540,7 +586,7 @@ class Analyzer {
     } else if (body.MultipleAssignments) {
       for (const a of body.MultipleAssignments.assignments ?? []) assignments.push({ scope: a.scope, name: names(a.name), value: a.value })
     } else if (body.SetTimeZone) {
-      return this.#expr(body.SetTimeZone.value, { relations: [], ctes: new Set() })
+      return this.#expr(body.SetTimeZone.value, { relations: [], ctes: new Map() })
     } else {
       return this.#refuse({ ...UNSUPPORTED, message: 'Sosie does not run this SET.' })
     }
@@ -550,7 +596,7 @@ class Analyzer {
   #assign(scope: string | undefined, name: string[], value: Node | undefined): void {
     const first = name[0] ?? ''
     // A user variable: anything a query may read, which is then faked as a value wherever it comes back.
-    if (first.startsWith('@') && !first.startsWith('@@')) return this.#expr(value, { relations: [], ctes: new Set() })
+    if (first.startsWith('@') && !first.startsWith('@@')) return this.#expr(value, { relations: [], ctes: new Map() })
     if (scope && !/^(session|local)$/i.test(scope)) return this.#refuse(SERVER_SETTINGS)
     const prefix = first.startsWith('@@') ? first.slice(2).toLowerCase() : ''
     if (['global', 'persist', 'persist_only'].includes(prefix)) return this.#refuse(SERVER_SETTINGS)
@@ -609,6 +655,10 @@ class Analyzer {
 
 function hasCte(scope: Scope | undefined, name: string): boolean {
   return !!scope?.ctes.has(name)
+}
+
+function cteColumns(scope: Scope | undefined, name: string): Columns | undefined {
+  return scope?.ctes.get(name)
 }
 
 function names(variable: Node[] | undefined): string[] {

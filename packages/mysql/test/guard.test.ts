@@ -146,6 +146,14 @@ describe('the guard', () => {
     expect(near("SELECT * FROM information_schema.TABLES WHERE TABLE_NAME = 'users'")).toEqual([['users', 'catalog']])
     // Two tables with the column, unqualified: Sosie cannot tell which.
     expect(near('SELECT * FROM users, orders WHERE id = 7')).toEqual([['7', undefined]])
+    // Through a derived table and a CTE, renamed or not, to the column each one's column is.
+    expect(near('SELECT * FROM (SELECT id, user_id AS owner FROM orders) t WHERE t.id = 8 AND owner = 6')).toEqual([
+      ['8', 'orders.id'],
+      ['6', 'orders.user_id'],
+    ])
+    expect(near('WITH o AS (SELECT * FROM orders) SELECT * FROM o WHERE id = 8')).toEqual([['8', 'orders.id']])
+    // A column the derived table computes is no field's, and no table outside it is looked at for its name.
+    expect(near('SELECT * FROM users u, (SELECT UPPER(email) AS email FROM users) t WHERE t.email = 7')).toEqual([['7', undefined]])
   })
 
   it('leaves alone a literal whose text it would not write back as it read it', () => {
