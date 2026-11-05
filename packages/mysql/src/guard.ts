@@ -103,7 +103,11 @@ const LOCATION = new Set([
   'admin_port', 'mysqlx_bind_address', 'mysqlx_port', 'mysqlx_socket', 'relay_log', 'relay_log_basename', 'relay_log_index',
   'relay_log_info_file', 'log_bin', 'log_bin_basename', 'log_bin_index', 'ssl_ca', 'ssl_capath', 'ssl_cert', 'ssl_key', 'ssl_crl',
   'ssl_crlpath', 'admin_ssl_ca', 'admin_ssl_cert', 'admin_ssl_key', 'replica_load_tmpdir', 'slave_load_tmpdir', 'init_file',
-  'keyring_file_data', 'auto_generated_certs', 'debug',
+  'keyring_file_data', 'auto_generated_certs', 'debug', 'caching_sha2_password_private_key_path',
+  'caching_sha2_password_public_key_path', 'sha256_password_private_key_path', 'sha256_password_public_key_path',
+  'innodb_buffer_pool_filename', 'innodb_doublewrite_dir', 'mysqlx_ssl_ca', 'mysqlx_ssl_capath', 'mysqlx_ssl_cert',
+  'mysqlx_ssl_crl', 'mysqlx_ssl_crlpath', 'mysqlx_ssl_key', 'admin_ssl_capath', 'admin_ssl_crl', 'admin_ssl_crlpath',
+  'group_replication_local_address', 'group_replication_group_seeds', 'audit_log_file',
 ])
 
 /** Functions that read files, take locks other sessions wait on, or wait on replication. */

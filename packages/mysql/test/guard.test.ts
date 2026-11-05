@@ -101,6 +101,8 @@ describe('the guard', () => {
     // A number sets modes by their bits: 1048576 is NO_BACKSLASH_ESCAPES, 4 ANSI_QUOTES.
     ['SET sql_mode = 1048576', 1227],
     ['SHOW STATUS', 1227],
+    ['SELECT @@caching_sha2_password_private_key_path', 1227],
+    ['SELECT @@global.mysqlx_ssl_cert', 1227],
     ["SHOW GLOBAL STATUS LIKE 'Mysqlx_socket'", 1227],
     ['SET SESSION sql_mode = 4', 1227],
     ["SET sql_mode = 'IGNORE_SPACE'", 1227],
