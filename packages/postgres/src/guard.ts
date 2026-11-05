@@ -105,6 +105,10 @@ const REFUSED_RELATIONS: Record<string, string> = {
   pg_hba_file_rules: WHERE,
   pg_ident_file_mappings: WHERE,
   pg_file_settings: WHERE,
+  // pg_config() as a view: the paths Postgres was built and installed with.
+  pg_config: WHERE,
+  pg_stat_ssl: WHERE,
+  pg_stat_gssapi: WHERE,
 }
 
 /** Settings that say where the database is: refused in SHOW and current_setting, as inet_server_addr() is. */
@@ -131,6 +135,12 @@ const LOCATION = new Set([
   'ssl_key_file',
   'ssl_ca_file',
   'ssl_crl_file',
+  'ssl_crl_dir',
+  'ssl_dh_params_file',
+  'ssl_passphrase_command',
+  'log_directory',
+  'dynamic_library_path',
+  'extension_control_path',
 ])
 
 /** Settings a query's own code may have written a row value into: their values are faked. */
@@ -144,6 +154,8 @@ const REFUSED_FUNCTIONS: Record<string, string> = {
   inet_server_port: WHERE,
   inet_client_addr: WHERE,
   inet_client_port: WHERE,
+  pg_stat_get_backend_client_addr: WHERE,
+  pg_stat_get_backend_client_port: WHERE,
   pg_config: WHERE,
   pg_tablespace_location: WHERE,
   pg_read_file: READS,
