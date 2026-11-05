@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,6 +31,70 @@ function run(args: string[], more: Record<string, string | undefined> = {}, cwd?
     throw new Error(`sosie ${args.join(' ')} did not end: ${result.error?.message ?? result.signal}\n${result.stdout}${result.stderr}`)
   }
   return { status: result.status, stdout: result.stdout, stderr: result.stderr }
+}
+
+/**
+ * Run the CLI to the end without holding the test's thread, within 20 s. One that does not end is asked for Node's
+ * diagnostic report before it is killed, and fails the test with where it was: its JavaScript stack, and what kept it
+ * waiting. No report at all means it was held in native code, outside JavaScript.
+ */
+async function watched(args: string[], more: Record<string, string | undefined> = {}, cwd?: string) {
+  const reports = mkdtempSync(join(tmpdir(), 'sosie-report-'))
+  const child = spawn(process.execPath, ['--report-on-signal', '--report-signal=SIGUSR2', `--report-directory=${reports}`, CLI, ...args], {
+    env: env(more),
+    cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let stdout = ''
+  let stderr = ''
+  child.stdout.on('data', (d) => (stdout += d))
+  child.stderr.on('data', (d) => (stderr += d))
+  const status = await new Promise<number | null | 'late'>((resolve) => {
+    const timer = setTimeout(() => resolve('late'), 20_000)
+    child.on('exit', (code) => (clearTimeout(timer), resolve(code)))
+  })
+  if (status !== 'late') return { status, stdout, stderr }
+  child.kill('SIGUSR2')
+  await new Promise((r) => setTimeout(r, 3000))
+  const [file] = readdirSync(reports)
+  // On Linux, what the process is doing, as the kernel sees it: running or asleep, on what, with which files open.
+  const proc = (path: string) => {
+    try {
+      return readFileSync(`/proc/${child.pid}/${path}`, 'utf8').trim()
+    } catch {
+      return ''
+    }
+  }
+  const tasks = (() => {
+    try {
+      return readdirSync(`/proc/${child.pid}/task`).map((t) => `${t}: ${proc(`task/${t}/stat`).split(') ')[1]?.split(' ')[0] ?? '?'} ${proc(`task/${t}/wchan`)} ${proc(`task/${t}/comm`)}`)
+    } catch {
+      return []
+    }
+  })()
+  const fds = (() => {
+    try {
+      return readdirSync(`/proc/${child.pid}/fd`).map((fd) => {
+        try {
+          return readlinkSync(`/proc/${child.pid}/fd/${fd}`)
+        } catch {
+          return fd
+        }
+      })
+    } catch {
+      return []
+    }
+  })()
+  const kernel = tasks.length ? ['Threads (state, wchan, name):', ...tasks, 'Open:', ...fds, `Syscall: ${proc('syscall')}`] : []
+  child.kill('SIGKILL')
+  let where = 'No report: it was busy, or held in native code.'
+  if (file) {
+    const report = JSON.parse(readFileSync(join(reports, file), 'utf8'))
+    const handles = (report.libuv ?? []).filter((h: { is_active?: boolean }) => h.is_active).map((h: { type: string; details?: string }) => `${h.type}${h.details ? ` ${h.details}` : ''}`)
+    const native = (report.nativeStack ?? []).slice(0, 25).map((f: { symbol: string }) => f.symbol)
+    where = [...(report.javascriptStack?.stack ?? []), 'Active handles:', ...handles, 'Native stack:', ...native].join('\n')
+  }
+  throw new Error(`sosie ${args.join(' ')} did not end in 20 s. Where it was:\n${where}\n${kernel.join('\n')}\n${stdout}${stderr}`)
 }
 
 /** Every Sosie a test started: one that a failing test left running is stopped with the file. */
@@ -140,14 +204,14 @@ describe('sosie', () => {
     await mcp.close()
   })
 
-  it('scans: nothing real in what it served, and the real value where one is', () => {
+  it('scans: nothing real in what it served, and the real value where one is', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sosie-transcripts-'))
     writeFileSync(join(dir, 'session.jsonl'), transcript.join('\n'))
-    const clean = run(['scan', dir], { SOSIE_HOME: home })
+    const clean = await watched(['scan', dir], { SOSIE_HOME: home })
     expect(clean.stdout).toContain('✓ No real values found in 1 file.')
     expect(clean.status).toBe(0)
     writeFileSync(join(dir, 'leak.md'), 'The agent wrote:\nZephyrine Orrowmoor ordered twice.\n')
-    const leak = run(['scan', dir], { SOSIE_HOME: home })
+    const leak = await watched(['scan', dir], { SOSIE_HOME: home })
     expect(leak.status).toBe(1)
     // Zephyrine is also a key in a profile, so the first real value found on the line may be either.
     expect(leak.stdout).toMatch(new RegExp(`✗ ${join(dir, 'leak.md')}:2  a real value from (format:full_name|users\\.profile\\.\\$\\.\\*key)\n`))
