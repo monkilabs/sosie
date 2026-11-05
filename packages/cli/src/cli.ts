@@ -131,6 +131,11 @@ async function start(options: {
     throw new Exit(2, fail(`Sosie reads postgres://, mysql:// and mongodb:// databases, and http:// or https:// APIs, for now; not ${upstream.protocol}//.`))
   }
 
+  // A rules file that is not there is a usage error, told before Sosie connects; what it says is checked after, against
+  // the schema.
+  const rulesFile = options.rules ?? (existsSync('sosie.yml') ? 'sosie.yml' : undefined)
+  if (rulesFile && !existsSync(rulesFile)) throw new Exit(2, fail(`No rules file at ${rulesFile}.`))
+
   let connection
   try {
     connection = await source.connect(upstream, { maxRows: options.maxRows, statementTimeout: 30_000, env: process.env })
@@ -138,10 +143,8 @@ async function start(options: {
     throw new Exit(1, fail((error as Error).message))
   }
 
-  const rulesFile = options.rules ?? (existsSync('sosie.yml') ? 'sosie.yml' : undefined)
   let rules: Rules = NO_RULES
   if (rulesFile) {
-    if (!existsSync(rulesFile)) throw new Exit(2, fail(`No rules file at ${rulesFile}.`))
     try {
       rules = loadRules(readFileSync(rulesFile, 'utf8'), connection.schema, rulesFile, { learns: !!connection.learns })
     } catch (error) {

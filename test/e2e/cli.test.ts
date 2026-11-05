@@ -245,6 +245,10 @@ describe('sosie, when something is wrong', () => {
     expect(result.status).toBe(1)
     expect(result.stderr).toContain(`✗ Cannot connect to 127.0.0.1:${port}/app`)
     expect(result.stderr).not.toContain('secret')
+    // A rules file that is not there is a usage error, told before Sosie tries to connect.
+    const missing = run(['--rules', 'nope.yml'], { SOSIE_UPSTREAM: `postgres://kim:secret@127.0.0.1:${port}/app`, SOSIE_HOME: home })
+    expect(missing.status).toBe(2)
+    expect(missing.stderr).toContain('✗ No rules file at nope.yml.')
   })
 
   it('names a typo in sosie.yml and suggests the field meant', () => {
