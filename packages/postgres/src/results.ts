@@ -1,5 +1,6 @@
 import type { Faker, Field, FieldType, RequestScope, Value } from '@sosie/core'
 import { parseArray, serializeArray } from './arrays.js'
+import { after, parseRanges, serializeRanges, type Range } from './ranges.js'
 import type { Analysis, Target } from './guard.js'
 import type { ColumnDescription } from './protocol.js'
 import type { Catalog } from './schema.js'
@@ -57,6 +58,20 @@ export function fakeRow(values: (string | null)[], plans: ColumnPlan[], faker: F
       try {
         const { bounds, items } = parseArray(value)
         return serializeArray(fake(items) as Value[], bounds)
+      } catch {
+        return faker.computed(value, { kind: 'string' }, sent) as string
+      }
+    }
+    if (type.kind === 'range') {
+      try {
+        const { multi, ranges } = parseRanges(value)
+        // Each bound faked as the range's subtype, in the field's domain; put back in order, as a range is.
+        const faked = ranges.map((r): Range | 'empty' => {
+          if (r === 'empty') return r
+          const [lower, upper] = fake([r.lower, r.upper]) as (string | null)[]
+          return lower != null && upper != null && after(lower, upper, type.of.kind) ? { ...r, lower: upper, upper: lower } : { ...r, lower: lower ?? null, upper: upper ?? null }
+        })
+        return serializeRanges(multi, faked)
       } catch {
         return faker.computed(value, { kind: 'string' }, sent) as string
       }

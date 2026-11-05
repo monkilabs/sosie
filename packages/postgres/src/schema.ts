@@ -122,6 +122,7 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
             typtype::text AS typtype, typcategory::text AS category, typtypmod::int AS typmod
      FROM pg_type`,
   )
+  const ranges = await client.query<RangeRow>(`SELECT rngtypid::int AS oid, rngsubtype::int AS subtype, rngmultitypid::int AS multi FROM pg_range`)
   const types = await client.query<{ typname: string }>(`
     SELECT DISTINCT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE ${SYSTEM}`)
   const role = await client.query<{ admin: boolean }>(
@@ -138,6 +139,7 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     constraints: constraints.rows,
     enums: new Map(enums.rows.map((e) => [e.oid, e.labels])),
     sends: sends.rows,
+    ranges: ranges.rows,
     views: views.rows,
     functions: functions.rows.map((f) => f.proname),
     operators: operators.rows.map((o) => o.oprname),
@@ -147,6 +149,13 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     writable: writable.rows[0]?.count ?? 0,
     admin: role.rows[0]?.admin ?? false,
   })
+}
+
+/** A range type, its subtype and its multirange's type. */
+export interface RangeRow {
+  oid: number
+  subtype: number
+  multi: number
 }
 
 /** A row of pg_type. */
@@ -167,6 +176,7 @@ export interface CatalogRows {
   enums: Map<number, string[]>
   /** Every type: its send function, element, base type and kind; none in tests that build a catalog by hand. */
   sends?: TypeRow[]
+  ranges?: RangeRow[]
   views: ViewRow[]
   functions: string[]
   operators: string[]
@@ -185,9 +195,13 @@ export function buildCatalog(rows: CatalogRows): Catalog {
   for (const c of rows.columns) columnsOf.set(c.attrelid, [...(columnsOf.get(c.attrelid) ?? []), c])
 
   const types = new Map((rows.sends ?? []).map((t) => [t.oid, t]))
+  const subtypes = new Map((rows.ranges ?? []).flatMap((r) => [[r.oid, r.subtype] as const, [r.multi, r.subtype] as const]))
   const typeOf = (oid: number, typmod = -1, depth = 0): FieldType => {
     const labels = rows.enums.get(oid)
     if (labels) return { kind: 'enum', labels }
+    // A range and its multirange, by their subtype.
+    const subtype = subtypes.get(oid)
+    if (subtype !== undefined && depth <= 16) return { kind: 'range', of: typeOf(subtype, -1, depth + 1) }
     const row = types.get(oid)
     if (!row?.typtype || depth > 16) return typeByOid(oid, rows.enums)
     // A domain is its base type, with its own modifier where the column has none; over an enum, an array or a domain too.

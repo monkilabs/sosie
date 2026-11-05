@@ -159,6 +159,25 @@ describe('reading through Sosie', () => {
     expect(String(found.id)).toBe(rows[0]!.id)
   })
 
+  it('fakes a range bound by bound, in order, so Postgres reads it as a range again', async () => {
+    const asText = { getTypeParser: () => (value: string) => value }
+    const text = 'SELECT during, seats, spans FROM memberships ORDER BY id'
+    const { rows } = await client.query({ text, types: asText })
+    seen.push(rows)
+    const { rows: real } = await truth.query({ text, types: asText })
+    expect(rows[0]!.during).not.toBe(real[0]!.during)
+    expect(rows[0]!.seats).not.toBe(real[0]!.seats)
+    expect(rows[0]!.spans).not.toBe(real[0]!.spans)
+    expect(rows[0]!.during).toMatch(/^\["\d{4}-\d\d-\d\d \d\d:\d\d:\d\d[+-]\d\d","\d{4}-.+"\)$/)
+    expect(rows[0]!.spans).toMatch(/^\{\[\d{4}-\d\d-\d\d,\d{4}-\d\d-\d\d\),\[.+\)\}$/)
+    // An infinite bound stays infinite, and empty ranges stay empty.
+    expect(rows[1]!.during).toMatch(/^\(,".+"\]$/)
+    expect(rows[1]!.seats).toBe('empty')
+    expect(rows[1]!.spans).toBe('{}')
+    // Postgres reads every fake as its type: each range's bounds in order.
+    for (const row of rows) await truth.query('SELECT $1::tstzrange, $2::int4range, $3::datemultirange', [row.during, row.seats, row.spans])
+  })
+
   it('fakes a setting a function set from a row, as Postgres reports it', async () => {
     const c = await sosie.client()
     const reported: Record<string, string> = {}

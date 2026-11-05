@@ -260,6 +260,7 @@ export type FieldType =
   | { kind: 'uuid' | 'bytes' | 'ip' | 'objectid' }  // objectid: MongoDB's, as 24 hex digits
   | { kind: 'json' }
   | { kind: 'array'; of: FieldType }
+  | { kind: 'range'; of: FieldType }                 // its bounds of that type: Postgres's ranges and multiranges
   | { kind: 'unknown' }
 ```
 
@@ -398,6 +399,7 @@ Values a query computes fake in `computed:<type>`.
 | A value its type's faker cannot change (`''` or `-` in a field without a format, `NaN` and `Infinity` in a number, `infinity` in a date) | Itself: there is nothing in it to fake. A field with a format draws its fake whatever the value, so even `-` in a `city` becomes a city |
 | `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked. Anywhere, a key that holds a value the request turned back from a fake (`quillon`, `quillon_profile`, `QuillonSettings`) is faked, however it looks: an answer that holds it is echoing what the client sent |
 | `array` | Each element faked in the field's domain |
+| `range` | Each bound faked as its type, in the field's domain, then put in order; brackets, infinite bounds and `empty` kept, so the database reads it as a range again |
 | `ip` | An address from a documentation range |
 | `bytes` | Random bytes of the same length; derived, not stored |
 | `unknown` | `null` |
@@ -686,6 +688,7 @@ own domain and passes only if `sosie.yml` lists it.
 | `uuid`, `json`, `jsonb`, `bytea`, `inet`, `cidr` | `uuid`, `json`, `json`, `bytes`, `ip`, `ip` |
 | A domain | its base type, through a domain over another, an enum or an array |
 | Arrays of any of these | `array` |
+| A range or a multirange of any of these (`int4range`, `tstzrange`, `datemultirange`) | `range` |
 | Anything else | `unknown` |
 
 ### Guard
@@ -1691,7 +1694,8 @@ source learns. Format domains make a person's email the same fake from the datab
 
 - Prisma's own schema engine (`prisma db pull`, migrations) is not checked:
   migrations write, and `db pull` reads the catalogs, which pass.
-- Postgres types without a neutral type come back `NULL`: `xml`, `bit`, `tsvector` and ranges.
+- Postgres types without a neutral type come back `NULL`: `xml`, `bit` and `tsvector`. An array of ranges is shaped,
+  not faked bound by bound; a range compared in a query is used as written.
 - REST: a collection named in kebab case (`/line-items`) is never learned as the API's word, so links fake it.
 - GraphQL: every refusal from the check threads is tagged `SOSIE_TOO_COSTLY`, `Sosie is stopping.` and a failure of
   graphql-js's own included; and an `operationName` that names no operation is answered as if the document had

@@ -302,7 +302,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
   ): Steps<Value> {
     if (value === null) return null
     if (Array.isArray(value)) {
-      const of = type.kind === 'array' ? type.of : type
+      const of = type.kind === 'array' || type.kind === 'range' ? type.of : type
       const out: Value[] = []
       for (const item of value) out.push(yield* fake(item, of, domain, plan, structure))
       return out
@@ -320,7 +320,8 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
       case 'unknown':
         return null
       case 'array':
-        // A source that could not split an array hands over its text: keep its shape, never its contents.
+      case 'range':
+        // A source that could not split an array or a range hands over its text: keep its shape, never its contents.
         return shape(value, new Random(store.seed(domain, value)))
       default:
         return scalar(value, type, domain, plan)
@@ -408,7 +409,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
         }
         const plan = planOf(near)
         if (plan.domain === null) return undefined
-        const type = near.type.kind === 'array' ? near.type.of : near.type
+        const type = near.type.kind === 'array' || near.type.kind === 'range' ? near.type.of : near.type
         switch (type.kind) {
           case 'boolean':
             return label(flip(fakeValue, plan.domain), fakeValue)

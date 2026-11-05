@@ -55,6 +55,8 @@ export type FieldType =
   | { kind: 'uuid' | 'bytes' | 'ip' | 'objectid' }
   | { kind: 'json' }
   | { kind: 'array'; of: FieldType }
+  /** A range of a type, and its bounds of that type: Postgres's ranges and multiranges. Each bound is faked as `of`. */
+  | { kind: 'range'; of: FieldType }
   | { kind: 'unknown' }
 
 export interface Faker {

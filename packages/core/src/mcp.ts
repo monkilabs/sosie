@@ -127,6 +127,7 @@ export function describe(schema: Schema, passing: string[], only?: string, stric
 
 function typeName(type: Schema['entities'][number]['fields'][number]['type']): string {
   if (type.kind === 'array') return `${typeName(type.of)}[]`
+  if (type.kind === 'range') return `range(${typeName(type.of)})`
   if (type.kind === 'enum') return `enum(${type.labels.join(', ')})`
   return type.kind
 }
