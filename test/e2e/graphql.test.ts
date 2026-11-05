@@ -59,12 +59,18 @@ async function startGraphqlSosie(
 }
 
 /** What `work` gives, and the longest Sosie's event loop, in this process, stood still meanwhile: every other client waits that long. */
-async function stillest<T>(work: Promise<T>): Promise<{ result: T; ms: number }> {
+/**
+ * The longest the event loop was held while `work` ran, and how long it ran. Paced, no one hold is more than a small
+ * part of the whole; one held for all of it answered no one else meanwhile. A loaded machine stretches both alike, so
+ * they are compared with each other, never with a number of milliseconds.
+ */
+async function stillest<T>(work: Promise<T>): Promise<{ result: T; ms: number; total: number }> {
   const loop = monitorEventLoopDelay({ resolution: 10 })
+  const started = performance.now()
   loop.enable()
   try {
     const result = await work
-    return { result, ms: loop.max / 1e6 }
+    return { result, ms: loop.max / 1e6, total: performance.now() - started }
   } finally {
     loop.disable()
   }
@@ -206,11 +212,11 @@ describe('a GraphQL API', () => {
       const others = (async () => {
         for (let i = 0; i < 5; i++) meanwhile.push((await sosie.ask('{ motd }')).status)
       })()
-      const { result, ms } = await stillest(heavy)
+      const { result, ms, total } = await stillest(heavy)
       await others
       expect(result).toMatchObject({ status: 400, body: { errors: [{ extensions: { code: 'SOSIE_TOO_COSTLY' } }] } })
       expect(meanwhile).toEqual([200, 200, 200, 200, 200])
-      expect(ms).toBeLessThan(1000)
+      expect(ms).toBeLessThan(total / 3)
     }
     // A thread that was stopped is replaced: introspection is answered again.
     expect((await sosie.ask('{ __schema { queryType { name } } }')).body).toEqual({ data: { __schema: { queryType: { name: 'Query' } } } })
@@ -239,9 +245,9 @@ describe('a GraphQL API', () => {
   })
 
   it('fakes a large JSON value a slice at a time, and answers other clients meanwhile', async () => {
-    const { result, ms } = await stillest(sosie.ask('{ big(n: 20000) }'))
+    const { result, ms, total } = await stillest(sosie.ask('{ big(n: 20000) }'))
     expect(Object.keys(result.body.data.big)).toHaveLength(20000)
-    expect(ms).toBeLessThan(1000)
+    expect(ms).toBeLessThan(total / 3)
   })
 
   it('sends a value compared with a field that passes as written, so no other field’s real value comes back in it', async () => {
