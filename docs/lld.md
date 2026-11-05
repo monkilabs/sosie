@@ -1505,7 +1505,9 @@ query that repeats a field, so one that needs more is refused
 everyone else; while both work on costly queries, others wait their turn, at
 most 2 seconds for each costly query ahead of them, since each is refused by
 then. A Sosie that cannot listen on its port stops its threads, and one that
-stops answers what they were still checking (`Sosie is stopping.`).
+stops answers what they were still checking (`Sosie is stopping.`, a `503` tagged `SOSIE_STOPPING`); a query graphql-js
+itself fails on is a `500` (`INTERNAL_SERVER_ERROR`). An `operationName` that names none of the document's operations
+gets `Unknown operation named "…".`
 Only queries reach the API, and only the operation to run with the fragments
 it uses: a mutation or a subscription is answered with an error, and its text
 never leaves Sosie, and so is a field of the mutation or subscription type
@@ -1697,9 +1699,6 @@ source learns. Format domains make a person's email the same fake from the datab
   migrations write, and `db pull` reads the catalogs, which pass.
 - Postgres types without a neutral type come back `NULL`: `xml`, `bit` and `tsvector`. An array of ranges is shaped,
   not faked bound by bound; a range compared in a query is used as written.
-- GraphQL: every refusal from the check threads is tagged `SOSIE_TOO_COSTLY`, `Sosie is stopping.` and a failure of
-  graphql-js's own included; and an `operationName` that names no operation is answered as if the document had
-  several.
 - MySQL: MariaDB, refused at start-up.
 - MongoDB: a fake in `$expr`, a `$lookup`'s `let`, or an index bound (`min`, `max`, `hint` by value) is used as
   written; Compass and the drivers other than Node's are not checked; a cursor cut at `--max-rows` says so only in the
