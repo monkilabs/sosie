@@ -30,7 +30,9 @@ const here = (p: string) => (path.startsWith(p) ? 'page' : undefined);
     <meta name="description" content={description} />
     <meta name="theme-color" content="#0b0d10" />
     {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
-    <link rel="icon" type="image/svg+xml" href={url('favicon.svg')} />
+    <link rel="icon" type="image/png" sizes="32x32" href={url('icon-32.png')} />
+    <link rel="icon" type="image/svg+xml" href={url('icon.svg')} />
+    <link rel="apple-touch-icon" href={url('apple-touch-icon.png')} />
     <link rel="sitemap" href={url('sitemap-index.xml')} />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Sosie" />
