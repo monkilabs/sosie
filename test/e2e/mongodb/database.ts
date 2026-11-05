@@ -2,6 +2,26 @@ import { MongoClient } from 'mongodb'
 import type { TestProject } from 'vitest/node'
 import { seed } from './seed.js'
 
+/**
+ * A client of the server, once it takes the login: a container just started makes its root user after it listens.
+ * Heartbeats poll, since a client closed while a streamed hello waits throws inside vitest's stack mapper.
+ */
+async function connectWithin(server: string, ms: number): Promise<MongoClient> {
+  const until = Date.now() + ms
+  for (;;) {
+    const client = new MongoClient(server, { serverMonitoringMode: 'poll', serverSelectionTimeoutMS: 5000 })
+    try {
+      await client.connect()
+      await client.db('admin').command({ ping: 1 })
+      return client
+    } catch (error) {
+      await client.close().catch(() => {})
+      if (Date.now() > until) throw error
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+  }
+}
+
 declare module 'vitest' {
   export interface ProvidedContext {
     /** A login with the read role on the seeded database: what a developer gives Sosie. */
@@ -28,9 +48,7 @@ export default async function setup(project: TestProject) {
   const suffix = `${process.pid}_${Date.now() % 100000}`
   const database = `sosie_test_${suffix}`
   const reader = `sosie_reader_${suffix}`
-  // Heartbeats that poll: a client closed while a streamed hello waits throws inside vitest's stack mapper.
-  const root = new MongoClient(server, { serverMonitoringMode: 'poll' })
-  await root.connect()
+  const root = await connectWithin(server, 60_000)
   const db = root.db(database)
   await seed(db)
   await db.command({ createUser: reader, pwd: 'reader', roles: [{ role: 'read', db: database }] })

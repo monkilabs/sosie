@@ -49,13 +49,9 @@ jobs:
         env:
           MONGO_INITDB_ROOT_USERNAME: root
           MONGO_INITDB_ROOT_PASSWORD: root
+        # No health check: the tests wait for it, as its entrypoint makes the root user after it starts.
         ports:
           - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet -u root -p root --authenticationDatabase admin --eval 'db.adminCommand({ ping: 1 })'"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 30
     env:
       SOSIE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       SOSIE_TEST_MYSQL_URL: mysql://root:root@127.0.0.1:3306/
