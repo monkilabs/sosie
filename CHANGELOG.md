@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- Postgres: a column of a domain over another domain, an enum or an array,
+  and an enum array a query computes (`array_agg(role)`), are faked by their
+  type; they came back `NULL`.
+- Postgres: `interval` is faked as another duration in the same form, each
+  number another of as many digits, so a computed one (`age(born_on)`) is
+  faked too; it came back `NULL`.
+- Postgres: ranges and multiranges (`tstzrange`, `int4range`,
+  `datemultirange`) are faked bound by bound, as their subtype, and put back
+  in order; they came back `NULL`. `describe` shows them as `range(…)`.
+- Postgres: `bit` and `varbit` are faked as as many bits, in text and in
+  binary; MySQL's `BIT` too, and a single bit, as Hibernate maps a boolean to
+  `BIT(1)`, is a flag that flips as a boolean does. They came back `NULL`.
+- `--timeout` sets how long a statement, a command or a request may run
+  upstream, from 1 to 3600 seconds; it was 30 s, with no way to change it.
+- REST: a collection named in kebab case (`/line-items`) is learned as one in
+  snake case is, so links show it as it is.
+- GraphQL: a refusal says why. Sosie stopping is a `503` tagged
+  `SOSIE_STOPPING`, a failure of graphql-js's own a `500`; only a query that
+  asks too much is tagged `SOSIE_TOO_COSTLY`. An `operationName` that names
+  no operation gets `Unknown operation named "…"`.
+- MongoDB: a fake compared with a field in `$expr` (`$eq`, `$ne`, `$in`)
+  turns back, as one in a filter does.
+
 ## 0.3.0, 5 November 2026
 
 MongoDB, a source of its own; MySQL's prepared statements, several statements to
