@@ -19,6 +19,7 @@ Current versions as of October 2026.
 | Postgres source: SQL | [`pgsql-parser`](https://github.com/constructive-io/pgsql-parser) 18: Postgres's own parser compiled to WebAssembly, parse and print |
 | GraphQL source | [`graphql`](https://github.com/graphql/graphql-js) 17: parsing, validation and introspection, as the API's own server does them |
 | MySQL source: upstream | [`mysql2`](https://github.com/sidorares/node-mysql2) 3.24, each value read as the server's text bytes |
+| MongoDB source: upstream | [`mongodb`](https://github.com/mongodb/node-mongodb-native) 7.8, the official driver; [`bson`](https://github.com/mongodb/js-bson) 7.3, each value read in its own BSON type |
 | MySQL source: SQL | [`@guanmingchiu/sqlparser-ts`](https://github.com/guan404ming/sqlparser-ts) 0.63, pinned: the MySQL dialect of [sqlparser](https://github.com/apache/datafusion-sqlparser-rs) compiled to WebAssembly, which reads executable comments and joins adjacent strings as MySQL does |
 | The plugin | The [Agent Plugins](https://agent-plugins.org) 1.0 format, checked and compiled for each assistant by [OpenCastle](https://github.com/monkilabs/opencastle) 1.12 |
 | Upstream databases | PostgreSQL 15 to 18, each tested in CI. 19 when it is released (release candidate 1 on 15 October 2026) and the parser supports it. 14 is out: its support ends on 12 November 2026 |
@@ -32,7 +33,7 @@ been wrapped around the same code.
 
 ## Packages
 
-One repository, npm workspaces, five packages:
+One repository, npm workspaces, seven packages:
 
 | Package | Published as | Holds |
 | --- | --- | --- |
@@ -40,6 +41,7 @@ One repository, npm workspaces, five packages:
 | `packages/core` | `@sosie/core` | Everything that does not depend on a source: the source interface, the neutral schema, rules, faking, the store, `scan`, the MCP server |
 | `packages/postgres` | `@sosie/postgres` | The Postgres source: endpoint, guard, rewriting, schema reading |
 | `packages/mysql` | `@sosie/mysql` | The MySQL source: endpoint, guard, rewriting, schema reading |
+| `packages/mongodb` | `@sosie/mongodb` | The MongoDB source: endpoint, guard, shapes, rewriting, faking documents |
 | `packages/rest` | `@sosie/rest` | The REST source: an HTTP endpoint for the team's own API, OpenAPI reading, JSON faking |
 | `packages/graphql` | `@sosie/graphql` | The GraphQL source: a GraphQL endpoint for the team's own API, schema by introspection, query checking and faking |
 
@@ -105,6 +107,19 @@ packages/
     results.ts       which field each result column came from
     errors.ts        what an error, a warning or a column's name may show
     mcp.ts           the query tool
+  mongodb/src/
+    index.ts         the Source: matches mongodb:// and mongodb+srv://, refuses MongoDB before 6.0, reads the collections
+    endpoint.ts      the TCP server
+    protocol.ts      OP_MSG, and OP_QUERY for the first hello
+    session.ts       one client: the handshake, then each command
+    upstream.ts      the driver, a session per client, the cursors open upstream
+    guard.ts         commands and stages allowed by name; JavaScript and MongoDB's own databases refused
+    shape.ts         where each value of a result comes from: the find, or the pipeline stage by stage
+    rewrite.ts       fakes compared by equality in a filter, back to real values
+    fake.ts          a document, each value faked in its own BSON type
+    schema.ts        collections, views and validators to the neutral schema; fields learned as documents come
+    errors.ts        what an error may show
+    mcp.ts           the find and aggregate tools
   rest/src/
     index.ts         the Source: matches http:// and https://, finds the OpenAPI document
     endpoint.ts      the HTTP server: the guard, paths and queries back to real values
@@ -144,7 +159,7 @@ A source is everything that knows one kind of upstream. The core gives it a
 
 ```ts
 export interface Source {
-  /** 'postgres', 'mysql', 'rest', 'graphql'. */
+  /** 'postgres', 'mysql', 'mongodb', 'rest', 'graphql'. */
   readonly kind: string
   /** Whether this source handles this upstream, or this endpoint address; `env` can say so where the URL cannot. */
   matches(url: URL, env?: Record<string, string | undefined>): boolean
@@ -366,6 +381,7 @@ Values a query computes fake in `computed:<type>`.
 | `integer` | A number with the same sign and number of digits; never zero for a value that is not zero; within the column's size. A key whose digit range is crowded gets a digit more (see the store), and past the column's size, any number within it |
 | `decimal` | Digits replaced: the same sign, digits and scale. `NaN` and `Infinity` stay; other text is shaped |
 | `uuid` | A random UUID |
+| `objectid` | 24 hex digits: the first 8, its time in seconds, shifted by 1 to 365 days earlier or later; the rest random. Every field that holds one shares one domain, `objectid`, so a reference to a document is the fake of its `_id` |
 | `boolean` | Flipped or not, decided once per domain by its key |
 | `enum` | A label of the same enum, by a fixed shuffle per domain; the shuffle may leave a label in place |
 | `date`, `datetime` | Shifted by 1 to 365 days, earlier or later, a datetime by a time of day too; the same shift for the same value, in the same format. `infinity` stays |
@@ -482,6 +498,8 @@ lists it, for when several Sosies of a kind run; without it, the newest.
 | --- | --- | --- | --- |
 | `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres, MySQL | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice (MySQL: its warnings, Sosie's notes among them); every value a consistent fake |
+| `find` | MongoDB | `collection`; `filter`, `projection`, `sort`, `limit` as JSON or Extended JSON (optional) | Up to 200 documents as relaxed Extended JSON, a 64-bit integer past 2^53 kept whole |
+| `aggregate` | MongoDB | `collection`, `pipeline` as a JSON array | Up to 200 documents, as `find` |
 | `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a GET through Sosie, up to 200 items of each list, within 50 s; it reaches the running Sosie only, whatever the path says |
 | `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list, within 50 s |
 
@@ -1014,6 +1032,129 @@ result cut at the cap.
 - MySQL reports no column for a value it computes, so `MAX(id)` is faked by type, not in `users.id`'s domain; nor for
   a `UNION`'s columns, so they are faked by type too, a total row's label included.
 
+## MongoDB source
+
+For MongoDB 6.0 and later (wire version 17); 6.0, 7.0 and 8.0 are tested. `SOSIE_UPSTREAM` is
+`mongodb://user:password@host:27017/database` or `mongodb+srv://…`, its database named; the driver takes every option
+the string gives (TLS, `authSource`, `replicaSet`, `readPreference`). A string of several hosts does not read as a URL:
+the CLI asks for one host and the `replicaSet` option, from which the driver finds the others.
+
+### Endpoint
+
+It listens on 127.0.0.1, and on ::1 too; its address carries `directConnection=true`, so a driver takes Sosie for one
+server. Messages are OP_MSG, their document sequences (kind 1) set on the body as arrays and a checksum skipped; the
+first `hello` of a handshake may come as OP_QUERY, and is answered with OP_REPLY. OP_COMPRESSED gets an error: Sosie
+offers no compression. A message with `moreToCome` gets no answer. Values are read with BSON's own types
+(`promoteValues: false`), so what Sosie does not change goes back byte for byte.
+
+Sosie answers itself: `hello` and `isMaster` (a standalone server, writable, `helloOk`, sessions of 30 minutes, the
+upstream's version and wire versions, no `topologyVersion`, so drivers poll), `ping`, `buildInfo` (the version only),
+`endSessions`, `startSession`, `whatsmyuri`, `connectionStatus` (no users), `getLog` (empty), `getParameter` for the
+feature compatibility version only. A login (`saslStart`, `authenticate`) gets `AuthenticationFailed`: Sosie takes
+none. `hostInfo`, `getCmdLineOpts` and `serverStatus` are refused, since they say where the server is.
+
+### Upstream
+
+One `MongoClient` for the Sosie, its heartbeats polled, and an upstream session (`ClientSession`) per connection to
+Sosie, ended with it. A command is sent through `db.command` in that session, with the client's session, cluster and
+read-preference fields (`lsid`, `txnNumber`, `$clusterTime`, `$readPreference`, `apiVersion`, any other `$` field)
+taken off, so the driver sets its own, and `readConcern`'s `afterClusterTime` dropped. An answer's `$clusterTime`,
+`operationTime` and the like are taken off too: the upstream's clock never reaches the client.
+
+`find`, `aggregate`, `count` and `distinct` get `maxTimeMS`, the statement timeout or the client's own if lower. A
+cursor's id is MongoDB's, kept with the session that opened it, its shape and its scope, for the whole endpoint: a
+driver sends `getMore` from any connection of its pool. Past `--max-rows` documents, the cursor is killed upstream,
+its id answered as 0, and the terminal says so. `killCursors` kills those it names; a connection that closes kills
+those it opened.
+
+### Schema
+
+From `listCollections` on the connection string's database: each collection and view an entity, its fields those of a
+`$jsonSchema` validator when it has one (`bsonType` to a neutral type, `enum` of strings to an enum, nested objects
+and arrays of objects dotted). A view's pipeline is kept, with the collection it reads. Every other field is learned as
+documents come: `collection.path`, a nested field dotted, an array's elements the array's path; in another database,
+`database.collection.path`. The schema grows as fields are met, and `describe` lists it, written to the running entry
+at most every half second. `connectionStatus` with its privileges says whether the login can write or is an
+administrator: Sosie warns of either.
+
+### Guard
+
+A command is the first key of its document. Allowed: `find`, `aggregate`, `count`, `distinct`, `getMore`,
+`killCursors`; `listCollections`, `listIndexes`, `listDatabases` and `dbStats`, which show the schema and sizes. Every
+other command is refused, with code 13 (`Unauthorized`), which no driver retries: the writes by name (`This command
+changes data. Sosie is read-only.`), `explain`, `mapReduce`, and any command Sosie does not know. A command with
+`startTransaction` or `autocommit` is refused: Sosie runs no transaction.
+
+- **Databases and collections:** `admin` (users and their password hashes), `local` (the oplog: every write, with its
+  values) and `config` (sessions, and the values that bound each shard), but `listDatabases`; `system.profile`
+  (queries with their values), `system.js` and `system.users` in any database, as a command's collection or a
+  `$lookup`'s, `$graphLookup`'s or `$unionWith`'s.
+- **Stages:** each of a pipeline, a `$facet`'s, a `$lookup`'s and a `$unionWith`'s by name, from the stages Sosie
+  knows the shape of. Refused: `$out` and `$merge` (writes), `$currentOp`, `$listSessions`, `$listLocalSessions`,
+  `$planCacheStats` and `$querySettings` (other sessions' queries), `$changeStream` (every change, as long as it runs),
+  `$collStats` and `$indexStats` (the host).
+- **JavaScript:** `$where`, `$function`, `$accumulator`, and BSON code, anywhere in a filter, a projection or a
+  pipeline: what it computes over the documents cannot be read.
+
+### Shapes
+
+MongoDB's answers name no field: where each value of a result comes from is read from the command. A shape is what is
+at a path of a collection's documents (a leaf there is that field), computed, a count, a literal the client wrote, a
+document a stage built (its named keys, and what any other key was before), or one of several (`$unionWith`).
+
+- A `find` starts from its collection's documents, a view's through its pipeline, then its projection: an inclusion
+  builds a document of what it names, `_id` included unless excluded; an exclusion leaves the rest; an expression in
+  it is read as in a pipeline.
+- A pipeline is read stage by stage. `$match`, `$sort`, `$limit`, `$skip`, `$sample`, `$unwind` and the like keep the
+  shape; `$project`, `$addFields` and `$set` build documents of expressions; `$replaceRoot` takes an expression's;
+  `$group` gives its `_id`'s, and each accumulator: `$sum: 1` and `$count` a count, `$first`, `$last`, `$min`, `$max`,
+  `$push` and `$addToSet` of a field that field, any other computed; `$count` and `$sortByCount` counts; `$lookup` and
+  `$graphLookup` the joined collection's documents under `as`, through a `$lookup`'s own pipeline; `$facet` each
+  pipeline's; `$unionWith` one of two, a field only where both name the same; `$densify` and `$fill` what they fill,
+  computed; `$documents` literals.
+- An expression is a field's where it is a field path (`$email`, `$$ROOT.email`); a literal where it is one, or
+  `$literal`; `$first`, `$last`, `$arrayElemAt` and `$ifNull` of fields the field; a document of expressions built from
+  them; anything an operator computes, computed.
+
+### Rewriting
+
+A value compared by equality with a field is looked up in that field's domain: `{ path: value }`, `$eq`, `$ne`, `$in`,
+`$nin`, `$all`, inside `$and`, `$or`, `$nor`, `$not` and `$elemMatch` (of values or of documents), and a document or
+an array compared whole, leaf by leaf. A filter is read against the shape of the documents it filters: a `find`'s,
+`count`'s and `distinct`'s against the collection's (a view's through its pipeline), each `$match` of a pipeline
+against the documents before it, so one after a `$group` compares with what the group made, and a `$lookup`'s own
+pipeline against the joined collection. A real value goes back in the BSON type of the fake: an ObjectId as an
+ObjectId, a `Long` as a `Long`.
+
+### Faking
+
+Each document of a batch is faked by its shape, a value at a time, other clients let in every 200 documents. A key
+the command built, `_id`, or one that looks like a word is structure; any other is a value (a map keyed by email),
+faked in a domain of its own, and what is under it named `*`. A leaf is faked by its field, as `collection.path`, its
+name the path's last key; computed, by its type; a count passes when it is an integer; a literal passes. Each BSON type
+is faked as its text and written back in the same type: a string, `Int32` and `Long` (the integers by their size),
+`Double` and `Decimal128` (decimals), a boolean, a date (a datetime in ISO form), an ObjectId (`objectid`), a UUID
+(`uuid`), other binary data (`bytes`, in hex), a timestamp (a date, to the second), a regular expression, a symbol and
+code (strings). A DBRef keeps its collection, and fakes its id. `MinKey` and `MaxKey` pass. A fake that does not read
+as its type comes back `null`. `distinct`'s values are faked by the field it names; `count`'s `n` passes.
+
+### Errors
+
+An error about the command itself comes back scrubbed of every value Sosie turned back: a bad value or option, a
+parse error, a type mismatch, an unknown namespace, operator or stage, the time limit (`MaxTimeMSExpired`), and the
+like, by code. Any other comes back as its code and name only, `Error 241 (ConversionFailure): Sosie hides the rest of
+this message, which may quote a value from your documents.` An upstream that cannot be reached is
+`HostUnreachable`, with the reason in the terminal only.
+
+### Limits
+
+- Order and ranges follow the real values; a regular expression, `$text` and `$expr` filter on them.
+- A cursor cut at `--max-rows` says so in the terminal only: MongoDB has no warnings to carry it.
+- `listIndexes` and `listCollections` show an index's `partialFilterExpression` and a view's pipeline as written,
+  a value in them included.
+- A stage Sosie does not know the shape of is refused, and so is any newer one until Sosie reads it.
+- No TLS and no login on Sosie's own address.
+
 ## REST source
 
 For the team's own HTTP API, where the database's people come back as JSON.
@@ -1387,8 +1528,8 @@ returns and every value a client sends. What each planned source maps:
 | REST (built, above) | A local HTTP address; paths as upstream | `GET` and `HEAD` only | The OpenAPI document when there is one; otherwise where the value sits |
 | GraphQL (built, above) | A local HTTP address, at the API's path | Queries only, no mutations | The schema, by introspection or a file |
 | MySQL (built, above) | MySQL's protocol: statements as text, and prepared | Reads only, read-only session | Its result metadata, as with Postgres |
-| MongoDB (next) | Its wire protocol, `OP_MSG`; a standalone server to the driver | Commands allowed by name; `$out`, `$merge` and server-side JavaScript refused; the `read` role | The collection and the dotted path; an aggregation's pipeline for what it renames |
-| SQL Server (then) | TDS: batches and RPC, with TLS inside it | sqlparser's T-SQL dialect; the login's grants, as there is no read-only session | Browse mode or `sp_describe_first_result_set` |
+| MongoDB (built, above) | Its wire protocol, `OP_MSG`; a standalone server to the driver | Commands and stages allowed by name; writes, `$out`, `$merge` and server-side JavaScript refused; the `read` role | The collection and the dotted path, read from the find or the pipeline |
+| SQL Server (next) | TDS: batches and RPC, with TLS inside it | sqlparser's T-SQL dialect; the login's grants, as there is no read-only session | Browse mode or `sp_describe_first_result_set` |
 | Oracle (on demand) | None: MCP's `describe` and `query` only | sqlparser's Oracle dialect; `SET TRANSACTION READ ONLY` | The parse alone |
 
 Rules, domains, fakes, the store, `scan` and `describe` stay as they are. Format
@@ -1408,6 +1549,12 @@ domains make a person's email the same fake from the database and from the API.
   (`query()` and `execute()`), the `mariadb` driver and the `mysql` client read through Sosie; the built CLI starts in
   front of it, and its `query` tool reads through that. Every answer, error, warning and column name is searched for
   each canary. CI runs MySQL 8.4 and 9.
+- **MongoDB, end to end.** An embedded MongoDB from MongoDB's own binaries (`mongodb-memory-server`), or the server in
+  `SOSIE_TEST_MONGODB_URL`, seeded with the same canary people as documents, nested, in arrays and in every BSON
+  type, with orders that refer to users by ObjectId and a view; read by a login with the `read` role. The Node driver
+  reads through Sosie, and the built CLI starts in front of it, its `find` and `aggregate` tools reading through
+  that. Every answer and error is searched for each canary, and for the seed's ObjectIds. CI runs MongoDB 6.0, 7.0
+  and 8.0; mongosh was checked by hand.
 - **Postgres, end to end.** An embedded PostgreSQL 18, or the server in
   `SOSIE_TEST_DATABASE_URL`, seeded with canary values: unique emails, names,
   phone numbers, keys and numbers; values with nothing to fake (`''`, `-`,
@@ -1478,3 +1625,6 @@ domains make a person's email the same fake from the database and from the API.
   answered as if the document had several.
 - The statement timeout is 30 s, with no flag to change it.
 - MySQL: MariaDB, refused at start-up.
+- MongoDB: a fake in `$expr`, a `$lookup`'s `let`, or an index bound (`min`, `max`, `hint` by value) is used as
+  written; Compass and the drivers other than Node's are not checked; a cursor cut at `--max-rows` says so only in the
+  terminal.

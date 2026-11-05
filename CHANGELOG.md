@@ -16,6 +16,20 @@
   Sosie turned back a fake (`email = 'real@…'`), a derived table's column in
   its `org_name` too; the name is now taken from the client's own text.
 - MySQL: a `tinyint` is faked within its own range, not a `smallint`'s.
+- MongoDB, a source of its own (`@sosie/mongodb`): `SOSIE_UPSTREAM=mongodb://…`
+  or `mongodb+srv://…` starts a local MongoDB endpoint in front of MongoDB 6.0
+  and later (6.0, 7.0 and 8.0 tested). mongosh and the drivers read through it.
+  Commands are allowed by name: `find`, `aggregate`, `count`, `distinct` and the
+  schema's; writes, `explain`, JavaScript on the server, stages that write or
+  show other sessions, and the `admin`, `local` and `config` databases are
+  refused. Each value is faked by the collection field it comes from, read from
+  the find's projection or the pipeline stage by stage, or by its BSON type
+  where a stage computed it, in its own BSON type. A fake compared by equality
+  in a filter or a `$match` is turned back. `sosie mcp` adds `find` and
+  `aggregate`.
+- The core: an `objectid` type. An ObjectId's fake is 24 hex digits with its
+  time shifted, and every field that holds one shares one domain, so a
+  reference to a document is the fake of its `_id`.
 
 ## 0.2.0, 5 November 2026
 

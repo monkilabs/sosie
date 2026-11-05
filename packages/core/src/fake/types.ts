@@ -4,7 +4,7 @@ import { generate, text, type Format } from './formats.js'
 import { matchCase, shape, type Random } from './random.js'
 
 /** Types whose fakes are drawn and stored; booleans, enums, json and arrays are handled around them. */
-export type ScalarKind = 'string' | 'integer' | 'decimal' | 'uuid' | 'date' | 'datetime' | 'time' | 'ip' | 'bytes'
+export type ScalarKind = 'string' | 'integer' | 'decimal' | 'uuid' | 'date' | 'datetime' | 'time' | 'ip' | 'bytes' | 'objectid'
 
 export interface Draw {
   random: Random
@@ -46,7 +46,22 @@ export function fakeScalar(
       return ip(real, draw.random)
     case 'bytes':
       return bytes(real, draw.random)
+    case 'objectid':
+      return objectId(real, draw.random)
   }
+}
+
+/**
+ * A MongoDB ObjectId: 24 hex digits, the first 8 its time in seconds. The fake's time is shifted as a date is, by 1 to
+ * 365 days, so it still says roughly when; the rest is random. Text that is no ObjectId is shaped.
+ */
+function objectId(real: string, random: Random): string {
+  if (!/^[0-9a-f]{24}$/i.test(real)) return shape(real, random)
+  const seconds = Number.parseInt(real.slice(0, 8), 16)
+  const shifted = Math.min(0xffffffff, Math.max(0, seconds + random.int(1, 365) * 86_400 * (random.next() < 0.5 ? -1 : 1)))
+  let rest = ''
+  for (let i = 0; i < 16; i++) rest += random.int(0, 15).toString(16)
+  return matchCase(real, shifted.toString(16).padStart(8, '0') + rest)
 }
 
 /** A string with no format: shaped like the value, so dates stay dates and codes stay codes. */

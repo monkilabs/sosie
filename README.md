@@ -146,8 +146,31 @@ query, and prepared, as mysql2's `execute()` and Prisma send them. MySQL 8.4 and
 are tested. Give the login `SELECT` and `SHOW VIEW`, so a view's columns share
 their tables' fakes.
 
-Postgres, MySQL, REST and GraphQL are the first sources. MongoDB comes next, then SQL
-Server, each a package behind the same interface ([how Sosie grows](docs/hld.md#how-sosie-grows)).
+### In front of MongoDB
+
+The same command, with a `mongodb://` or `mongodb+srv://` connection string:
+
+```sh
+export SOSIE_UPSTREAM='mongodb://readonly:…@db.internal:27017/app'
+npx @sosie/cli
+```
+
+```
+  ✓ db.internal:27017/app, read-only: 12 collections
+  ✓ Every value is faked
+
+  Your agent, app and mongosh: mongodb://127.0.0.1:7674/app?directConnection=true
+```
+
+mongosh, the drivers and your app read through it. MongoDB says nothing of where a
+value came from, so Sosie reads it from the command: each value of a `find` or a
+pipeline is faked by the collection field it comes from, or by its BSON type when
+a stage computed it. Every ObjectId shares one domain, so references between
+collections hold. MongoDB 6.0, 7.0 and 8.0 are tested. Give the login the `read`
+role.
+
+Postgres, MySQL, MongoDB, REST and GraphQL are the first sources. SQL Server comes
+next, each a package behind the same interface ([how Sosie grows](docs/hld.md#how-sosie-grows)).
 
 ### In your assistant
 

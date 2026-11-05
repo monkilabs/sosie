@@ -128,7 +128,7 @@ async function start(options: {
   const upstream = await readUpstream()
   const source = sources.find((s) => s.matches(upstream, process.env))
   if (!source) {
-    throw new Exit(2, fail(`Sosie reads postgres:// and mysql:// databases, and http:// or https:// APIs, for now; not ${upstream.protocol}//.`))
+    throw new Exit(2, fail(`Sosie reads postgres://, mysql:// and mongodb:// databases, and http:// or https:// APIs, for now; not ${upstream.protocol}//.`))
   }
 
   let connection
@@ -214,14 +214,22 @@ async function start(options: {
       ? []
       : [warn(`Listening on ${options.host}, with no password: anyone who can reach it can query the fakes and filter on the real values.`)]),
     '',
-    `  Your agent, app and ${(connection.client ?? 'tools') + ':'}`.padEnd(29) + endpoint.address,
-    `  Claude Code:               claude plugin marketplace add monkilabs/sosie`,
-    `                             claude plugin install sosie@sosie`,
-    `  Any MCP client:            npx @sosie/cli mcp`,
+    ...banner([
+      [`Your agent, app and ${connection.client ?? 'tools'}:`, endpoint.address],
+      ['Claude Code:', 'claude plugin marketplace add monkilabs/sosie'],
+      ['', 'claude plugin install sosie@sosie'],
+      ['Any MCP client:', 'npx @sosie/cli mcp'],
+    ]),
     '',
   ]
   process.stdout.write(lines.join('\n') + '\n')
   await stopped
+}
+
+/** Labels and what they say, in two columns: the second starts one space past the longest label, at 29 at least. */
+function banner(rows: [string, string][]): string[] {
+  const width = Math.max(27, ...rows.map(([label]) => label.length + 1))
+  return rows.map(([label, text]) => `  ${label.padEnd(width)}${text}`)
 }
 
 /** SOSIE_UPSTREAM, or a hidden prompt in a terminal. Never an argument, never echoed. */
@@ -240,6 +248,10 @@ async function readUpstream(): Promise<URL> {
   try {
     return new URL(text)
   } catch {
+    // A replica set's string may list its hosts: one is enough, as the driver finds the others from it.
+    if (/^mongodb:\/\/[^/]*,/.test(text)) {
+      throw new Exit(2, fail('Give one host of the replica set, with its replicaSet option: mongodb://user:password@host:27017/database?replicaSet=rs0. The driver finds the others.'))
+    }
     throw new Exit(
       2,
       fail('The upstream is not a URL. It looks like postgres://user:password@host:5432/database, or https://api.example.com/v1.'),
