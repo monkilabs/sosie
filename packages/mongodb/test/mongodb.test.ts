@@ -3,7 +3,9 @@ import { Binary, BSON, Code, DBRef, Decimal128, Double, Int32, Long, ObjectId, T
 import { describe, expect, it } from 'vitest'
 import { fakeDocument, fromText, textOf } from '../src/fake.js'
 import { plan } from '../src/guard.js'
-import { msgReply, OP, opReply, readMessage } from '../src/protocol.js'
+import { EventEmitter } from 'node:events'
+import type { Socket } from 'node:net'
+import { MessageReader, msgReply, OP, opReply, readMessage } from '../src/protocol.js'
 import { rewriteFilter, rewritePipeline } from '../src/rewrite.js'
 import { at, collection, leaf, pipeline, projection, type Shape } from '../src/shape.js'
 
@@ -236,6 +238,19 @@ describe('the wire protocol', () => {
     expect(message.requestId).toBe(7)
     expect(message.body.insert).toBe('users')
     expect(message.body.documents).toHaveLength(2)
+  })
+
+  it('reads a message that comes in many chunks, and two that come in one', async () => {
+    const socket = new EventEmitter()
+    const reader = new MessageReader(socket as unknown as Socket)
+    const body = Buffer.concat([Buffer.alloc(5), BSON.serialize({ ping: 1, pad: 'x'.repeat(100_000), $db: 'admin' })])
+    const message = frame(OP.MSG, body)
+    const read = reader.next()
+    for (let at = 0; at < message.length; at += 1000) socket.emit('data', message.subarray(at, at + 1000))
+    expect((await read)!.body.pad).toHaveLength(100_000)
+    socket.emit('data', Buffer.concat([message, message]))
+    expect((await reader.next())!.requestId).toBe(7)
+    expect((await reader.next())!.requestId).toBe(7)
   })
 
   it('reads OP_QUERY’s first hello, and answers each in its own form', () => {

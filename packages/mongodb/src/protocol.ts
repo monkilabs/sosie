@@ -29,15 +29,20 @@ export interface Message {
   namespace?: string
 }
 
-/** Reads whole messages from a socket. */
+/** How long a message may stay half sent: past it, the connection is closed, and what it held let go. */
+const HALF_SENT = 60_000
+
+/** Reads whole messages from a socket: the chunks each comes in are joined once, when all have come. */
 export class MessageReader {
-  #buffer: Buffer = Buffer.alloc(0)
+  #chunks: Buffer[] = []
+  #size = 0
   #waiting: ((ok: boolean) => void) | undefined
   #ended = false
 
   constructor(socket: Socket) {
     socket.on('data', (chunk: Buffer) => {
-      this.#buffer = this.#buffer.length ? Buffer.concat([this.#buffer, chunk]) : chunk
+      this.#chunks.push(chunk)
+      this.#size += chunk.length
       this.#wake(true)
     })
     socket.on('close', () => {
@@ -53,19 +58,42 @@ export class MessageReader {
     waiting?.(ok)
   }
 
+  /** More bytes; false once the client is gone. Throws when a message stays half sent too long. */
+  async #more(): Promise<boolean> {
+    const half = this.#size > 0
+    let timer: NodeJS.Timeout | undefined
+    const stalled = new Promise<never>((_, reject) => {
+      if (half) timer = setTimeout(() => reject(new ProtocolError('A message half sent for a minute.')), HALF_SENT)
+    })
+    try {
+      return await Promise.race([new Promise<boolean>((resolve) => (this.#waiting = resolve)), stalled])
+    } finally {
+      clearTimeout(timer)
+      this.#waiting = undefined
+    }
+  }
+
+  /** The chunks as one buffer. */
+  #joined(): Buffer {
+    if (this.#chunks.length > 1) this.#chunks = [Buffer.concat(this.#chunks, this.#size)]
+    return this.#chunks[0] ?? Buffer.alloc(0)
+  }
+
   /** The next message; undefined once the client is gone. Throws on one that does not read as a message. */
   async next(): Promise<Message | undefined> {
-    while (this.#buffer.length < 4 || this.#buffer.length < this.#buffer.readInt32LE(0)) {
-      if (this.#buffer.length >= 4) {
-        const length = this.#buffer.readInt32LE(0)
-        if (length < 16 || length > MAX_MESSAGE) throw new ProtocolError(`A message of ${length} bytes.`)
-      }
-      if (this.#ended) return undefined
-      if (!(await new Promise<boolean>((resolve) => (this.#waiting = resolve)))) return undefined
+    while (this.#size < 4) {
+      if (this.#ended || !(await this.#more())) return undefined
     }
-    const length = this.#buffer.readInt32LE(0)
-    const frame = this.#buffer.subarray(0, length)
-    this.#buffer = this.#buffer.subarray(length)
+    const length = this.#joined().readInt32LE(0)
+    if (length < 16 || length > MAX_MESSAGE) throw new ProtocolError(`A message of ${length} bytes.`)
+    while (this.#size < length) {
+      if (this.#ended || !(await this.#more())) return undefined
+    }
+    const all = this.#joined()
+    const frame = all.subarray(0, length)
+    const rest = all.subarray(length)
+    this.#chunks = rest.length ? [rest] : []
+    this.#size = rest.length
     return readMessage(frame)
   }
 }
