@@ -26,6 +26,10 @@ const MAX_KNOWN = 10_000
 const OVERRIDE = /^(_+method|_?httpmethod|method|x-http-method(-override)?|x-method-override)$/i
 /** Methods that write, as an override names them. */
 const WRITE = /^(post|put|patch|delete|merge)$/i
+/** A query name as frameworks read it: PHP turns . and a space into _, and reads name[] as name. */
+const overrideName = (name: string) => name.replace(/\[\]$/, '').replace(/[.\s[]/g, '_')
+/** Whether a query parameter asks a framework to write, its name and its value read as frameworks read them. */
+const overrides = (name: string, ...values: string[]) => OVERRIDE.test(overrideName(name)) && values.some((v) => WRITE.test(v.trim()))
 /** How an error's body is read: as no entity's, each value faked by where it sits. */
 const NO_ENTITY: Route = { entity: '*', values: new Map() }
 /** A word that looks like a name of the API's: lowercase first, then letters and digits, in kebab, snake or camel case. */
@@ -140,8 +144,8 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       const plain = queryNames.has(name) || mine.has(name) || referenceOf(name, (word) => word) !== undefined
       const hidden = !(plain && wordName(name) && !scope.turnedBack(name))
       const named = hidden ? String(ctx.faker.value(name, QUERY_NAME)) : name
-      // A page's number stays; a long number under such a name may be an id, and is faked.
-      const keep = PAGING.has(name) && /^\d{1,5}$/.test(value)
+      // A page's number stays, unless the request turned it back; a long number under such a name may be an id, and is faked.
+      const keep = PAGING.has(name) && /^\d{1,5}$/.test(value) && !scope.turnedBack(value)
       query.append(named, keep ? value : String(ctx.faker.value(value, queryField(name, value, rt, { fields, entityFor }, hidden), scope)))
     }
     const search = query.toString()
@@ -203,11 +207,13 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       // (jdoe into zleu) included, and turns back into the API's. One Sosie never gave stays as written.
       const plain = queryNames.has(sentName) || known.has(sentName) || referenceOf(sentName, (word) => word) !== undefined
       const name = plain ? sentName : (scope.lookup(sentName, QUERY_NAME) ?? sentName)
-      // A number that names no field (limit=10) stays as written; other text is looked up anywhere.
-      const turnedValue = lookup(value, queryField(name, value, rt, { fields, entityFor }, name !== sentName)) ?? value
+      // A page's number (page=2) stays as written, as links show it as written: never turned back, even where a body
+      // showed that key. A number that names no field (limit=10) stays as written; other text is looked up anywhere.
+      const asWritten = PAGING.has(name) && /^\d{1,5}$/.test(value)
+      const turnedValue = asWritten ? value : (lookup(value, queryField(name, value, rt, { fields, entityFor }, name !== sentName)) ?? value)
       // A method override (?_method=DELETE), its name and its method as sent or as Sosie turns them back, asks a
       // framework to write: it never leaves Sosie.
-      if (OVERRIDE.test(name) && (WRITE.test(value) || WRITE.test(turnedValue))) {
+      if (overrides(name, value, turnedValue)) {
         return send(res, 400, { error: 'Sosie is read-only: a method override in the query (_method=DELETE) is not sent.' })
       }
       if (name === sentName) names.push(name)

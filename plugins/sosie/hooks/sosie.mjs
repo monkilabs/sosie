@@ -2,7 +2,7 @@
 // they keep what a scan found until a session reports it. Claude Code, Copilot CLI and VS Code run them alike.
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** Where Sosie keeps its stores, as `sosie` reads it: $SOSIE_HOME, or ~/.sosie. */
@@ -170,10 +170,18 @@ const key = (f) => `${f.file}:${f.line}:${f.field}`
  * What one scan of a session found, added to what earlier scans of it found that no session has reported yet: a scan
  * that fails, or finds less, never drops a finding. A scan that fails says so beside them; a clean one ends that.
  */
-export function addScan(out, { transcript, findings = [], failed }) {
-  const all = [...(read(out)?.findings ?? [])]
-  for (const f of findings) if (!all.some((k) => key(k) === key(f))) all.push(f)
-  if (all.length || failed) keep(out, { transcript, ...(all.length && { findings: all }), ...(failed && { failed }) })
+export function addScan(out, { transcript, findings = [], failed, project }) {
+  const kept = read(out)
+  const all = [...(kept?.findings ?? [])]
+  // By key, in one pass: a scan may find thousands.
+  const known = new Set(all.map(key))
+  for (const f of findings) {
+    if (known.has(key(f))) continue
+    known.add(key(f))
+    all.push(f)
+  }
+  const where = project ?? kept?.project
+  if (all.length || failed) keep(out, { transcript, ...(where && { project: where }), ...(all.length && { findings: all }), ...(failed && { failed }) })
   else rmSync(out, { force: true })
 }
 
@@ -187,7 +195,7 @@ let taken = []
  * finds the same lines again, and only lines not told yet are reported. Nothing is marked told until `reported()`,
  * so a session start that fails on the way leaves them for the next.
  */
-export function pendingScans() {
+export function pendingScans(cwd) {
   taken = []
   const scans = join(data, 'scans')
   if (!existsSync(scans)) return []
@@ -210,6 +218,8 @@ export function pendingScans() {
     } catch {
       continue // taken by another session start
     }
+    // A session of another project is told in that project, by a session there: not in one the developer may not read.
+    if (result.project && cwd && result.project !== resolve(cwd)) continue
     const seenFile = join(seenDir, name)
     // A seen file that cannot be read tells again what it held, rather than nothing.
     const seen = read(seenFile)

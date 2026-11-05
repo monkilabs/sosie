@@ -33,11 +33,15 @@ Start Sosie first, in your own terminal. When none is running, every tool says s
 | --- | --- | --- | --- |
 | `describe` | Every Sosie | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres, MySQL | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice or warning |
+| `find` | MongoDB | `collection`; `filter`, `projection`, `sort`, `limit` (optional), as JSON | Up to 200 documents as Extended JSON |
+| `aggregate` | MongoDB | `collection`, `pipeline` as a JSON array | Up to 200 documents as Extended JSON |
+
+`query` on MySQL, `find` and `aggregate` come with the next release: 0.2.0 has `query` for Postgres only.
 | `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a `GET` through Sosie, up to 200 items of each list |
 | `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list |
 
-Each source's tools appear when a Sosie of that kind runs. When several of a kind run, each tool takes the `address`
-that `describe` lists; without it, the newest.
+Every tool is listed whatever runs; one whose kind is not running says which kinds are. When several Sosies run, a
+tool takes the `address` that `describe` lists; without it, the newest of its kinds.
 
 ## The plugin
 
@@ -85,11 +89,13 @@ npx @sosie/cli scan ~/.claude/projects
 ```
 
 ```
-  ✗ ~/.claude/projects/app/2026-11-02.jsonl:1203  a real value from users.email
+  ✗ /home/kim/.claude/projects/app/2026-11-02.jsonl:1203  a real value from format:email
   1 real value found in 412 files.
 ```
 
-It never prints the real value: only the file, the line and the field it came from. It exits 1 when it finds one.
+It never prints the real value: only the file's full path, the line, and where the value came from: its field
+(`users.api_key`), or for a person's value the format every field of it shares (`format:email`). It exits 1 when it
+finds one.
 
 ### How it looks
 

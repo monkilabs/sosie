@@ -7,7 +7,7 @@ import { formatByName, PERSONAL, type Format } from './formats.js'
 import { Random, shape } from './random.js'
 import { fakeScalar, type ScalarKind } from './types.js'
 
-const SCANNABLE = new Set<FieldType['kind']>(['string', 'integer', 'decimal', 'uuid', 'ip'])
+const SCANNABLE = new Set<FieldType['kind']>(['string', 'integer', 'decimal', 'uuid', 'ip', 'objectid'])
 const TRUE = /^(t|true|y|yes|on|1)$/i
 const BOOLEAN = /^(t|f|true|false|y|n|yes|no|on|off|1|0)$/i
 /** A key of a json column that looks like structure: a lowercase or camelCase word, perhaps ending in a number. */

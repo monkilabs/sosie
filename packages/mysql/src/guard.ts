@@ -103,7 +103,11 @@ const LOCATION = new Set([
   'admin_port', 'mysqlx_bind_address', 'mysqlx_port', 'mysqlx_socket', 'relay_log', 'relay_log_basename', 'relay_log_index',
   'relay_log_info_file', 'log_bin', 'log_bin_basename', 'log_bin_index', 'ssl_ca', 'ssl_capath', 'ssl_cert', 'ssl_key', 'ssl_crl',
   'ssl_crlpath', 'admin_ssl_ca', 'admin_ssl_cert', 'admin_ssl_key', 'replica_load_tmpdir', 'slave_load_tmpdir', 'init_file',
-  'keyring_file_data', 'auto_generated_certs', 'debug',
+  'keyring_file_data', 'auto_generated_certs', 'debug', 'caching_sha2_password_private_key_path',
+  'caching_sha2_password_public_key_path', 'sha256_password_private_key_path', 'sha256_password_public_key_path',
+  'innodb_buffer_pool_filename', 'innodb_doublewrite_dir', 'mysqlx_ssl_ca', 'mysqlx_ssl_capath', 'mysqlx_ssl_cert',
+  'mysqlx_ssl_crl', 'mysqlx_ssl_crlpath', 'mysqlx_ssl_key', 'admin_ssl_capath', 'admin_ssl_crl', 'admin_ssl_crlpath',
+  'group_replication_local_address', 'group_replication_group_seeds', 'audit_log_file',
 ])
 
 /** Functions that read files, take locks other sessions wait on, or wait on replication. */
@@ -122,7 +126,16 @@ const REFUSED_FUNCTIONS: Record<string, string> = {
 
 /** Settings that keep the session read-only, its text read as Sosie reads it, and its limits. */
 const READ_ONLY_SETTINGS = new Set(['transaction_read_only', 'tx_read_only'])
-const LEXICAL_MODES = /\b(ANSI_QUOTES|NO_BACKSLASH_ESCAPES|PIPES_AS_CONCAT|ANSI)\b/i
+/**
+ * The modes sql_mode may be set to: by name, never by number (each mode a bit), and none of those that change how
+ * MySQL reads a statement's text: ANSI_QUOTES, NO_BACKSLASH_ESCAPES (which would let a quote out of a literal Sosie
+ * writes), PIPES_AS_CONCAT, IGNORE_SPACE, HIGH_NOT_PRECEDENCE, and ANSI, which holds several of them.
+ */
+const SAFE_MODES = new Set([
+  'ALLOW_INVALID_DATES', 'ERROR_FOR_DIVISION_BY_ZERO', 'NO_AUTO_VALUE_ON_ZERO', 'NO_DIR_IN_CREATE', 'NO_ENGINE_SUBSTITUTION',
+  'NO_UNSIGNED_SUBTRACTION', 'NO_ZERO_DATE', 'NO_ZERO_IN_DATE', 'ONLY_FULL_GROUP_BY', 'PAD_CHAR_TO_FULL_LENGTH', 'REAL_AS_FLOAT',
+  'STRICT_ALL_TABLES', 'STRICT_TRANS_TABLES', 'TIME_TRUNCATE_FRACTIONAL', 'TRADITIONAL',
+])
 const CHARSETS = new Set(['character_set_client', 'character_set_connection', 'character_set_results', 'collation_connection', 'names'])
 
 /** SHOW … statements sqlparser reads as words: these show the schema, the login or counters, nothing from rows. */
@@ -135,11 +148,20 @@ interface Relation {
   /** MySQL's own catalog: its columns are not fields, and what is compared with them is not a fake. */
   system?: boolean
   byName?: Map<string, Field>
+  /** A derived table's or a CTE's column names, each of its byName or computed. */
+  columns?: Set<string>
+}
+
+/** The columns a derived table or a CTE gives: every name, and the field each is where it is one. */
+interface Columns {
+  names: Set<string>
+  byName: Map<string, Field>
 }
 
 interface Scope {
   relations: Relation[]
-  ctes: Set<string>
+  /** CTEs in scope, by name, with their columns where Sosie can tell them. */
+  ctes: Map<string, Columns | undefined>
   parent?: Scope
 }
 
@@ -179,7 +201,6 @@ class Analyzer {
       case 'ShowDatabases':
       case 'ShowSchemas':
       case 'ShowCollation':
-      case 'ShowStatus':
       case 'ShowFunctions':
       case 'ShowObjects':
       case 'ExplainTable':
@@ -200,6 +221,10 @@ class Analyzer {
       }
       case 'ShowVariables':
         this.#refuse({ ...DENIED, message: 'Sosie does not run SHOW VARIABLES: some say where your database is. Ask for one with SELECT @@name.' })
+        break
+      case 'ShowStatus':
+        // Mysqlx_socket holds a path, Mysqlx_address and Mysqlx_port where the server listens, Current_tls_* its files.
+        this.#refuse({ ...DENIED, message: 'Sosie does not run SHOW STATUS: some of it says where your database is.' })
         break
       case 'ShowProcessList':
         this.#refuse({ ...DENIED, message: `Sosie does not run SHOW PROCESSLIST: it ${QUERIES}.` })
@@ -257,22 +282,26 @@ class Analyzer {
 
   /* Queries and their scopes. */
 
-  #query(q: Node, outer: Scope | undefined, onTargets?: (t: Target[]) => void): void {
-    const scope: Scope = { relations: [], ctes: new Set(outer?.ctes ?? []), ...(outer && { parent: outer }) }
+  #query(q: Node, outer: Scope | undefined, onTargets?: (t: Target[]) => void, onColumns?: (c: Columns | undefined) => void): void {
+    const scope: Scope = { relations: [], ctes: new Map(outer?.ctes ?? []), ...(outer && { parent: outer }) }
+    // With RECURSIVE, a CTE's own query may read it: every one of the clause is in scope from the start.
+    if (q.with?.recursive) for (const cte of q.with.cte_tables ?? []) scope.ctes.set(String(cte.alias?.name?.value ?? '').toLowerCase(), undefined)
     for (const cte of q.with?.cte_tables ?? []) {
-      this.#query(cte.query, scope)
-      scope.ctes.add(String(cte.alias?.name?.value ?? '').toLowerCase())
+      let columns: Columns | undefined
+      this.#query(cte.query, scope, undefined, (c) => (columns = c))
+      // A column list (WITH c (a, b) AS …) renames the columns: Sosie does not follow it.
+      scope.ctes.set(String(cte.alias?.name?.value ?? '').toLowerCase(), cte.alias?.columns?.length ? undefined : columns)
     }
     if (q.locks?.length) {
       this.#refuse({ ...DENIED, message: 'Sosie does not lock rows (FOR UPDATE, FOR SHARE): other sessions would wait on them.' })
     }
-    this.#setExpr(q.body, scope, onTargets)
+    this.#setExpr(q.body, scope, onTargets, onColumns)
     for (const key of ['order_by', 'limit_clause', 'limit', 'offset', 'fetch']) if (q[key]) this.#expr(q[key], scope)
   }
 
-  #setExpr(body: Node, scope: Scope, onTargets?: (t: Target[]) => void): void {
-    if (body.Select) return this.#select(body.Select, scope, onTargets)
-    if (body.Query) return this.#query(body.Query, scope, onTargets)
+  #setExpr(body: Node, scope: Scope, onTargets?: (t: Target[]) => void, onColumns?: (c: Columns | undefined) => void): void {
+    if (body.Select) return this.#select(body.Select, scope, onTargets, onColumns)
+    if (body.Query) return this.#query(body.Query, scope, onTargets, onColumns)
     if (body.SetOperation) {
       // MySQL names no table for a UNION's columns: each is what every branch has in its place.
       let left: Target[] | undefined
@@ -286,7 +315,7 @@ class Analyzer {
     this.#refuse(WRITE)
   }
 
-  #select(select: Node, outer: Scope, onTargets?: (t: Target[]) => void): void {
+  #select(select: Node, outer: Scope, onTargets?: (t: Target[]) => void, onColumns?: (c: Columns | undefined) => void): void {
     const scope: Scope = { relations: [], ctes: outer.ctes, parent: outer }
     if (select.into) {
       this.#refuse({ ...DENIED, message: 'Sosie does not run SELECT … INTO: it puts values where Sosie cannot fake them.' })
@@ -297,11 +326,42 @@ class Analyzer {
     }
     for (const from of select.from ?? []) for (const join of from.joins ?? []) this.#expr(join.join_operator, scope)
     onTargets?.((select.projection ?? []).map(target))
+    onColumns?.(this.#columns(select.projection ?? [], scope))
     for (const hint of select.optimizer_hints ?? []) this.#hint(String(hint.text ?? ''))
     for (const [key, value] of Object.entries(select)) {
       if (key === 'from' || key === 'into' || key === 'select_token' || key === 'optimizer_hints') continue
       this.#expr(value, scope)
     }
+  }
+
+  /**
+   * The columns a select list gives, for a derived table or a CTE that holds it: a column that is a column of a table
+   * keeps its field, so a literal compared with it outside turns back there. A * over a table Sosie does not know
+   * leaves them unknown.
+   */
+  #columns(items: Node[], scope: Scope): Columns | undefined {
+    const given = new Set<string>()
+    const byName = new Map<string, Field>()
+    for (const item of items) {
+      if (item.Wildcard || item.QualifiedWildcard) {
+        // t.* names its relation last: ObjectName's parts, as names().
+        const qualifier = item.QualifiedWildcard ? names(item.QualifiedWildcard[0]?.ObjectName).at(-1)?.toLowerCase() : undefined
+        for (const r of scope.relations.filter((r) => !qualifier || r.alias.toLowerCase() === qualifier)) {
+          if (!r.byName) return undefined
+          for (const name of r.columns ?? r.byName.keys()) given.add(name)
+          for (const [name, field] of r.byName) byName.set(name, field)
+        }
+        continue
+      }
+      const expr = item.UnnamedExpr ?? item.ExprWithAlias?.expr
+      const ref = unwrapColumn(expr)
+      const name = (item.ExprWithAlias ? String(item.ExprWithAlias.alias?.value ?? '') : (ref?.at(-1) ?? '')).toLowerCase()
+      if (!name) continue
+      given.add(name)
+      const near = ref ? this.#resolve(expr, scope) : undefined
+      if (near && near !== 'catalog') byName.set(name, near)
+    }
+    return { names: given, byName }
   }
 
   #relation(relation: Node | undefined, scope: Scope): void {
@@ -312,7 +372,8 @@ class Analyzer {
       const alias = String(table.alias?.name?.value ?? parts.at(-1) ?? '')
       if (table.args) this.#expr(table.args, scope)
       if (parts.length === 1 && hasCte(scope, parts[0]!.toLowerCase())) {
-        scope.relations.push({ alias })
+        const columns = cteColumns(scope, parts[0]!.toLowerCase())
+        scope.relations.push({ alias, ...(columns && { byName: columns.byName, columns: columns.names }) })
         return
       }
       const db = (parts.length > 1 ? parts.at(-2)! : this.database).toLowerCase()
@@ -332,8 +393,11 @@ class Analyzer {
       return
     }
     if (relation.Derived) {
-      this.#query(relation.Derived.subquery, relation.Derived.lateral ? scope : (scope.parent ?? scope))
-      scope.relations.push({ alias: String(relation.Derived.alias?.name?.value ?? '') })
+      let columns: Columns | undefined
+      this.#query(relation.Derived.subquery, relation.Derived.lateral ? scope : (scope.parent ?? scope), undefined, (c) => (columns = c))
+      const renamed = relation.Derived.alias?.columns?.length
+      const known = !renamed && columns ? { byName: columns.byName, columns: columns.names } : {}
+      scope.relations.push({ alias: String(relation.Derived.alias?.name?.value ?? ''), ...known })
       return
     }
     if (relation.NestedJoin) {
@@ -494,7 +558,7 @@ class Analyzer {
     for (let s: Scope | undefined = scope; s; s = s.parent) {
       const candidates =
         parts.length === 1
-          ? s.relations.filter((r) => !r.byName || r.byName.has(column) || r.system)
+          ? s.relations.filter((r) => !r.byName || r.byName.has(column) || r.columns?.has(column) || r.system)
           : s.relations.filter((r) => r.alias.toLowerCase() === parts.at(-2) && (parts.length < 3 || r.db === parts.at(-3)))
       if (!candidates.length) continue
       if (candidates.length > 1) return undefined
@@ -524,7 +588,7 @@ class Analyzer {
     } else if (body.MultipleAssignments) {
       for (const a of body.MultipleAssignments.assignments ?? []) assignments.push({ scope: a.scope, name: names(a.name), value: a.value })
     } else if (body.SetTimeZone) {
-      return this.#expr(body.SetTimeZone.value, { relations: [], ctes: new Set() })
+      return this.#expr(body.SetTimeZone.value, { relations: [], ctes: new Map() })
     } else {
       return this.#refuse({ ...UNSUPPORTED, message: 'Sosie does not run this SET.' })
     }
@@ -534,7 +598,7 @@ class Analyzer {
   #assign(scope: string | undefined, name: string[], value: Node | undefined): void {
     const first = name[0] ?? ''
     // A user variable: anything a query may read, which is then faked as a value wherever it comes back.
-    if (first.startsWith('@') && !first.startsWith('@@')) return this.#expr(value, { relations: [], ctes: new Set() })
+    if (first.startsWith('@') && !first.startsWith('@@')) return this.#expr(value, { relations: [], ctes: new Map() })
     if (scope && !/^(session|local)$/i.test(scope)) return this.#refuse(SERVER_SETTINGS)
     const prefix = first.startsWith('@@') ? first.slice(2).toLowerCase() : ''
     if (['global', 'persist', 'persist_only'].includes(prefix)) return this.#refuse(SERVER_SETTINGS)
@@ -545,8 +609,12 @@ class Analyzer {
     if (READ_ONLY_SETTINGS.has(setting) && !/^(1|on|true)$/i.test(literal)) {
       return this.#refuse({ ...DENIED, message: `Sosie keeps ${setting} on: the session stays read-only.` })
     }
-    if (setting === 'sql_mode' && (LEXICAL_MODES.test(literal) || /^default$/i.test(literal))) {
-      return this.#refuse({ ...DENIED, message: 'Sosie keeps sql_mode without ANSI_QUOTES, NO_BACKSLASH_ESCAPES and PIPES_AS_CONCAT: it must read each statement as MySQL does.' })
+    if (setting === 'sql_mode' && !literal.split(',').every((mode) => mode.trim() === '' || SAFE_MODES.has(mode.trim().toUpperCase()))) {
+      return this.#refuse({
+        ...DENIED,
+        message:
+          'Sosie sets sql_mode only to modes by name, without ANSI_QUOTES, NO_BACKSLASH_ESCAPES, PIPES_AS_CONCAT, IGNORE_SPACE or HIGH_NOT_PRECEDENCE: it must read each statement as MySQL does.',
+      })
     }
     if (CHARSETS.has(setting)) return this.#charset(literal)
     if (setting === 'max_execution_time') this.#timeout(literal)
@@ -589,6 +657,10 @@ class Analyzer {
 
 function hasCte(scope: Scope | undefined, name: string): boolean {
   return !!scope?.ctes.has(name)
+}
+
+function cteColumns(scope: Scope | undefined, name: string): Columns | undefined {
+  return scope?.ctes.get(name)
 }
 
 function names(variable: Node[] | undefined): string[] {

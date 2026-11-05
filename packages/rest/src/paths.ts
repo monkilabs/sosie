@@ -11,7 +11,19 @@ export const VALUE_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
  * API, or a proxy before it, that decodes %2F and resolves .. would read another path than Sosie.
  */
 export function oneSegment(segment: string): boolean {
-  return !/[/\\]/.test(segment) && segment !== '.' && segment !== '..'
+  // A NUL or a control character, where an upstream may stop reading the path.
+  if (/[\x00-\x1f\x7f]/.test(segment)) return false
+  // Decoded once more, as a proxy that decodes twice reads it; and without ;params, as Tomcat reads ..; as ..
+  let twice = segment
+  try {
+    twice = decodeURIComponent(segment)
+  } catch {
+    // Not an escape: as it is.
+  }
+  return [segment, twice].every((s) => {
+    const bare = s.split(';')[0]!
+    return !/[/\\]/.test(s) && bare !== '.' && bare !== '..'
+  })
 }
 
 /** The segments of a path, decoded; undefined when a % starts no escape. */

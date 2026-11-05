@@ -131,6 +131,15 @@ describe('querying by what you saw', () => {
     const [byKey] = await query(`SELECT full_name FROM users WHERE external_id = '${first!.external_id}'`)
     for (const row of [byEmail, byId, byIn[0], byKey]) expect(row!.full_name).toBe(first!.full_name)
   })
+
+  it('finds a row by a fake through a derived table and a CTE', async () => {
+    const orders = await query('SELECT id, note FROM orders ORDER BY id')
+    for (const order of orders) {
+      const [derived] = await query(`SELECT note FROM (SELECT id, note FROM orders) t WHERE t.id = ${order.id}`)
+      const [cte] = await query(`WITH o AS (SELECT * FROM orders) SELECT note FROM o WHERE id = ${order.id}`)
+      expect([derived?.note, cte?.note]).toEqual([order.note, order.note])
+    }
+  })
 })
 
 describe('the guard', () => {
@@ -147,6 +156,8 @@ describe('the guard', () => {
     ["SELECT /*!50000 LOAD_FILE('/etc/passwd'), */ 1", 1227],
     ['EXPLAIN SELECT * FROM users', 1235],
     ["SET SESSION sql_mode = 'ANSI_QUOTES'", 1227],
+    ['SET sql_mode = 1048576', 1227],
+    ["SHOW GLOBAL STATUS LIKE 'Mysqlx%'", 1227],
     ['SET GLOBAL TRANSACTION READ ONLY', 1227],
     ['SELECT /*+ MAX_EXECUTION_TIME(100000) */ SLEEP(1)', 1227],
     ['SELECT /*+ SET_VAR(max_execution_time = 100000) */ SLEEP(1)', 1227],

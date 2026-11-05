@@ -533,6 +533,9 @@ const SCALARS: Record<string, Codec> = {
 
 type Nested = (string | null | Nested)[]
 
+/** Postgres's MAXDIM. */
+const MAX_DIMENSIONS = 6
+
 function arrayCodec(elemOid: number, element: Codec): Codec {
   return {
     encode(t) {
@@ -558,8 +561,20 @@ function arrayCodec(elemOid: number, element: Codec): Codec {
     decode(b) {
       const ndim = b.readInt32BE(0)
       if (ndim === 0) return '{}'
+      // Checked as Postgres's array_recv checks it, before anything is built: a client's dimensions could ask for
+      // billions of empty arrays and no element at all.
+      if (ndim < 0 || ndim > MAX_DIMENSIONS) throw new Error(`An array of ${ndim} dimensions.`)
       const dims = Array.from({ length: ndim }, (_, i) => [b.readInt32BE(12 + 8 * i), b.readInt32BE(16 + 8 * i)] as const)
       let at = 12 + 8 * ndim
+      if (dims.some(([length]) => length < 0)) throw new Error('An array with a negative dimension.')
+      // A dimension of 0 makes the array empty, as Postgres reads it.
+      if (dims.some(([length]) => length === 0)) return '{}'
+      let count = 1
+      for (const [length] of dims) {
+        count *= length
+        // Each element takes 4 bytes at least, its length: more than the message holds is a lie.
+        if (count > (b.length - at) / 4) throw new Error('An array with more elements than the message holds.')
+      }
       const next = (): string | null => {
         const length = b.readInt32BE(at)
         at += 4

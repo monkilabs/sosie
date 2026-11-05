@@ -7,6 +7,7 @@
     "packages/core",
     "packages/postgres",
     "packages/mysql",
+    "packages/mongodb",
     "packages/rest",
     "packages/graphql",
     "packages/cli"
@@ -29,6 +30,7 @@
     "drizzle-orm": "^0.45.4",
     "embedded-postgres": "^18.4.0-beta.17",
     "mariadb": "^3.5.4",
+    "mongodb-memory-server": "^11.3.0",
     "mysql-memory-server": "^1.18.0",
     "postgres": "^3.4.9",
     "prisma": "^7.10.1",

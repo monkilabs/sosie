@@ -102,6 +102,10 @@ const REFUSED_RELATIONS: Record<string, string> = {
   pg_hba_file_rules: WHERE,
   pg_ident_file_mappings: WHERE,
   pg_file_settings: WHERE,
+  // pg_config() as a view: the paths Postgres was built and installed with.
+  pg_config: WHERE,
+  pg_stat_ssl: WHERE,
+  pg_stat_gssapi: WHERE,
 }
 
 /** Settings that say where the database is: refused in SHOW and current_setting, as inet_server_addr() is. */
@@ -128,6 +132,12 @@ const LOCATION = new Set([
   'ssl_key_file',
   'ssl_ca_file',
   'ssl_crl_file',
+  'ssl_crl_dir',
+  'ssl_dh_params_file',
+  'ssl_passphrase_command',
+  'log_directory',
+  'dynamic_library_path',
+  'extension_control_path',
 ])
 
 /** Settings a query's own code may have written a row value into: their values are faked. */
@@ -141,6 +151,8 @@ const REFUSED_FUNCTIONS: Record<string, string> = {
   inet_server_port: WHERE,
   inet_client_addr: WHERE,
   inet_client_port: WHERE,
+  pg_stat_get_backend_client_addr: WHERE,
+  pg_stat_get_backend_client_port: WHERE,
   pg_config: WHERE,
   pg_tablespace_location: WHERE,
   pg_read_file: READS,
@@ -178,6 +190,26 @@ const REFUSED_FUNCTIONS: Record<string, string> = {
   tuple_data_split: READS,
   bt_page_items: READS,
 }
+/**
+ * Views that hold each role's settings, which may hold secrets, in one column (rolconfig, useconfig), beside what
+ * psql's \d and \du and ORMs read of a role. They are read by their other columns, named, only: a *, a whole row
+ * (r::text, row_to_json(r), or r.text, a function called on it), an alias that renames columns, or a named join
+ * would show the settings too.
+ */
+const ROLE_VIEWS: Record<string, { settings: string; columns: Set<string> }> = {
+  pg_roles: {
+    settings: 'rolconfig',
+    columns: new Set([
+      'rolname', 'rolsuper', 'rolinherit', 'rolcreaterole', 'rolcreatedb', 'rolcanlogin', 'rolreplication',
+      'rolconnlimit', 'rolpassword', 'rolvaliduntil', 'rolbypassrls', 'oid',
+    ]),
+  },
+  pg_user: {
+    settings: 'useconfig',
+    columns: new Set(['usename', 'usesysid', 'usecreatedb', 'usesuper', 'userepl', 'usebypassrls', 'passwd', 'valuntil']),
+  },
+}
+
 /** Functions that run SQL given as text, or read raw data: the guard cannot see what they read. */
 const READERS = /^((query|table|cursor|schema|database)_to_xml|dblink|pg_logical_slot_|pg_get_wal_)/
 
@@ -207,6 +239,11 @@ const PINNED: Record<string, { value: string; allowed: RegExp }> = {
   client_encoding: { value: 'UTF8', allowed: /^(utf-?8|unicode)$/i },
 }
 
+const roleSettings = (view: string): Refusal => ({
+  code: '42501',
+  message: `${view} holds each role’s settings, which may hold secrets, in ${ROLE_VIEWS[view]!.settings}, so Sosie reads it by its other columns only, each named.`,
+})
+
 /** What a statement does, whether Sosie runs it, and what in it may be a fake to look up. */
 export function analyze(stmt: Node, catalog: Catalog, limits: Limits): Analysis {
   return new Analyzer(catalog, limits).statement(stmt)
@@ -233,6 +270,8 @@ class Analyzer {
   #rowsFromValues = false
   readonly #consts: ConstRef[] = []
   readonly #params = new Map<number, ParamRef>()
+  /** The role views the statement reads, by the names that mean them in it. */
+  readonly #roleViews = new Map<string, string>()
 
   constructor(
     readonly catalog: Catalog,
@@ -300,6 +339,7 @@ class Analyzer {
       default:
         this.#refuse(WRITE)
     }
+    if (this.#roleViews.size) this.#roleSettings(stmt)
     // A count of rows a value made is that value.
     if (targets && this.#rowsFromValues) targets = targets.map((t): Target => (t === 'count' ? 'other' : t))
     return {
@@ -468,14 +508,21 @@ class Analyzer {
     )
   }
 
-  /** The scope of a WITH clause: its CTEs are checked, and their names hide tables of the same name. */
+  /**
+   * The scope of a WITH clause: its CTEs are checked, and their names hide tables of the same name. A CTE's own query
+   * sees only the CTEs before it, as Postgres reads it: in WITH users AS (SELECT * FROM users), the inner users is the
+   * table. With RECURSIVE, every CTE of the clause is in scope, itself included.
+   */
   #with(body: Node, outer: Scope | undefined): Scope {
-    if (body.withClause?.recursive) this.#rowsFromValues = true
+    const recursive = !!body.withClause?.recursive
+    if (recursive) this.#rowsFromValues = true
     const ctes = new Set<string>()
     const scope: Scope = { relations: [], ctes, ...(outer && { parent: outer }) }
-    for (const cte of body.withClause?.ctes ?? []) {
-      ctes.add(cte.CommonTableExpr.ctename)
+    const list = (body.withClause?.ctes ?? []) as Node[]
+    if (recursive) for (const cte of list) ctes.add(cte.CommonTableExpr.ctename)
+    for (const cte of list) {
       this.#walk(cte.CommonTableExpr.ctequery, scope)
+      ctes.add(cte.CommonTableExpr.ctename)
     }
     return scope
   }
@@ -510,6 +557,11 @@ class Analyzer {
       this.#refuse({ code: '42501', message: `${name} holds your tables' values in raw form, so Sosie does not read it.` })
     }
     if (!schema) for (let s = scope; s; s = s.parent) if (s.ctes.has(name)) return { name, catalog: false, ...(alias && { alias }) }
+    // Unqualified, Postgres reads pg_catalog first, a table of the same name or not.
+    if ((!schema || schema === 'pg_catalog') && ROLE_VIEWS[name]) {
+      this.#roleViews.set(alias ?? name, name)
+      if (rv.alias?.colnames) this.#refuse(roleSettings(name))
+    }
     const known = this.catalog.relations.get(`${schema ?? 'public'}.${name}`) ?? (schema ? undefined : this.#unique(name))
     // Unqualified, a name is a catalog only if Postgres has a catalog of that name and no user table shares it.
     const catalog =
@@ -521,6 +573,43 @@ class Analyzer {
     // An alias that renames columns (users AS u(a, b)) makes names mean other columns: Sosie does not place them.
     const fields = known && !rv.alias?.colnames ? known.byName : undefined
     return { name, catalog, ...(alias && { alias }), ...(schema && { schema }), ...(fields && { fields }) }
+  }
+
+  /**
+   * In a statement that reads a role view, every column reference must name one of its other columns: no *, no whole
+   * row of it or of a join, and its settings column by no qualifier at all.
+   */
+  #roleSettings(stmt: Node): void {
+    const settings = new Set([...this.#roleViews.values()].map((view) => ROLE_VIEWS[view]!.settings))
+    const shows = (node: unknown): string | undefined => {
+      if (Array.isArray(node)) {
+        for (const item of node) {
+          const view = shows(item)
+          if (view) return view
+        }
+        return undefined
+      }
+      if (!node || typeof node !== 'object') return undefined
+      for (const [key, value] of Object.entries(node as Node)) {
+        if (key === 'A_Star' || (key === 'JoinExpr' && value?.alias)) return [...this.#roleViews.values()][0]
+        if (key === 'ColumnRef') {
+          const fields = (value.fields ?? []) as Node[]
+          if (fields.some((f) => f.A_Star)) return [...this.#roleViews.values()][0]
+          const names = fields.map((f) => f.String?.sval as string)
+          const last = names.at(-1)!
+          // A whole row, by its alias or its name.
+          if (this.#roleViews.has(last)) return this.#roleViews.get(last)
+          const view = names.length > 1 ? this.#roleViews.get(names.at(-2)!) : undefined
+          if (view && !ROLE_VIEWS[view]!.columns.has(last)) return view
+          if (settings.has(last)) return [...this.#roleViews.values()].find((v) => ROLE_VIEWS[v]!.settings === last)
+        }
+        const view = shows(value)
+        if (view) return view
+      }
+      return undefined
+    }
+    const view = shows(stmt)
+    if (view) this.#refuse(roleSettings(view))
   }
 
   #unique(name: string) {

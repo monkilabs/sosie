@@ -19,10 +19,10 @@ npx @sosie/cli
   ✓ api.internal/v1, read-only: OpenAPI 3.1, 24 schemas, 41 GET paths
   ✓ Every value is faked
 
-  Your agent, app and curl:  http://localhost:7675/v1
+  Your agent, app and curl:  http://localhost:7674/v1
 ```
 
-`http://localhost:7675/v1/users` reads `https://api.internal/v1/users`.
+`http://localhost:7674/v1/users` reads `https://api.internal/v1/users`.
 
 ## Read-only
 

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { writeRunning } from '@sosie/core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * version, so a release that forgets the plugin fails here. Its hooks run in Claude Code, Copilot CLI and VS Code,
  * each with its own events and payloads.
  */
-const root = new URL('..', import.meta.url).pathname
+const root = fileURLToPath(new URL('..', import.meta.url))
 const json = (path: string) => JSON.parse(readFileSync(join(root, path), 'utf8'))
 const cli = json('packages/cli/package.json').version as string
 const hooksDir = join(root, 'plugins/sosie/hooks')
@@ -289,6 +289,28 @@ describe('the plugin', () => {
         stop()
         await until(() => runs() === 3 && !existsSync(join(scans, 'v1.lock')), 'the scan runs')
         expect(start()).toMatch(new RegExp(`could not scan a session's transcript, ${transcript}: Error: the store is locked`))
+      })
+
+      it('keep every finding of a scan that prints more than a megabyte of them', async () => {
+        const lines = Array.from({ length: 12_000 }, (_, i) => `✗ ${transcript}:${i + 1}  a real value from users.email`).join('\n')
+        run(4, { out: `${lines}\n  12000 real values found in 1 file.\n`, status: 1 })
+        stop()
+        await until(() => runs() === 4 && !existsSync(join(scans, 'v1.lock')), 'the scan runs')
+        // Line 4 was told by the first scan: the other 11,999 are new.
+        expect(start()).toMatch(/Sosie found 11999 real values in a session's transcript/)
+      }, 20_000)
+
+      it('report a session’s findings in its own project, not in another', async () => {
+        const project = join(vscode, 'project-a')
+        const other = join(vscode, 'project-b')
+        mkdirSync(project)
+        mkdirSync(other)
+        run(5, { out: `✗ ${transcript}:99  a real value from users.phone\n  1 real value found in 1 file.\n`, status: 1 })
+        hook('session-end.mjs', { hook_event_name: 'Stop', session_id: 'p1', transcript_path: transcript, cwd: project }, env)
+        await until(() => runs() === 5 && !existsSync(join(scans, 'p1.lock')), 'the scan runs')
+        const at = (cwd: string) => hook('session-start.mjs', { hook_event_name: 'SessionStart', cwd }, env).stdout
+        expect(at(other)).not.toMatch(/line 99/)
+        expect(JSON.parse(at(project)).hookSpecificOutput.additionalContext).toMatch(/line 99, from users\.phone/)
       })
 
       it('say so when Copilot CLI names a session Sosie cannot find', () => {

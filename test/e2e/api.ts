@@ -141,6 +141,13 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
       next.set('page', String(page + 1))
       return json(200, { data: list, next: page === 1 ? `${origin}/v1/users?${next}` : null })
     }
+    // A login of digits, whose fake is a word: what a crafted ?limit= could turn back.
+    if (path === '/logins') return json(200, { data: [{ id: 1, username: '48213' }] })
+    // A list that says which page it is in its body, and links to the next.
+    if (path === '/pages') {
+      const page = Number(url.searchParams.get('page') ?? 1)
+      return json(200, { data: users.slice(page - 1, page), page, next: `${origin}/v1/pages?page=${page + 1}` })
+    }
     let m = /^\/users\/(\d+)$/.exec(path)
     if (m) {
       const user = users.find((u) => u.id === Number(m![1]))

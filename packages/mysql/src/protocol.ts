@@ -67,15 +67,17 @@ export const COMMAND = {
 
 const MAX_PACKET = 0xffffff
 
-/** Reads packets from a socket, a payload split over 16 MB packets joined again. */
+/** Reads packets from a socket, a payload split over 16 MB packets joined again; the chunks each comes in joined once. */
 export class PacketReader {
-  #buffer: Buffer = Buffer.alloc(0)
+  #chunks: Buffer[] = []
+  #size = 0
   #waiting: ((ok: boolean) => void) | undefined
   #ended = false
 
   constructor(socket: Socket) {
     socket.on('data', (chunk: Buffer) => {
-      this.#buffer = this.#buffer.length ? Buffer.concat([this.#buffer, chunk]) : chunk
+      this.#chunks.push(chunk)
+      this.#size += chunk.length
       this.#wake(true)
     })
     socket.on('close', () => {
@@ -91,18 +93,34 @@ export class PacketReader {
     waiting?.(ok)
   }
 
+  /** Bytes that have come, waiting for more until there are `n`; false once the client is gone. */
+  async #have(n: number): Promise<boolean> {
+    while (this.#size < n) {
+      if (this.#ended) return false
+      if (!(await new Promise<boolean>((resolve) => (this.#waiting = resolve)))) return false
+    }
+    return true
+  }
+
+  /** The chunks as one buffer. */
+  #joined(): Buffer {
+    if (this.#chunks.length > 1) this.#chunks = [Buffer.concat(this.#chunks, this.#size)]
+    return this.#chunks[0]!
+  }
+
   /** The next payload and the sequence id of its last packet; undefined once the client is gone. */
   async next(): Promise<{ payload: Buffer; seq: number } | undefined> {
     const parts: Buffer[] = []
     for (;;) {
-      while (this.#buffer.length < 4 || this.#buffer.length < 4 + this.#buffer.readUIntLE(0, 3)) {
-        if (this.#ended) return undefined
-        if (!(await new Promise<boolean>((resolve) => (this.#waiting = resolve)))) return undefined
-      }
-      const length = this.#buffer.readUIntLE(0, 3)
-      const seq = this.#buffer[3]!
-      parts.push(this.#buffer.subarray(4, 4 + length))
-      this.#buffer = this.#buffer.subarray(4 + length)
+      if (!(await this.#have(4))) return undefined
+      const length = this.#joined().readUIntLE(0, 3)
+      if (!(await this.#have(4 + length))) return undefined
+      const all = this.#joined()
+      const seq = all[3]!
+      parts.push(all.subarray(4, 4 + length))
+      const rest = all.subarray(4 + length)
+      this.#chunks = rest.length ? [rest] : []
+      this.#size = rest.length
       if (length < MAX_PACKET) return { payload: parts.length === 1 ? parts[0]! : Buffer.concat(parts), seq }
     }
   }

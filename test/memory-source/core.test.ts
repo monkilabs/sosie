@@ -102,6 +102,21 @@ describe('fakes by type', async () => {
     expect(orders[0]!.total).toMatch(/^[1-9]\d\d\.\d\d$/)
   })
 
+  it('ObjectIds: 24 hex digits, their time shifted by up to a year, one domain for every field that holds one', async () => {
+    const { faker } = await serve()
+    const real = '64b7f0c2a1b2c3d4e5f60001'
+    const id = (entity: string, name: string): Field => ({ id: `${entity}.${name}`, name, type: { kind: 'objectid' } })
+    const fake = faker.value(real, id('users', '_id')) as string
+    expect(fake).toMatch(/^[0-9a-f]{24}$/)
+    expect(fake).not.toBe(real)
+    const days = Math.abs(Number.parseInt(fake.slice(0, 8), 16) - Number.parseInt(real.slice(0, 8), 16)) / 86_400
+    expect(days).toBeGreaterThanOrEqual(1)
+    expect(days).toBeLessThanOrEqual(365)
+    // A reference in another collection is the same fake, and turns back.
+    expect(faker.value(real, id('orders', 'userId'))).toBe(fake)
+    expect(faker.request().lookup(fake, id('orders', 'userId'))).toBe(real)
+  })
+
   it('booleans: flipped or not, the same way for the whole field', () => {
     const flipped = pairs('active').map(([real, fake]) => real !== fake)
     expect(new Set(flipped).size).toBe(1)

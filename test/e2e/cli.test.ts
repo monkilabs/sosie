@@ -106,7 +106,7 @@ describe('sosie', () => {
 
   it('serves describe and query over MCP', async () => {
     const mcp = await mcpClient(home)
-    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'graphql', 'request'])
+    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'find', 'aggregate', 'graphql', 'request'])
     const users = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
     expect(users.entities[0].fields).toContainEqual({ field: 'email', type: 'string', key: 'unique' })
     const result = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT * FROM users u JOIN orders o ON o.user_id = u.id' } })
@@ -169,7 +169,7 @@ describe('sosie, in front of an API', () => {
     const entry = join(home, 'running', `${sosie.child.pid}.json`)
     for (let i = 0; i < 40 && !readFileSync(entry, 'utf8').includes('user.email'); i++) await new Promise((r) => setTimeout(r, 50))
     const mcp = await mcpClient(home)
-    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'graphql', 'request'])
+    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'find', 'aggregate', 'graphql', 'request'])
     const described = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
     expect(described.entities.map((e: { entity: string }) => e.entity)).toEqual(['user'])
     expect(described.entities[0].fields.map((f: { field: string }) => f.field)).toEqual(expect.arrayContaining(['id', 'email', 'name']))
@@ -189,7 +189,7 @@ describe('sosie, in front of a GraphQL API', () => {
     const api = await startGraphql()
     const home = mkdtempSync(join(tmpdir(), 'sosie-cli-gql-'))
     const sosie = await start({ SOSIE_UPSTREAM: api.url, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home }, ['--port', '0'])
-    expect(sosie.stdout()).toMatch(/✓ 127\.0\.0\.1:\d+\/api\/graphql, read-only: 8 types, 17 queries/)
+    expect(sosie.stdout()).toMatch(/✓ 127\.0\.0\.1:\d+\/api\/graphql, read-only: 10 types, 19 queries/)
     expect(sosie.address).toMatch(/^http:\/\/localhost:\d+\/api\/graphql$/)
     const mcp = await mcpClient(home)
     const result = JSON.parse(text(await mcp.callTool({ name: 'graphql', arguments: { query: '{ users { email } }' } })))
@@ -208,7 +208,7 @@ describe('sosie, in front of a GraphQL API', () => {
     for (const [path, more] of [['/graphql/v1', {}], ['/query', { SOSIE_GRAPHQL_SCHEMA: schema }]] as const) {
       const upstream = api.url.replace('/api/graphql', path)
       const sosie = await start({ SOSIE_UPSTREAM: upstream, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home, ...more })
-      expect(sosie.stdout()).toMatch(/read-only: 8 types, 17 queries/)
+      expect(sosie.stdout()).toMatch(/read-only: 10 types, 19 queries/)
       expect(sosie.address).toMatch(new RegExp(`^http://localhost:\\d+${path}$`))
       const answer = await fetch(sosie.address, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: '{ users { email } }' }) })
       const body = (await answer.json()) as { data: { users: unknown[] } }
@@ -230,13 +230,20 @@ describe('sosie, when something is wrong', () => {
   })
 
   it('names an upstream it cannot read, without echoing it', () => {
-    const result = run([], { SOSIE_UPSTREAM: 'mongodb://kim:secret@db/app', SOSIE_HOME: home })
+    const result = run([], { SOSIE_UPSTREAM: 'redis://kim:secret@db/0', SOSIE_HOME: home })
     expect(result.status).toBe(2)
-    expect(result.stderr).toContain('Sosie reads postgres:// and mysql:// databases, and http:// or https:// APIs, for now; not mongodb://.')
+    expect(result.stderr).toContain('Sosie reads postgres://, mysql:// and mongodb:// databases, and http:// or https:// APIs, for now; not redis://.')
     expect(result.stderr).not.toContain('secret')
     const notUrl = run([], { SOSIE_UPSTREAM: 'host=db password=secret', SOSIE_HOME: home })
     expect(notUrl.stderr).toContain('The upstream is not a URL.')
     expect(notUrl.stderr).not.toContain('secret')
+    // A replica set's hosts, with their ports or without: one is enough.
+    for (const hosts of ['h1:27017,h2:27017', 'h1,h2']) {
+      const listed = run([], { SOSIE_UPSTREAM: `mongodb://kim:secret@${hosts}/app?replicaSet=rs0`, SOSIE_HOME: home })
+      expect(listed.status).toBe(2)
+      expect(listed.stderr).toContain('Give one host of the replica set')
+      expect(listed.stderr).not.toContain('secret')
+    }
   })
 
   it('says when it cannot connect', async () => {
@@ -245,6 +252,10 @@ describe('sosie, when something is wrong', () => {
     expect(result.status).toBe(1)
     expect(result.stderr).toContain(`✗ Cannot connect to 127.0.0.1:${port}/app`)
     expect(result.stderr).not.toContain('secret')
+    // A rules file that is not there is a usage error, told before Sosie tries to connect.
+    const missing = run(['--rules', 'nope.yml'], { SOSIE_UPSTREAM: `postgres://kim:secret@127.0.0.1:${port}/app`, SOSIE_HOME: home })
+    expect(missing.status).toBe(2)
+    expect(missing.stderr).toContain('✗ No rules file at nope.yml.')
   })
 
   it('names a typo in sosie.yml and suggests the field meant', () => {

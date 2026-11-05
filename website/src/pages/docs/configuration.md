@@ -29,6 +29,7 @@ format:
 | --- | --- |
 | Postgres | `table.column`, or `schema.table.column` outside `public` |
 | MySQL | `table.column`, or `database.table.column` outside the database the connection string names |
+| MongoDB | `collection.path`, a nested field's path dotted (`users.address.city`), or `database.collection.path` outside the database the connection string names |
 | REST, with a document | `Schema.property`, nested properties dotted: `User.address.city` |
 | REST, without one | The entity its path names, singular, and the key: `user.email` |
 | GraphQL | `Type.field`: `User.email` |
@@ -65,8 +66,9 @@ silently. Every problem is listed at once:
 sosie.yml: users.emial is not a field. Did you mean users.email?
 ```
 
-A source that learns its fields as answers come, REST without a document, warns instead and applies the rule once it
-meets the field.
+A source that learns its fields as answers come, REST without a document and MongoDB, warns instead and applies the
+rule once it meets the field. So on those, read the warnings Sosie starts with: a field misspelt there is one Sosie
+waits to meet, and never does. `entity.*` holds for the fields such a source meets later too.
 
 ## The command
 
@@ -95,7 +97,7 @@ usage error.
 | `SOSIE_UPSTREAM` | A database's connection string, or an API's base URL |
 | `SOSIE_UPSTREAM_HEADERS` | For an API: headers Sosie sends it, one `Name: value` per line |
 | `SOSIE_OPENAPI` | For a REST API: its OpenAPI document, a file or URL |
-| `SOSIE_GRAPHQL_SCHEMA` | For a GraphQL API without introspection, or at a path without `graphql` in it: its SDL, or its introspection result as JSON |
+| `SOSIE_GRAPHQL_SCHEMA` | For a GraphQL API without introspection, or at a path without `graphql` in it: a file with its SDL, or with its introspection result as JSON |
 | `SOSIE_HOME` | Where Sosie keeps its store; `~/.sosie` by default |
 
 The upstream and its credentials are never arguments: arguments show in shell history and the process list, where an

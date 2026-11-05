@@ -143,6 +143,8 @@ function readValue(p: Buffer, at: number, type: number, unsigned: boolean): [Par
     }
     default: {
       need(1)
+      // The length's own size first: 0xfc, 0xfd and 0xfe say 2, 3 or 8 more bytes of it.
+      need(({ 0xfc: 3, 0xfd: 4, 0xfe: 9 } as Record<number, number>)[p[at]!] ?? 1)
       const [length, size] = readLenenc(p, at)
       need(size + length)
       return [stringParam(type, p.subarray(at + size, at + size + length)), size + length]

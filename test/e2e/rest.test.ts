@@ -434,6 +434,26 @@ describe('the guard and the credentials', () => {
     await recorder.close()
   })
 
+  it('sends a page’s number as written, even where a body showed a page of its own', async () => {
+    const own = await startRest(api)
+    // A page number the body showed is a fake of the body's page: sent back, it is still the page asked for.
+    const first = (await (await fetch(`${own.address}/pages`)).json()) as { page: number }
+    await fetch(`${own.address}/pages?page=${first.page}`)
+    expect(api.requests.at(-1)!.path).toBe(`/v1/pages?page=${first.page}`)
+    await own.close()
+  })
+
+  it('never shows in a link a paging value the request turned back', async () => {
+    const own = await startRest(api)
+    // A fake under a paging name turns back, so the API gets the real 48213; the link it answers with shows a fake.
+    const { data: [member] } = (await (await fetch(`${own.address}/logins`)).json()) as { data: { username: string }[] }
+    expect(member!.username).not.toBe('48213')
+    const body = (await (await fetch(`${own.address}/users?limit=${encodeURIComponent(member!.username)}`)).json()) as { next: string }
+    expect(api.requests.at(-1)!.path).toContain('limit=48213')
+    expect(body.next).not.toContain('48213')
+    await own.close()
+  })
+
   it('answers requests for localhost only, so a web page cannot rebind its name to Sosie', async () => {
     const { port } = new URL(sosie.address)
     const status = (host: string) =>
@@ -478,7 +498,17 @@ describe('the guard and the credentials', () => {
   it('refuses a segment the API could read as another path: an escaped / or \\, or . or ..', async () => {
     const before = api.requests.length
     // At an API, or a proxy before it, that decodes %2F and resolves .., these leave the base or name another kind.
-    for (const path of ['/x%2F..%2F..%2Fadmin%2Fsecret', '/countries/x%2Fusers%2F1', '/users/..%5C..%5Cadmin', '/users/%2E%2E%2F']) {
+    for (const path of [
+      '/x%2F..%2F..%2Fadmin%2Fsecret',
+      '/countries/x%2Fusers%2F1',
+      '/users/..%5C..%5Cadmin',
+      '/users/%2E%2E%2F',
+      // A NUL; Tomcat's ..; for ..; and a .. or a / that a second decoding makes.
+      '/users/1%00',
+      '/users/..;/admin',
+      '/users/%252e%252e',
+      '/users/x%252Fadmin',
+    ]) {
       expect(await sosie.get(path), path).toMatchObject({ status: 400, body: { error: expect.stringMatching(/another path/) } })
     }
     expect(api.requests.slice(before)).toEqual([])
@@ -562,6 +592,10 @@ describe('the guard and the credentials', () => {
     const before = api.requests.length
     for (const name of ['_method', '__method', 'method', '_HttpMethod', 'X-HTTP-Method-Override']) {
       expect((await sosie.get(`/users/1?${name}=DELETE`)).status, name).toBe(400)
+    }
+    // Names and values as frameworks rewrite them: PHP reads .method and " method" as _method, _method[] as _method.
+    for (const query of ['.method=DELETE', '%20method=PUT', '_method%5B%5D=DELETE', 'x-http-method-override=%20DELETE']) {
+      expect((await sosie.get(`/users/1?${query}`)).status, query).toBe(400)
     }
     expect(api.requests.length).toBe(before)
     // A method that is a value of the API's own (?method=card) goes on.

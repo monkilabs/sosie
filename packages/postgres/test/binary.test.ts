@@ -105,6 +105,22 @@ describe('the binary format', () => {
     expect(hex(1007, '{}')).toBe('000000000000000000000017')
   })
 
+  it('refuses an array whose dimensions the message cannot hold, before building anything', () => {
+    const header = (ndim: number, dims: number[]) => {
+      const b = Buffer.alloc(12 + 8 * dims.length)
+      b.writeInt32BE(ndim, 0)
+      b.writeUInt32BE(23, 8)
+      dims.forEach((d, i) => (b.writeInt32BE(d, 12 + 8 * i), b.writeInt32BE(1, 16 + 8 * i)))
+      return b
+    }
+    // Two billion empty arrays, and no element: this ran Sosie out of memory.
+    expect(codec(1007).decode(header(2, [2147483647, 0]))).toBe('{}')
+    expect(() => codec(1007).decode(header(1, [100_000_000]))).toThrow(/more elements than the message holds/)
+    expect(() => codec(1007).decode(header(2, [65536, 65536]))).toThrow(/more elements/)
+    expect(() => codec(1007).decode(header(7, [1, 1, 1, 1, 1, 1, 1]))).toThrow(/7 dimensions/)
+    expect(() => codec(1007).decode(header(1, [-1]))).toThrow(/negative/)
+  })
+
   it('reads a domain as its base type, an enum as its label, an array of either by its element', () => {
     expect(hex(16390, '7')).toBe(hex(20, '7'))
     expect(codec(16385).encode('ok').toString()).toBe('ok')

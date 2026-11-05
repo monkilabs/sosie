@@ -19,6 +19,7 @@ Current versions as of October 2026.
 | Postgres source: SQL | [`pgsql-parser`](https://github.com/constructive-io/pgsql-parser) 18: Postgres's own parser compiled to WebAssembly, parse and print |
 | GraphQL source | [`graphql`](https://github.com/graphql/graphql-js) 17: parsing, validation and introspection, as the API's own server does them |
 | MySQL source: upstream | [`mysql2`](https://github.com/sidorares/node-mysql2) 3.24, each value read as the server's text bytes |
+| MongoDB source: upstream | [`mongodb`](https://github.com/mongodb/node-mongodb-native) 7.8, the official driver; [`bson`](https://github.com/mongodb/js-bson) 7.3, each value read in its own BSON type |
 | MySQL source: SQL | [`@guanmingchiu/sqlparser-ts`](https://github.com/guan404ming/sqlparser-ts) 0.63, pinned: the MySQL dialect of [sqlparser](https://github.com/apache/datafusion-sqlparser-rs) compiled to WebAssembly, which reads executable comments and joins adjacent strings as MySQL does |
 | The plugin | The [Agent Plugins](https://agent-plugins.org) 1.0 format, checked and compiled for each assistant by [OpenCastle](https://github.com/monkilabs/opencastle) 1.12 |
 | Upstream databases | PostgreSQL 15 to 18, each tested in CI. 19 when it is released (release candidate 1 on 15 October 2026) and the parser supports it. 14 is out: its support ends on 12 November 2026 |
@@ -32,7 +33,7 @@ been wrapped around the same code.
 
 ## Packages
 
-One repository, npm workspaces, five packages:
+One repository, npm workspaces, seven packages:
 
 | Package | Published as | Holds |
 | --- | --- | --- |
@@ -40,6 +41,7 @@ One repository, npm workspaces, five packages:
 | `packages/core` | `@sosie/core` | Everything that does not depend on a source: the source interface, the neutral schema, rules, faking, the store, `scan`, the MCP server |
 | `packages/postgres` | `@sosie/postgres` | The Postgres source: endpoint, guard, rewriting, schema reading |
 | `packages/mysql` | `@sosie/mysql` | The MySQL source: endpoint, guard, rewriting, schema reading |
+| `packages/mongodb` | `@sosie/mongodb` | The MongoDB source: endpoint, guard, shapes, rewriting, faking documents |
 | `packages/rest` | `@sosie/rest` | The REST source: an HTTP endpoint for the team's own API, OpenAPI reading, JSON faking |
 | `packages/graphql` | `@sosie/graphql` | The GraphQL source: a GraphQL endpoint for the team's own API, schema by introspection, query checking and faking |
 
@@ -98,6 +100,7 @@ packages/
     binary.ts        the binary protocol: an execution's parameters, as literals; result rows
     session.ts       one client: the handshake, then each command
     split.ts         a query of several statements, split where MySQL ends each
+    functions.ts     MySQL's native functions: a call to any other may read rows
     upstream.ts      one read-only session upstream per client, rows as text bytes
     guard.ts         sqlparser's MySQL dialect: allow reads; refuse writes and some tables; find what a literal is compared with
     rewrite.ts       fakes in literals and parameters' values, written in where they are in the text
@@ -105,6 +108,19 @@ packages/
     results.ts       which field each result column came from
     errors.ts        what an error, a warning or a column's name may show
     mcp.ts           the query tool
+  mongodb/src/
+    index.ts         the Source: matches mongodb:// and mongodb+srv://, refuses MongoDB before 6.0, reads the collections
+    endpoint.ts      the TCP server
+    protocol.ts      OP_MSG, and OP_QUERY for the first hello
+    session.ts       one client: the handshake, then each command
+    upstream.ts      the driver, a session per client, the cursors open upstream
+    guard.ts         commands and stages allowed by name; JavaScript and MongoDB's own databases refused
+    shape.ts         where each value of a result comes from: the find, or the pipeline stage by stage
+    rewrite.ts       fakes compared by equality in a filter, back to real values
+    fake.ts          a document, each value faked in its own BSON type
+    schema.ts        collections, views and validators to the neutral schema; fields learned as documents come
+    errors.ts        what an error may show
+    mcp.ts           the find and aggregate tools
   rest/src/
     index.ts         the Source: matches http:// and https://, finds the OpenAPI document
     endpoint.ts      the HTTP server: the guard, paths and queries back to real values
@@ -132,7 +148,8 @@ packages/
 plugins/sosie/       the plugin: the MCP server, the skill, the hooks for Claude Code, Copilot CLI and VS Code
 test/
   memory-source/     a source that serves rows from memory, for core tests
-  e2e/               Postgres seeded with canary values, and fake REST and GraphQL APIs serving the same people
+  e2e/               Postgres seeded with canary values, MySQL (mysql/) and MongoDB (mongodb/) with the same, and fake
+                     REST and GraphQL APIs serving the same people
   dependencies.test.ts  the dependency rule
   plugin.test.ts     the plugin's version, the CLI it runs, and its hooks
 ```
@@ -144,7 +161,7 @@ A source is everything that knows one kind of upstream. The core gives it a
 
 ```ts
 export interface Source {
-  /** 'postgres', 'mysql', 'rest', 'graphql'. */
+  /** 'postgres', 'mysql', 'mongodb', 'rest', 'graphql'. */
   readonly kind: string
   /** Whether this source handles this upstream, or this endpoint address; `env` can say so where the URL cannot. */
   matches(url: URL, env?: Record<string, string | undefined>): boolean
@@ -169,7 +186,7 @@ export interface Connection {
   readonly summary: string
   /** Things the developer should know: 'The login can write to 12 tables.' */
   readonly warnings: string[]
-  /** The schema grows as values come (an API without a document): sosie.yml may name fields not met yet. */
+  /** The schema grows as values come (an API without a document, MongoDB): sosie.yml may name fields not met yet. */
   readonly learns?: boolean
   /** The tool a developer would point at the address, for the terminal: 'psql', 'curl'. */
   readonly client?: string
@@ -234,23 +251,23 @@ export interface Field {
 }
 export type FieldType =
   | { kind: 'string'; maxLength?: number }
-  | { kind: 'integer'; bytes?: 2 | 4 | 8 }
+  | { kind: 'integer'; bytes?: 1 | 2 | 4 | 8 }
   | { kind: 'decimal' }
   | { kind: 'boolean' }
   | { kind: 'enum'; labels: string[] }
   | { kind: 'date' | 'datetime' | 'time' }
-  | { kind: 'uuid' | 'bytes' | 'ip' }
+  | { kind: 'uuid' | 'bytes' | 'ip' | 'objectid' }  // objectid: MongoDB's, as 24 hex digits
   | { kind: 'json' }
   | { kind: 'array'; of: FieldType }
   | { kind: 'unknown' }
 ```
 
 **Choosing a source:** the CLI asks each source it knows whether it `matches`
-the upstream URL, in order: Postgres for `postgres://` and `postgresql://`, MySQL for `mysql://`, then GraphQL for an http(s) URL with a
-`graphql` or `graphql.json` segment in its path (`/graphql`, `/graphql/v1`; not `/mygraphql`), or any when
-`SOSIE_GRAPHQL_SCHEMA` is set, then REST for any other. Sources from other packages, listed
-in `sosie.yml`, come after v0.1, when the interface is settled; until 1.0 it may
-change between minor versions.
+the upstream URL, in order: Postgres for `postgres://` and `postgresql://`, MySQL for `mysql://`, MongoDB for
+`mongodb://` and `mongodb+srv://`, then GraphQL for an http(s) URL with a `graphql` or `graphql.json` segment in its
+path (`/graphql`, `/graphql/v1`; not `/mygraphql`), or any when `SOSIE_GRAPHQL_SCHEMA` is set, then REST for any
+other. Sources from other packages, listed in `sosie.yml`, are not supported yet: they come when the interface is
+settled; until 1.0 it may change between minor versions.
 
 ## CLI
 
@@ -335,10 +352,13 @@ keeps a rule it has not met yet, but never one of these.
 
 ## Start-up
 
-1. Read the upstream; pick the source that matches it.
+1. Read the upstream; pick the source that matches it. A `--rules` file that
+   is not there stops Sosie here, before it connects.
 2. `connect`: the source reads its catalog on a read-only connection and
    returns the neutral schema.
-3. Load `sosie.yml` and check it against the schema.
+3. Load `sosie.yml` and check it against the schema. For a source that learns
+   its fields, a field not met yet is kept, with a warning, and `entity.*`
+   holds for every field of the entity as it is met.
 4. Open the store, creating its key on first use.
 5. `serve`; write its entry under `running/`; print the address.
 
@@ -347,14 +367,16 @@ keeps a rule it has not met yet, but never one of these.
 A domain is the set of real values that share fakes. For a field:
 
 1. Listed under `pass`: no domain, the value passes.
-2. It shares another field's values (`references`): that field's domain, so
+2. An `objectid`: the domain `objectid`, shared by every field that holds one,
+   so a reference to a document (`orders.userId`) is the fake of its `_id`.
+3. It shares another field's values (`references`): that field's domain, so
    `orders.user_id` fakes like `users.id`, and a view's `email` like its
    table's. Its fakes are drawn for the key's type, so a key of two characters
    stays two characters wherever it appears.
-3. Its format is personal (email, phone, first name, last name, full name,
+4. Its format is personal (email, phone, first name, last name, full name,
    street, city, postal code): the format's domain, so one person's email is
-   the same fake in every field, and later in every source.
-4. Otherwise: the field's own id.
+   the same fake in every field, and in every source.
+5. Otherwise: the field's own id.
 
 Values a query computes fake in `computed:<type>`.
 
@@ -366,6 +388,7 @@ Values a query computes fake in `computed:<type>`.
 | `integer` | A number with the same sign and number of digits; never zero for a value that is not zero; within the column's size. A key whose digit range is crowded gets a digit more (see the store), and past the column's size, any number within it |
 | `decimal` | Digits replaced: the same sign, digits and scale. `NaN` and `Infinity` stay; other text is shaped |
 | `uuid` | A random UUID |
+| `objectid` | 24 hex digits: the first 8, its time in seconds, shifted by 1 to 365 days earlier or later; the rest random. Every field that holds one shares one domain, `objectid`, so a reference to a document is the fake of its `_id` |
 | `boolean` | Flipped or not, decided once per domain by its key |
 | `enum` | A label of the same enum, by a fixed shuffle per domain; the shuffle may leave a label in place |
 | `date`, `datetime` | Shifted by 1 to 365 days, earlier or later, a datetime by a time of day too; the same shift for the same value, in the same format. `infinity` stays |
@@ -429,8 +452,8 @@ CREATE INDEX value_scan ON value (mac_ci) WHERE scannable = 1;
 - **Allocation.** The fake is drawn from a seed taken from the value's keyed
   hash. A fake is never the value itself, unless the value has no letter or
   digit to fake: draws stop after a fixed number of attempts. For keys and text, a fake is unique
-  within its domain: if it is taken, the seed advances, and a numeric key whose
-  digit range fills up gets one more digit. After 64 draws the last is kept, taken or not, so a domain with few
+  within its domain: if it is taken, the seed advances, and a numeric key gets
+  one more digit for every 16 draws that were taken. After 64 taken draws the next is kept, taken or not, so a domain with few
   fakes to draw from (first names, in a large table) can give two real values one fake; a lookup by it, naming
   two, leaves it as written. Other numbers only need to be consistent, so two real values may share a fake.
 - **Booleans, enums and bytes** are not stored; their fakes come from the key.
@@ -450,7 +473,7 @@ and binary files. Decodes JSON string escapes, since transcripts are JSON lines
 (`email\nkim@…`). Splits each line into words, lower-cased and without the
 punctuation around them, and compares every run of one to four words, by
 keyed hash, with the store's real values. Only distinctive values are looked
-for: values of text, numbers, uuids and IP addresses (never a boolean, an enum, a date or bytes), of one to four
+for: values of text, numbers, uuids, IP addresses and ObjectIds (never a boolean, an enum, a date or bytes), of one to four
 words and at least four characters, and numbers of six digits or more, so years, ports and line numbers are not
 findings. A line is one finding however many values it holds; a symbolic link inside a folder is not followed. A run that is also
 a fake is not counted: it is what the agent was shown. An API's own words in
@@ -463,12 +486,14 @@ passes is neither stored nor looked for. A finding from a domain of no entity
 exits 1 if it finds one, so CI can run it.
 
 ```
-  ✗ /home/kim/.claude/projects/app/2026-11-02.jsonl:1203  a real value from users.email
+  ✗ /home/kim/.claude/projects/app/2026-11-02.jsonl:1203  a real value from format:email
   1 real value found in 412 files.
 ```
 
 Each path is printed in full. The plugin reads these lines, so their form is an interface: `✗ <file>:<line>  a real
-value from <field>`.
+value from <domain>`. The domain is where the store keeps the value: a field's id (`users.id`), a format's
+(`format:email`, shared by every field of that format), `objectid`, or `computed:<type>`. Two domains that hold the
+same value name whichever the index met last.
 
 ## Core: `sosie mcp`
 
@@ -482,13 +507,15 @@ lists it, for when several Sosies of a kind run; without it, the newest.
 | --- | --- | --- | --- |
 | `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres, MySQL | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice (MySQL: its warnings, Sosie's notes among them); every value a consistent fake |
+| `find` | MongoDB | `collection`; `filter`, `projection`, `sort`, `limit` as JSON or Extended JSON (optional) | Up to 200 documents as relaxed Extended JSON, a 64-bit integer past 2^53 kept whole |
+| `aggregate` | MongoDB | `collection`, `pipeline` as a JSON array | Up to 200 documents, as `find` |
 | `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a GET through Sosie, up to 200 items of each list, within 50 s; it reaches the running Sosie only, whatever the path says |
 | `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list, within 50 s |
 
 Sources that share a tool's name share one tool: `query` goes to the newest Postgres or MySQL Sosie, or the one at
 `address`, and runs as that source's. When Sosie is not running, every tool says so, and how to start it. A tool for a
-kind that is not running says which kinds are. Every tool is marked read-only. A REST Sosie without a document learns its fields from the answers, and
-writes its entry again as it does: `describe` lists each entity a collection names that the API answered with a list,
+kind that is not running says which kinds are. Every tool is marked read-only. A MongoDB Sosie, and a REST Sosie without a document, learn their fields from the
+answers, and write their entries again as they do. For REST, `describe` lists each entity a collection names that the API answered with a list,
 with the fields met in it so far. An entity named after another word a client typed (a tenant's slug in
 `/jones/profile`) is not listed: such a word is never shown to another request. Until the agent has listed a
 collection, such an API is read by its paths.
@@ -553,19 +580,19 @@ file in its namespace, for an Agent Plugin, and Copilot CLI only `hooks/hooks.js
 
 | Hook | Reads | Does |
 | --- | --- | --- |
-| Session start, within 10 s | `$SOSIE_HOME/running/`, keeping the entries whose process is alive; `sosie.yml` in the session's folder; `scans/` in the plugin's data | Tells the agent each running Sosie's kind and address, or, with a `sosie.yml` and none running, to ask the developer to start one. Reports what scans found that no session has reported yet. Says nothing when there is nothing to say. For a subagent, only which Sosies run: the report is the developer's |
-| Session end, or VS Code's `Stop` | The session's files: its transcript, and the folder beside it, named the same, where Claude Code keeps subagent transcripts and long tool results; or Copilot CLI's session folder | When a store exists, starts `scan.mjs` in a process of its own, and returns. While a scan of the session runs, asks it to run once more instead. Nothing for a subagent |
+| Session start, within 10 s | `$SOSIE_HOME/running/`, keeping the entries whose process is alive; `sosie.yml` in the session's folder; `scans/` in the plugin's data | Tells the agent each running Sosie's kind and address, or, with a `sosie.yml` and none running, to ask the developer to start one. Reports what scans of this project's sessions found that no session has reported yet: a scan keeps its session's folder, and one that has none (an older one, or a session without a `cwd`) is reported in any. Says nothing when there is nothing to say. For a subagent, only which Sosies run: the report is the developer's |
+| Session end, or VS Code's `Stop` | The session's files: its transcript, and the folder beside it, named the same, where Claude Code keeps subagent transcripts and long tool results; or Copilot CLI's session folder | When a store exists, takes the session's lock, created only if none is there, starts `scan.mjs` in a process of its own with the session's folder, puts its pid in the lock, and returns: two turns that end together start one scan. While a scan of the session holds the lock, asks it to run once more instead; a lock no live scan holds is taken over. Nothing for a subagent |
 
 A hook gets little time, and a scan reads the whole store, so the scan runs on its own and the next session reports
 it. `scan.mjs` runs `npx -y @sosie/cli@<version> scan <files>` with `NO_COLOR`, within 10 minutes, from the plugin's
 data folder rather than the project's, so a `@sosie/cli` in the project's `node_modules` never runs in its place. It
 holds `scans/<session>.lock` while it runs, and runs again while `<session>.again` is there. The lock holds its pid,
-written again each time it scans: a lock whose pid is not this user's live process, or older than a scan may run, was
+written again each time it scans; its output has no cap, as a session that leaked much prints a line per finding: a lock whose pid is not this user's live process, or older than a scan may run, was
 left by a scan that was killed, and counts for nothing. On Windows, where `npx` is a batch file only `cmd.exe` runs,
 it runs npm's `npx-cli.js` beside `node`, with no shell, or each argument quoted; and no window opens. It reads the
 [lines `sosie scan` prints](#core-sosie-scan) and adds, to `scans/<session>.json` (mode 0600), each finding's file,
-line and field: never the value. What earlier scans found stays until a session reports it: a scan that fails keeps
-it, and the line of its error beside it (exit 1 with nothing found is the CLI's own error); a clean one ends the
+line and domain: never the value. What earlier scans found stays until a session reports it, each finding once: a
+scan that fails keeps it, with what it found before it failed and the line of its error beside it (exit 1 with nothing found is the CLI's own error); a clean one ends the
 failure. Each file is written to a draft and renamed into place.
 
 A session start reads each result, reports the findings not in `seen/<session>.json` and the failure, and only once
@@ -667,8 +694,8 @@ Each statement is parsed. Allowed: `SELECT` and `WITH`, unless they have
 what it is (`default_transaction_read_only`, `transaction_read_only`, `role`,
 `session_authorization`, `READ WRITE` transactions), the pinned settings
 (`standard_conforming_strings` and `client_encoding` may only be set to the
-values Sosie pinned), and `statement_timeout` above the limit Sosie started
-with; `BEGIN`, `COMMIT`, `ROLLBACK` and
+values Sosie pinned), and `statement_timeout` or
+`idle_in_transaction_session_timeout` above the limit Sosie started with; `BEGIN`, `COMMIT`, `ROLLBACK` and
 savepoints; cursors (`DECLARE`, `FETCH`, `CLOSE`), but not `WITH HOLD`, whose
 query runs at `COMMIT`; `PREPARE`, `EXECUTE`,
 `DEALLOCATE`, `DISCARD`. Refused: everything else, including `EXPLAIN`, whose
@@ -678,17 +705,18 @@ Refused relations, because they hold row values, queries with their values,
 credentials, or where the database is: `pg_stats`, `pg_stats_ext`,
 `pg_stats_ext_exprs`, `pg_statistic`, `pg_statistic_ext_data`,
 `pg_largeobject`, every `pg_toast` table, `pg_stat_activity`,
-`pg_stat_statements`, `pg_prepared_statements`, `pg_cursors`,
-`pg_backend_memory_contexts`, `pg_authid`, `pg_shadow`, `pg_user_mappings`,
-`pg_stat_wal_receiver`, `pg_stat_replication`, `pg_hba_file_rules`,
-`pg_ident_file_mappings`, `pg_file_settings`, `pg_settings`, `pg_sequences`,
-`pg_subscription`, `pg_foreign_server`, `pg_db_role_setting` (per-database
-settings may hold secrets), and in `information_schema`
+`pg_stat_statements`, `pg_stat_statements_info`, `pg_prepared_statements`, `pg_cursors`,
+`pg_backend_memory_contexts`, `pg_authid`, `pg_shadow`, `pg_user_mapping`, `pg_user_mappings`,
+`pg_stat_wal_receiver`, `pg_stat_replication`, `pg_stat_ssl`, `pg_stat_gssapi`, `pg_hba_file_rules`,
+`pg_ident_file_mappings`, `pg_file_settings`, `pg_settings`, `pg_config`, `pg_sequences`,
+`pg_subscription`, `pg_foreign_server`, `pg_db_role_setting` (per-database and per-role settings may hold secrets),
+and in `information_schema`
 `foreign_server_options`, `user_mapping_options` and the `_pg_` views behind
 them; and the functions behind the refused views. `SHOW` and
 `current_setting()` refuse the settings that say where the database is
 (`listen_addresses`, `port`, `data_directory`, `primary_conninfo`,
-`archive_command` and the like, and `SHOW ALL`), as do `inet_client_addr()`,
+`archive_command`, `log_directory`, `ssl_crl_dir`, `dynamic_library_path` and the like, and `SHOW ALL`), as do
+`inet_client_addr()`, `pg_stat_get_backend_client_addr()` and `_port()`,
 `pg_config()` and `pg_tablespace_location()`; `pg_settings` and `pg_show_all_settings()`, which list
 them all, are refused. `RESET` of the settings that keep the session
 read-only is refused like `SET`. Refused functions: those that reveal where the
@@ -707,7 +735,14 @@ objects, `pg_notify`) or hold locks other sessions wait on (advisory locks).
 The session is read-only too, so a statement the guard misses still cannot
 write.
 
-A relation named without a schema is a catalog only if Postgres has a catalog
+`pg_roles` and `pg_user` hold the same settings, in `rolconfig` and `useconfig`, beside what psql's `\d` (a
+table's policies) and `\du` read of each role: they are read by their other columns, each named. A statement that
+reads one is refused when it names the settings column, or could show it: a `*`, a whole row (`r::text`,
+`row_to_json(r)`, `r.text`, which calls a function on it), an alias that renames columns, or a named join.
+
+A CTE's query sees only the CTEs before it, and with `RECURSIVE` every one,
+itself included, as Postgres reads it: in `WITH users AS (SELECT * FROM users)`
+the inner `users` is the table. A relation named without a schema is a catalog only if Postgres has a catalog
 of that name and no user table shares it; an alias that renames columns
 (`users AS u(a, b)`) makes Sosie place none of its columns.
 
@@ -751,6 +786,12 @@ views.
 | Anything else a query computes | `Faker.computed` with the type of its OID |
 | From a catalog-only read | Unchanged |
 
+Postgres reports some settings when they change (ParameterStatus). Those it checks the values of (encodings, date
+styles, the time zone, versions, flags) are relayed as they are. Any other (`application_name`, `search_path`) is
+shown when the client wrote that value, at start-up or in the statement it sent last, and faked otherwise: a function
+can set one from a row, out of the guard's sight. At start-up only the checked ones, and the client's own
+`application_name`, are sent.
+
 ### Binary format
 
 Sosie reads every value upstream as text, which is what it fakes, and writes
@@ -762,7 +803,7 @@ upstream for when the client did not.
 
 A type is known by its send function, read from `pg_type` at start-up: a
 domain sends as its base type, an enum as its label, an array by its element.
-Written: every type Sosie fakes, and the catalog's own a driver reads: the
+Written: every type Sosie fakes but `money`, and the catalog's own a driver reads: the
 integers, `oid`, `xid`, `float4` and `float8`, `numeric`, the text types,
 `name`, `"char"`, `bytea`, `bool`, `uuid`, `json` and `jsonb`, `date`, `time`,
 `timetz`, `timestamp`, `timestamptz`, `interval`, `inet`, `cidr`, `pg_lsn`,
@@ -771,7 +812,9 @@ type asked for in binary is refused before its rows, naming the column and
 its type (`0A000`): `regclass` and its family, whose text is a name and
 whose binary is an OID; composite values, ranges, geometry, `money`. Text a
 codec cannot read, as after a client's `SET DateStyle`, ends the statement
-with `22P03` once upstream has finished it.
+with `22P03` once upstream has finished it. A binary array parameter's header is checked before the array is
+built, as Postgres's `array_recv` checks it: at most six dimensions, none negative, an empty array where one is 0, and
+no more elements than the message has the four bytes each takes for.
 
 ### Errors
 
@@ -853,7 +896,8 @@ none, which Sosie never checks: the address is this machine's. The database a cl
 `COM_QUERY` in the text protocol, with the classic EOF packets; prepared statements (below); `COM_INIT_DB`,
 `COM_PING`, `COM_QUIT`, `COM_RESET_CONNECTION` (a new session upstream, in the database the client was in, as MySQL
 keeps it: the guard reads unqualified names there; prepared statements gone), `COM_SET_OPTION` (multiple statements
-on or off), `COM_STATISTICS`; `COM_FIELD_LIST` answers no columns. Refused: `COM_CHANGE_USER`. The status flags of
+on or off), `COM_STATISTICS`, which answers a line of Sosie's own; `COM_FIELD_LIST` answers no columns. Refused:
+`COM_CHANGE_USER`; any other command gets `1047 Unknown command`. The status flags of
 each OK, whether the session commits each statement and is in a transaction, are the server's; after rows, Sosie sets
 the transaction's when autocommit is off and the statement read a table.
 
@@ -877,9 +921,10 @@ values, and a parameter's data sent ahead with `COM_STMT_SEND_LONG_DATA` (64 MB 
 Each is written into the statement's text as a literal, spaced so it runs into nothing: an integer or a decimal as
 itself, a negative one in parentheses, a double as a whole number or with an exponent (a `DOUBLE` to MySQL, not a
 `DECIMAL`), a string quoted with backslash escapes, bytes (a `BLOB`, or a string that is not UTF-8) as `X'…'`, a date
-or time quoted. A parameter compared with a column is looked up as a literal is: bytes by their hex text, a date or
-time with each length of fraction that drops only zeros, so a `Date` a driver read from a `DATETIME(3)` fake finds it.
-A `NaN` or infinite double has no literal: `Incorrect arguments`. The statement then runs upstream as text, and its
+or time quoted. A parameter compared with a column is looked up as a literal is (bytes never are: see Limits), a date
+or time with each length of fraction that drops only zeros, so a `Date` a driver read from a `DATETIME(3)` fake finds it.
+A `NaN` or infinite double has no literal, and a packet cut short reads as none: both get `1210 Incorrect
+arguments`. The statement then runs upstream as text, and its
 rows are written back in the binary protocol from the text MySQL sent: integers by their width and sign, floats,
 dates and times in their binary forms, everything else as bytes. A value that does not read as its type is sent as
 `NULL`. A client that asks for a cursor gets the rows at once, as MySQL answers a statement that cannot have one;
@@ -895,7 +940,7 @@ One session per client, opened with mysql2 at the handshake, and set at its star
 | --- | --- |
 | `transaction_read_only` | `ON` |
 | `max_execution_time` | The statement timeout, 30 s |
-| `sql_mode` | The server's, without `ANSI_QUOTES`, `NO_BACKSLASH_ESCAPES`, `PIPES_AS_CONCAT` and `ANSI`: MySQL reads each statement's text as Sosie's parser does |
+| `sql_mode` | The server's, without `ANSI_QUOTES`, `NO_BACKSLASH_ESCAPES`, `PIPES_AS_CONCAT`, `IGNORE_SPACE`, `HIGH_NOT_PRECEDENCE` and `ANSI`: MySQL reads each statement's text as Sosie's parser does |
 | `sql_select_limit` | `--max-rows` plus one; a `SELECT` with a `LIMIT` of its own is read to its end, the rows past the cap dropped |
 | Character set | `utf8mb4` |
 
@@ -912,8 +957,8 @@ the session.
 From `information_schema`, every database the login can see but MySQL's own (`information_schema`, `mysql`,
 `performance_schema`, `sys`): tables and views, columns and their types, an index of one column that is unique or the
 primary key, foreign keys, and stored functions. A field's id is `table.column` in the database the connection string
-names, `database.table.column` elsewhere. Types map as `tinyint(1)` to boolean; the integers by size; `decimal`,
-`float` and `double` to decimal; `char`, `varchar` and the texts to string, `char` and `varchar` with their length;
+names, `database.table.column` elsewhere. Types map as `tinyint(1)` to boolean; the integers by size, `year` as a `smallint`; `decimal`,
+`float` and `double` to decimal; `char`, `varchar`, the texts and `set` to string, `char` and `varchar` with their length;
 the binaries and blobs to bytes; `enum` to an enum with its labels; `json`; the dates and times. `bit`, spatial types
 and `vector` have none: their values come back `NULL`.
 
@@ -934,21 +979,26 @@ is refused, a valid one included: a guard must not let through what it did not r
 - **Allowed:** `SELECT`, `WITH` and `VALUES`; `SHOW` of tables, columns, databases, `CREATE TABLE` and views,
   indexes, grants, table and routine status, collations and the like; `DESCRIBE`; `USE`; `START TRANSACTION` (not
   `READ WRITE`), `COMMIT`, `ROLLBACK`, savepoints; `SET NAMES` and `SET` of this session's settings.
-- **Refused:** whatever changes data (`25006`, `This statement changes data. Sosie is read-only.`), `EXPLAIN`, `SELECT
+- **Refused:** whatever changes data (error 1792, SQLSTATE `25006`, `This statement changes data. Sosie is
+  read-only.`), `EXPLAIN`, `SELECT
   … INTO`, row locks (`FOR UPDATE`, `FOR SHARE`), and any statement not allowed above.
 - **Databases and tables:** `mysql` (password hashes, the general and slow logs), `performance_schema` and `sys`
   (statements with their values), and from `information_schema` the process list, `INNODB_TRX` and the optimizer trace
   (queries), `COLUMN_STATISTICS` (histograms of real values), the lock tables (key values), and `FILES` and the
   tablespace tables (where the files are). The rest of `information_schema` is the schema, and passes.
-- **Functions:** `LOAD_FILE()`; `GET_LOCK()` and the other named locks; waits on replication; `sys_exec()` and
+- **Functions:** `LOAD_FILE()`; `GET_LOCK()`, `RELEASE_LOCK()`, `RELEASE_ALL_LOCKS()` and `IS_USED_LOCK()`, which
+  hold a lock other sessions wait on or say which session holds one (`IS_FREE_LOCK()` says only whether one is
+  free, and passes); waits on replication; `sys_exec()` and
   `sys_eval()`. A function that is not one of MySQL's own (the names in its help tables), or one named with its
   database, may be stored or loadable, made since Sosie started, and read rows the guard cannot see: the statement
   reads data, and what the function returns is faked.
-- **Settings:** `@@datadir`, `@@hostname`, `@@port` and every other setting that says where the database, its files,
-  its certificates or its peers are; `SHOW VARIABLES` and `SHOW PROCESSLIST`. A `SET` changes this session only, to
+- **Settings:** `@@datadir`, `@@hostname`, `@@port` and the other settings Sosie lists that say where the database,
+  its files, its keys, its certificates or its peers are (`@@caching_sha2_password_private_key_path`,
+  `@@innodb_doublewrite_dir`, `@@mysqlx_ssl_*`, the group replication addresses); `SHOW VARIABLES`, `SHOW STATUS`
+  (the X Protocol's socket and port, the TLS files) and `SHOW PROCESSLIST`. A `SET` changes this session only, to
   a value written in the query: copied from a row, a setting would come back real from `SELECT @@name`. Kept:
-  `transaction_read_only` on, `sql_mode` without the modes that change how text is read (and not `DEFAULT`, the
-  server's own), `utf8mb4` (`SET NAMES`), `max_execution_time` above zero and within the timeout, `sql_select_limit`
+  `transaction_read_only` on, `sql_mode` set by name only, to modes that leave how text is read alone (not by
+  number, which can turn any mode on, and not `DEFAULT`, the server's own), `utf8mb4` (`SET NAMES`), `max_execution_time` above zero and within the timeout, `sql_select_limit`
   within the cap. A user variable (`@x`) may hold a row's value: what it gives back is faked. An optimizer hint sets
   for one statement what `SET` does for the session: `MAX_EXECUTION_TIME(n)` is held to the timeout, and each
   `SET_VAR(name = value)` read as `SET SESSION name = value`. `SET GLOBAL`, `PERSIST` and `PERSIST_ONLY` are refused;
@@ -958,8 +1008,9 @@ is refused, a valid one included: a guard must not let through what it did not r
 ### Rewriting
 
 A literal compared by `=`, `<>`, `<=>` or `IN` with a column, through aliases, databases, derived tables, CTEs,
-parentheses, an introducer and `COLLATE`, is looked up in that column's domain; a column of MySQL's own catalog is not
-a fake's. Only the literals turned back are replaced, where sqlparser places them in the text; the rest of the
+parentheses, an introducer and `COLLATE`, is looked up in that column's domain: a derived table's or a CTE's column
+is the field it selects, renamed or through `*`, and one it computes is no field's. A recursive CTE reads itself, not
+a table of that name. A column of MySQL's own catalog is not a fake's. Only the literals turned back are replaced, where sqlparser places them in the text; the rest of the
 statement goes upstream as the client wrote it. A literal whose text there does not read as its value (`'a' 'b'`) is
 left alone. A real value is written as a number, or quoted with backslash escapes, which Sosie keeps on. A prepared
 statement's parameters are written in the same way, each where its `?` is.
@@ -1010,9 +1061,155 @@ result cut at the cap.
 - `BIT`, spatial and `VECTOR` values come back `NULL`.
 - A prepared statement's parameter changes a computed value's type where MySQL's would not: `? + 1` with a `DOUBLE`
   of 5 runs as `5 + 1`. What a statement computes is faked by its type all the same.
-- `SHOW CREATE VIEW` and `information_schema.VIEWS` show a view's definition, a literal in it included.
+- `SHOW CREATE VIEW` and `information_schema.VIEWS` show a view's definition, a literal in it included; so do
+  `SHOW CREATE` of a trigger, function, procedure or event, `SHOW TRIGGERS`, `SHOW EVENTS`, and
+  `information_schema`'s `ROUTINES`, `TRIGGERS` and `EVENTS`, for their code.
+- Bytes are never turned back: a fake in a `BINARY` or `BLOB` column, as `X'…'` or a parameter, is used as written,
+  so a `BINARY(16)` id cannot be queried by its fake.
 - MySQL reports no column for a value it computes, so `MAX(id)` is faked by type, not in `users.id`'s domain; nor for
   a `UNION`'s columns, so they are faked by type too, a total row's label included.
+
+## MongoDB source
+
+For MongoDB 6.0 and later (wire version 17); 6.0, 7.0 and 8.0 are tested. `SOSIE_UPSTREAM` is
+`mongodb://user:password@host:27017/database` or `mongodb+srv://…`, its database named; the driver takes every option
+the string gives (TLS, `authSource`, `replicaSet`, `readPreference`). A string of several hosts does not read as a URL:
+the CLI asks for one host and the `replicaSet` option, from which the driver finds the others.
+
+### Endpoint
+
+It listens on 127.0.0.1, and on ::1 too; its address carries `directConnection=true`, so a driver takes Sosie for one
+server. Messages are OP_MSG, their document sequences (kind 1) set on the body as arrays and a checksum skipped; the
+first `hello` of a handshake may come as OP_QUERY, and is answered with OP_REPLY. OP_COMPRESSED gets an error: Sosie
+offers no compression. A message with `moreToCome` gets no answer. Values are read with BSON's own types
+(`promoteValues: false`), so what Sosie does not change goes back byte for byte.
+
+Sosie answers itself: `hello` and `isMaster` (a standalone server, writable, `helloOk`, sessions of 30 minutes, the
+upstream's wire versions, no `topologyVersion`, so drivers poll), `ping`, `refreshSessions` and `logout` (ok),
+`buildInfo` (the upstream's version only), `endSessions` (which ends their sessions upstream), `startSession`,
+`whatsmyuri`, `connectionStatus` (no users), `getLog` (empty), `getParameter` for the feature compatibility version
+only. A login (`saslStart`, `authenticate`) gets `AuthenticationFailed`: Sosie takes none. `hostInfo`,
+`getCmdLineOpts` and `serverStatus` are refused, since they say where the server is; `atlasVersion`,
+`getFreeMonitoringStatus` and `getnonce` get `59 CommandNotFound`, as does an OP_QUERY that is not a `hello`.
+
+### Upstream
+
+One `MongoClient` for the Sosie, its heartbeats polled, and an upstream session (`ClientSession`) per client session:
+per `lsid` a driver sends, ended by `endSessions` or after 30 minutes unused, as MongoDB ends its own; a connection
+that sends none has one of its own, ended with it. A command is sent through `db.command` in that session, with the client's session, cluster and
+read-preference fields (`lsid`, `txnNumber`, `$clusterTime`, `$readPreference`, `apiVersion`, any other `$` field)
+taken off, so the driver sets its own, and `readConcern`'s `afterClusterTime` dropped. An answer's `$clusterTime`,
+`operationTime` and the like are taken off too: the upstream's clock never reaches the client.
+
+`find`, `aggregate`, `count` and `distinct` get `maxTimeMS`, the statement timeout or the client's own if lower. A
+cursor's id is MongoDB's, kept with the upstream session that opened it, its shape and its scope, and it is its client
+session's, as MongoDB ties a cursor to the session that opened it (or its connection's, without an `lsid`): a driver
+may send `getMore` from any connection of its pool, and another client finds no such cursor. Past `--max-rows`
+documents, the cursor is killed upstream, its id answered as 0, and the terminal says so whenever the cap cuts a batch.
+`killCursors` kills those it names, of its own session; a connection that closes kills those it opened.
+
+### Schema
+
+From `listCollections` on the connection string's database: each collection and view an entity, its fields those of a
+`$jsonSchema` validator when it has one (`bsonType` to a neutral type, `enum` of strings to an enum, nested objects
+and arrays of objects dotted). A view's pipeline is kept, with the collection it reads. Every other field is learned as
+documents come: `collection.path`, a nested field dotted, an array's elements the array's path; in another database,
+`database.collection.path`. The schema grows as fields are met, and `describe` lists it, written to the running entry
+at most every half second. `connectionStatus` with its privileges says whether the login can write or is an
+administrator: Sosie warns of either. The login needs the `listCollections` action on the database, as the `read`
+role has: Sosie lists the collections with `nameOnly: false`, which a login with privileges on single collections
+cannot.
+
+### Guard
+
+A command is the first key of its document, and must name its database in `$db`, as OP_MSG carries it. Allowed:
+`find`, `aggregate`, `count`, `distinct`, `getMore`, `killCursors`; `listCollections`, `listIndexes`,
+`listSearchIndexes`, `listDatabases` and `dbStats`, which show the schema and sizes. Every other command but those
+Sosie answers itself is refused, with code 13 (`Unauthorized`), which no driver retries: the writes by name (`This
+command changes data. Sosie is read-only.`), `explain`, `mapReduce`, and any command Sosie does not know. A command with
+`startTransaction` or `autocommit` is refused: Sosie runs no transaction.
+
+- **Databases and collections:** `admin` (users and their password hashes), `local` (the oplog: every write, with its
+  values) and `config` (sessions, and the values that bound each shard), but `listDatabases`; `system.profile`
+  (queries with their values), `system.js` and `system.users` in any database, as a command's collection or a
+  `$lookup`'s, `$graphLookup`'s or `$unionWith`'s.
+- **Stages:** each of a pipeline, a `$facet`'s, a `$lookup`'s and a `$unionWith`'s by name, from the stages Sosie
+  knows the shape of: besides those under Shapes, `$redact`, `$unset`, `$replaceWith`, `$bucket`, `$bucketAuto`,
+  `$geoNear`, `$setWindowFields`, `$search`, `$searchMeta`, `$vectorSearch` and `$listSearchIndexes`. Refused: `$out`
+  and `$merge` (writes), `$currentOp`, `$listSessions`, `$listLocalSessions`, `$planCacheStats` and `$querySettings`
+  (other sessions' queries), `$changeStream` and `$changeStreamSplitLargeEvent` (every change, as long as it runs),
+  `$collStats`, `$indexStats` and `$listClusterCatalog` (the host and its catalog).
+- **JavaScript:** `$where`, `$function`, `$accumulator`, and BSON code, anywhere in a filter, a projection, a pipeline
+  or a command's `let`, whose variables a filter or a pipeline reads: what it computes over the documents cannot be
+  read.
+
+### Shapes
+
+MongoDB's answers name no field: where each value of a result comes from is read from the command. A shape is what is
+at a path of a collection's documents (a leaf there is that field), computed, a count, a literal the client wrote, a
+document a stage built (its named keys, and what any other key was before), or one of several (`$unionWith`).
+
+- A `find` starts from its collection's documents, a view's through its pipeline, then its projection, read as
+  MongoDB reads it, a nested document of `1`s and `0`s as dotted paths (`{ address: { city: 1 } }` is
+  `'address.city': 1`): an inclusion builds a document of what it names, `_id` included unless excluded; an exclusion
+  leaves the rest; an expression in it is read as in a pipeline.
+- A pipeline is read stage by stage. `$match`, `$sort`, `$limit`, `$skip`, `$sample`, `$unwind` and the like keep the
+  shape; `$project` builds a document of expressions, its projection read as a `find`'s; `$addFields` and `$set` merge
+  theirs into the document there, a nested document into the one at its path; `$replaceRoot` takes an expression's;
+  `$group` gives its `_id`'s, and each accumulator: `$sum: 1` and `$count` a count, `$first`, `$last`, `$min`, `$max`,
+  `$push` and `$addToSet` of a field that field, any other computed; `$count` and `$sortByCount` counts; `$lookup` and
+  `$graphLookup` the joined collection's documents under `as`, through a `$lookup`'s own pipeline; `$facet` each
+  pipeline's; `$unionWith` one of two, a field only where both name the same; `$densify` and `$fill` what they fill,
+  computed; `$documents` each value as an expression, so a literal passes and a server variable (`$$NOW`,
+  `$$USER_ROLES`) is computed.
+- An expression is a field's where it is a field path (`$email`, `$$ROOT.email`); a literal where it is one, or
+  `$literal`; `$first`, `$last`, `$arrayElemAt` and `$ifNull` of fields the field; a document of expressions built from
+  them; anything an operator computes, computed.
+
+### Rewriting
+
+A value compared by equality with a field is looked up in that field's domain: `{ path: value }`, `$eq`, `$ne`, `$in`,
+`$nin`, `$all`, inside `$and`, `$or`, `$nor`, `$not` and `$elemMatch` (of values or of documents), and a document or
+an array compared whole, leaf by leaf. A filter is read against the shape of the documents it filters: a `find`'s,
+`count`'s and `distinct`'s against the collection's (a view's through its pipeline), each `$match` of a pipeline
+against the documents before it, so one after a `$group` compares with what the group made; a `$lookup`'s and a
+`$unionWith`'s own pipelines, and a `$graphLookup`'s `restrictSearchWithMatch`, against the collection each reads. A real value goes back in the BSON type of the fake: an ObjectId as an
+ObjectId, a `Long` as a `Long`.
+
+### Faking
+
+Each document of a batch is faked by its shape, a value at a time, other clients let in every 200 documents. In a
+collection's documents, `_id` and a key that looks like a word are structure; any other is a value (a map keyed by
+email), faked in a domain of its own, and what is under it named `*`. In what a stage computed, a key stays only when
+the client wrote it or MongoDB's own operators give it (`$objectToArray`'s `k` and `v`, `$dateToParts`' fields);
+any other, a word or not, is faked, since a pipeline can make keys of values (`$arrayToObject` of a group's roles).
+A `$unionWith`'s key is structure where each collection's shape says it is. A leaf is faked by its field, as `collection.path`, its
+name the path's last key; computed, by its type; a count passes when it is an integer; a literal passes. Each BSON type
+is faked as its text and written back in the same type: a string, `Int32` and `Long` (the integers by their size),
+`Double` and `Decimal128` (decimals), a boolean, a date (a datetime in ISO form), an ObjectId (`objectid`), a UUID
+(`uuid`), other binary data (`bytes`, in hex), a timestamp (a date, to the second), a regular expression, a symbol and
+code (strings). A DBRef keeps its collection, and fakes its id. `MinKey` and `MaxKey` pass. A fake that does not read
+as its type comes back `null`. `distinct`'s values are faked by the field it names; `count`'s `n` passes.
+
+### Errors
+
+An error about the command itself comes back scrubbed of every value Sosie turned back: a bad value or option, a
+parse error, a type mismatch, an unknown namespace, operator or stage, the time limit (`MaxTimeMSExpired`), and the
+like, by code. Any other comes back as its code and name only, `Error 241 (ConversionFailure): Sosie hides the rest of
+this message, which may quote a value from your documents.` An upstream that cannot be reached is
+`HostUnreachable`, with the reason in the terminal only.
+
+### Limits
+
+- Order and ranges follow the real values; a regular expression, `$text` and `$expr` filter on them.
+- A cursor cut at `--max-rows` says so in the terminal only: MongoDB has no warnings to carry it.
+- `listIndexes` and `listCollections` show an index's `partialFilterExpression` and a view's pipeline as written,
+  a value in them included.
+- A stage Sosie does not know the shape of is refused, and so is any newer one until Sosie reads it.
+- A map stored in a document and keyed by lowercase words that are data (`{ prefs: { quillon: … } }`) keeps those
+  keys, since they look like structure, as a json column's do in Postgres.
+- A value in a `$unionWith`'s documents where the two collections name different fields is faked by its type.
+- No TLS and no login on Sosie's own address.
 
 ## REST source
 
@@ -1025,14 +1222,18 @@ A local HTTP address with the API's own paths: `http://localhost:7674/v1/users`
 reads `https://api.internal/v1/users`. Only `GET` and `HEAD` reach the API;
 anything else gets `405`, with `Allow: GET, HEAD`, and never leaves Sosie. Requests outside the base path
 get `404`, and a path whose `%` starts no escape `400`. So does a segment that
-decodes to one with a `/` or `\` in it, and a fake in a
-segment that stands for such a value, or for `.` or `..`: an API, or a proxy before it, that
+decodes to one with a `/` or `\` in it, or with a NUL or another control character, where a server may stop reading
+the path; one that is `.` or `..`, or holds a `/` or `\`, once decoded again (`%252e`, `%252F`, as a proxy that
+decodes twice reads it) or without its `;params` (`..;`, as Tomcat reads it); and a fake in a segment that stands for
+such a value, or for `.` or `..`: an API, or a proxy before it, that
 decodes `%2F` and resolves `..` would read another path than Sosie does, one
 outside the base or of another kind. A `.` or `..` the client writes, `%2e` included, is resolved before the path is
 read, as the API would resolve it, so both read the same path. A method override in the query
 (`?_method=DELETE`, `method`, `X-HTTP-Method-Override` and the like, with a
 method that writes), which some frameworks run instead of `GET`, gets `400`,
-its name and its method as written or as Sosie turns them back. On
+its name and its method as written or as Sosie turns them back, and read as frameworks read them: a name with a `.`,
+a space or a `[` in it as `_` (`?.method=`, as PHP reads it), one ending in `[]` without it, a method with spaces
+around it trimmed. On
 this machine's own
 address, a request whose `Host` is not `localhost`, a `127.` address or `[::1]`
 gets `403`: a web page that rebinds its own name to this machine cannot read the
@@ -1134,7 +1335,8 @@ instead, with nothing real in it, so following it reads the record it names:
   not look for them.
 - Query values are faked by the field they name, so a real value Sosie sent
   upstream comes back as the fake the client sent; a page's number (`page`,
-  `limit`, `offset` and the like, up to five digits) stays. A name stays when
+  `limit`, `offset` and the like, up to five digits) stays, unless the request turned it back from a fake: then the
+  API's link would repeat the real value. A name stays when
   it is a common one (`sort`, `cursor`, `q`), a field of the document, a key a
   body has shown as structure, a reference (`userId`), or one of the request
   the answer is for; any other (`q[Quillon]`, `?jdoe=1`) is faked, and its
@@ -1152,7 +1354,8 @@ instead, with nothing real in it, so following it reads the record it names:
 Status codes pass; error bodies in JSON are faked as no entity's, each value by
 where it sits, so no field's rule in `sosie.yml` applies to them; a body that is
 not JSON is not passed on: an error status passes with Sosie's own message, and
-any other answer is `502`, saying why. A body typed JSON that does not parse, or is nested too deep to read, is a
+any other answer is `502`, saying why. JSON that starts with a byte order mark, as older .NET APIs send it, is read.
+A body typed JSON that does not parse, or is nested too deep to read, is a
 `502` whatever its status. An empty body, and every answer to `HEAD`, pass their status with no body. Sosie answers
 `application/json`, whatever JSON type the API used (`application/problem+json`).
 An answer the API redirected to another path is read by that path, as a link
@@ -1183,7 +1386,9 @@ but never a bare number, is looked up anywhere too. A query parameter is looked
 up in the field it names (`?email=` in `user.email`, `?userId=` in `user.id`,
 `?role=` by the document's enum, `?active=false` as the boolean it shows);
 other text anywhere; a number that names no field (`limit=10`, `page=2`) stays
-as written. A query name links show as it is stays; any other that is a name Sosie faked for a link turns back into
+as written, and so does a page's number of up to five digits under a paging name, as a link shows it, even where a
+body's field of that name holds the fake (`{ page: 2 }` for page 1): a longer one, which may be an id, still turns
+back. A query name that links show as it is stays as it is; any other that is a name Sosie faked for a link turns back into
 the API's, a word faked into another word (`?jdoe=` as `?zleu=`) included. A value compared with a field that passes is real already, and
 stays as written, in a path too: looked up anywhere, a fake of another field
 would turn into that field's real value, which the passing field would show.
@@ -1225,7 +1430,7 @@ would turn into that field's real value, which the passing field would show.
 - A word a client typed that looks like a name, a tenant's slug in lowercase
   (`jones`, `acme-industries`), names an entity after it, and the domains of
   that entity's fields, which `sosie scan` prints, are named after it too; a
-  link never shows it. One that starts with a capital (`/Customers`, as OData
+  link never shows it. Without a document, one that starts with a capital (`/Customers`, as OData
   writes paths) names no entity, so no rule in `sosie.yml` applies under it:
   every value there is faked.
 - Without a document, the same record read through two kinds of path may be
@@ -1240,9 +1445,9 @@ would turn into that field's real value, which the passing field would show.
 - A link reads less well than the API's own: a word no client has asked a list
   of yet, and one that follows a collection's name (`/users/by-email/…`), comes
   back faked, and so does a query name Sosie cannot tell is structure.
-- Without a document, a tenant's slug that is itself a lowercase plural
-  (`jones`), asked for on its own (`/jones`) and answered with a list, is taken
-  for a collection's name, and links show it.
+- A tenant's slug that is itself a lowercase plural (`jones`), asked for on its
+  own (`/jones`) and answered with a list, is taken for a collection's name, and
+  links show it, with a document or without one.
 - An endpoint the API serves for `GET` that writes is the API's to guard: Sosie
   sends every `GET` on.
 - An id with a `/` in it (`group%2Fproject`, as GitLab names projects) cannot
@@ -1265,8 +1470,8 @@ By introspection, with Sosie's credentials, at start-up. An API with
 introspection off is read from `SOSIE_GRAPHQL_SCHEMA`: its SDL, or an
 introspection result as JSON. When it is set, it is the schema, and Sosie does not ask the API at start-up: wrong
 credentials, or an API out of reach, show at the first query. Left set in the shell, it makes any http(s) upstream,
-a REST API's too, GraphQL. Each object and interface type is an entity, but the mutation and subscription types, each
-field that holds a scalar or an enum is a field; one that holds another object
+a REST API's too, GraphQL. Each object and interface type, except the mutation and subscription types, is an entity;
+each field that holds a scalar or an enum is a field; one that holds another object
 is that object's row. Built-in scalars map to neutral types, and custom ones by
 name (`DateTime`, `Date`, `UUID`, `JSON`, `jsonb`, `Map`, `Any`, `BigInt`);
 `Email` and `EmailAddress` pick the email format, `URL` and `URI` the URL
@@ -1279,7 +1484,7 @@ not valid GraphQL stops Sosie at start, saying why.
 ### Endpoint and guard
 
 The API's own path on a local address, by `GET` and `POST`, batches of up to 50
-operations included. A `POST` is JSON or `application/graphql`, of up to 1 MB
+operations included; another method gets `405`, with `Allow: GET, POST`, and another path `404`. A `POST` is JSON or `application/graphql`, of up to 1 MB
 (`413` above it); any other type, as a web page's form or `text/plain` would
 send, gets `415`. On this machine's own address, a `Host` other than localhost,
 or a page of another site, gets `403`, as for REST. Each operation is parsed and
@@ -1298,9 +1503,11 @@ stops answers what they were still checking (`Sosie is stopping.`).
 Only queries reach the API, and only the operation to run with the fragments
 it uses: a mutation or a subscription is answered with an error, and its text
 never leaves Sosie, and so is a field of the mutation or subscription type
-asked for under a query field (`Query.admin: Mutation`). Variables that nest
+asked for under a query field (`Query.admin: Mutation`), or through an interface or a union that type belongs to
+(`{ operator { deleteUser } }`, where `Mutation implements Operator`), by a fragment or not. Variables that nest
 deeper than 100 levels get `400`. A persisted query without its text is refused. POSTs are
-not redirected: the body and the credentials stay with the API.
+not redirected: the body and the credentials stay with the API. The API's answer is read up to 20 MB, within the
+statement timeout (30 s).
 
 Introspection is answered from the schema Sosie holds, with what the client
 sent, and never reaches the API; so clients introspect an API that has
@@ -1354,13 +1561,16 @@ and in a variable's default. On an interface or a union, in
 that field of each type it may be, when they agree: `node(id:)` in `User.id`,
 `Order.id` and the rest. Text that names no field, or whose field does not know the fake, is looked up anywhere, so
 `user(id:)` given a fake of `Post.id` sends that post's real id; digits that name no field (`first: 10`, or `"10"`)
-stay as written; a directive's
+stay as written, and so does an integer of up to five digits under a paging argument (`page`, `limit`, `offset`,
+`first`, `last` and the like), or a variable of a number there, even where a field of that name holds its fake
+(`UserPage.page`), so the client gets the page it asked for; a directive's
 argument (`@include(if:)`) is left alone. A value compared with a field that
 passes is real already, and stays as written, as for REST. A variable has one
 value for all its uses, so it is looked up in the fields of every use at once:
 it is real only when they agree, and stays as written when any use compares it
 with a field that passes. Only the operation that runs, and the fragments it
-uses, count; only the variables it declares are sent.
+uses, count; only the variables it declares are sent, each as the client's own value, one named `__proto__`
+included.
 
 ### Limits
 
@@ -1387,12 +1597,13 @@ returns and every value a client sends. What each planned source maps:
 | REST (built, above) | A local HTTP address; paths as upstream | `GET` and `HEAD` only | The OpenAPI document when there is one; otherwise where the value sits |
 | GraphQL (built, above) | A local HTTP address, at the API's path | Queries only, no mutations | The schema, by introspection or a file |
 | MySQL (built, above) | MySQL's protocol: statements as text, and prepared | Reads only, read-only session | Its result metadata, as with Postgres |
-| MongoDB (next) | Its wire protocol, `OP_MSG`; a standalone server to the driver | Commands allowed by name; `$out`, `$merge` and server-side JavaScript refused; the `read` role | The collection and the dotted path; an aggregation's pipeline for what it renames |
-| SQL Server (then) | TDS: batches and RPC, with TLS inside it | sqlparser's T-SQL dialect; the login's grants, as there is no read-only session | Browse mode or `sp_describe_first_result_set` |
+| MongoDB (built, above) | Its wire protocol, `OP_MSG`; a standalone server to the driver | Commands and stages allowed by name; writes, `$out`, `$merge` and server-side JavaScript refused; the `read` role | The collection and the dotted path, read from the find or the pipeline |
+| SQL Server (next) | TDS: batches and RPC, with TLS inside it | sqlparser's T-SQL dialect; the login's grants, as there is no read-only session | Browse mode or `sp_describe_first_result_set` |
 | Oracle (on demand) | None: MCP's `describe` and `query` only | sqlparser's Oracle dialect; `SET TRANSACTION READ ONLY` | The parse alone |
 
-Rules, domains, fakes, the store, `scan` and `describe` stay as they are. Format
-domains make a person's email the same fake from the database and from the API.
+Rules, domains, fakes, the store, `scan` and `describe` are the core's, and a source adds to them only what its
+upstream has and the core does not: MongoDB added the `objectid` type and its domain, and `entity.*` for fields a
+source learns. Format domains make a person's email the same fake from the database and from the API.
 
 ## Tests
 
@@ -1408,6 +1619,14 @@ domains make a person's email the same fake from the database and from the API.
   (`query()` and `execute()`), the `mariadb` driver and the `mysql` client read through Sosie; the built CLI starts in
   front of it, and its `query` tool reads through that. Every answer, error, warning and column name is searched for
   each canary. CI runs MySQL 8.4 and 9.
+- **MongoDB, end to end.** An embedded MongoDB from MongoDB's own binaries (`mongodb-memory-server`), or the server in
+  `SOSIE_TEST_MONGODB_URL`, seeded with the same canary people as documents, nested, in arrays, and in the BSON
+  types an app stores (strings, `Int32`, `Double`, dates, ObjectIds, UUIDs, binary data), with orders that refer to users by ObjectId and a view; read by a login with the `read` role. The Node driver
+  reads through Sosie, and the built CLI starts in front of it, its `find` and `aggregate` tools reading through
+  that. Every answer and error is searched for each canary, and for the seed's ObjectIds. CI runs MongoDB 6.0, 7.0
+  and 8.0; mongosh was checked by hand. `Long`, `Decimal128`, a timestamp, a DBRef and code are faked in the
+  package's unit tests; `MinKey` and `MaxKey` were checked by hand; a regular expression and a symbol
+  are not tested.
 - **Postgres, end to end.** An embedded PostgreSQL 18, or the server in
   `SOSIE_TEST_DATABASE_URL`, seeded with canary values: unique emails, names,
   phone numbers, keys and numbers; values with nothing to fake (`''`, `-`,
@@ -1453,7 +1672,8 @@ domains make a person's email the same fake from the database and from the API.
   planted value, and the next session reported it. A CI job runs
   `opencastle plugin check`, which loads it as each assistant would, and checks that the marketplaces list it as it
   is. The hooks were run by hand against a running Sosie: what Claude Code would send them, and what they answer.
-- **CI.** PostgreSQL 15, 16, 17 and 18 on Node 26; 18 on Node 24.
+- **CI.** PostgreSQL 15, 16, 17 and 18 on Node 26, and 18 on Node 24; each with MySQL 8.4 or 9 and MongoDB 6.0, 7.0
+  or 8.0 beside it (8.0 on Ubuntu 22.04, as mongod 8.0 does not start on the newer kernel); and the plugin's check.
 
 ## Defaults
 
@@ -1474,7 +1694,11 @@ domains make a person's email the same fake from the database and from the API.
 - Postgres types without a neutral type come back `NULL`: `interval`, `xml`, `bit`, `tsvector`, ranges, and a domain
   over an enum, an array or another domain.
 - REST: a collection named in kebab case (`/line-items`) is never learned as the API's word, so links fake it.
-- GraphQL: `Sosie is stopping.` is tagged `SOSIE_TOO_COSTLY`, and an `operationName` that names no operation is
-  answered as if the document had several.
+- GraphQL: every refusal from the check threads is tagged `SOSIE_TOO_COSTLY`, `Sosie is stopping.` and a failure of
+  graphql-js's own included; and an `operationName` that names no operation is answered as if the document had
+  several.
 - The statement timeout is 30 s, with no flag to change it.
 - MySQL: MariaDB, refused at start-up.
+- MongoDB: a fake in `$expr`, a `$lookup`'s `let`, or an index bound (`min`, `max`, `hint` by value) is used as
+  written; Compass and the drivers other than Node's are not checked; a cursor cut at `--max-rows` says so only in the
+  terminal.

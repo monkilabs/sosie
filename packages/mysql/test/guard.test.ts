@@ -53,6 +53,8 @@ describe('the guard', () => {
     'SET NAMES utf8mb4',
     'SET autocommit = 0, time_zone = \'+00:00\'',
     "SET SESSION sql_mode = 'STRICT_TRANS_TABLES'",
+    "SET sql_mode = 'TRADITIONAL,ONLY_FULL_GROUP_BY'",
+    "SET sql_mode = ''",
     'SET max_execution_time = 1000',
     'SET @x = 1',
     'SET TRANSACTION ISOLATION LEVEL READ COMMITTED',
@@ -96,6 +98,17 @@ describe('the guard', () => {
     ['SET SESSION transaction_read_only = OFF', 1227],
     ["SET sql_mode = 'ANSI_QUOTES'", 1227],
     ['SET sql_mode = DEFAULT', 1227],
+    // A number sets modes by their bits: 1048576 is NO_BACKSLASH_ESCAPES, 4 ANSI_QUOTES.
+    ['SET sql_mode = 1048576', 1227],
+    ['SHOW STATUS', 1227],
+    ['SELECT @@caching_sha2_password_private_key_path', 1227],
+    ['SELECT @@global.mysqlx_ssl_cert', 1227],
+    ["SHOW GLOBAL STATUS LIKE 'Mysqlx_socket'", 1227],
+    ['SET SESSION sql_mode = 4', 1227],
+    ["SET sql_mode = 'IGNORE_SPACE'", 1227],
+    ["SET sql_mode = 'STRICT_TRANS_TABLES,HIGH_NOT_PRECEDENCE'", 1227],
+    ["SET sql_mode = 'NO_SUCH_MODE'", 1227],
+    ['SELECT /*+ SET_VAR(sql_mode = 1048576) */ 1', 1227],
     ['SET max_execution_time = 0', 1227],
     ['SET max_execution_time = 999999', 1227],
     ['SET NAMES latin1', 1235],
@@ -133,6 +146,14 @@ describe('the guard', () => {
     expect(near("SELECT * FROM information_schema.TABLES WHERE TABLE_NAME = 'users'")).toEqual([['users', 'catalog']])
     // Two tables with the column, unqualified: Sosie cannot tell which.
     expect(near('SELECT * FROM users, orders WHERE id = 7')).toEqual([['7', undefined]])
+    // Through a derived table and a CTE, renamed or not, to the column each one's column is.
+    expect(near('SELECT * FROM (SELECT id, user_id AS owner FROM orders) t WHERE t.id = 8 AND owner = 6')).toEqual([
+      ['8', 'orders.id'],
+      ['6', 'orders.user_id'],
+    ])
+    expect(near('WITH o AS (SELECT * FROM orders) SELECT * FROM o WHERE id = 8')).toEqual([['8', 'orders.id']])
+    // A column the derived table computes is no field's, and no table outside it is looked at for its name.
+    expect(near('SELECT * FROM users u, (SELECT UPPER(email) AS email FROM users) t WHERE t.email = 7')).toEqual([['7', undefined]])
   })
 
   it('leaves alone a literal whose text it would not write back as it read it', () => {
@@ -145,6 +166,9 @@ describe('the guard', () => {
 
   it('tells what reads data, and what only the catalog', () => {
     expect(check('SELECT 1, NOW()').catalogOnly).toBe(true)
+    // A recursive CTE reads itself, not a table: numbers made from nothing.
+    expect(check('WITH RECURSIVE g (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM g WHERE n < 3) SELECT n FROM g').catalogOnly).toBe(true)
+    expect(check('WITH RECURSIVE g (n) AS (SELECT id FROM users UNION ALL SELECT n + 1 FROM g WHERE n < 3) SELECT n FROM g').catalogOnly).toBe(false)
     expect(check('SELECT * FROM information_schema.TABLES').catalogOnly).toBe(true)
     expect(check('SELECT * FROM users').catalogOnly).toBe(false)
     expect(check('SELECT @x').catalogOnly).toBe(false)

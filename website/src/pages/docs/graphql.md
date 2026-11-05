@@ -19,7 +19,7 @@ npx @sosie/cli
   ✓ api.internal/graphql, read-only: 31 types, 12 queries
   ✓ Every value is faked
 
-  Your agent, app and curl:  http://localhost:7676/graphql
+  Your agent, app and curl:  http://localhost:7674/graphql
 ```
 
 Sosie serves GraphQL at the API's own path, by `GET` and `POST`, batches included.
@@ -41,7 +41,7 @@ Without it, the URL goes to the REST source. Sosie never sends a `POST` to find 
 ## The schema
 
 By introspection, with Sosie's credentials, at start-up. An API with introspection off is read from
-`SOSIE_GRAPHQL_SCHEMA`: its SDL, or an introspection result as JSON.
+`SOSIE_GRAPHQL_SCHEMA`: a file with its SDL, or with an introspection result as JSON.
 
 - Each object and interface type is an entity; each field that holds a scalar or an enum is a field.
 - Custom scalars map by name: `DateTime`, `Date`, `UUID`, `JSON`, `BigInt` and the like. `Email` and `EmailAddress`

@@ -4,8 +4,8 @@ Sosie is a read-only endpoint in front of a data source that fakes every value
 on the way out. An AI agent, the developer's app and their tools connect to it
 as they would to the real source, and get the real shape with fake contents.
 Postgres was its first source, the [MVP](mvp.md); the team's own REST and
-GraphQL APIs came next, and v0.1, the first release, has all three; MySQL followed. More are packages behind the same
-interface. A
+GraphQL APIs came next, and v0.1, the first release, has all three; MySQL followed, then MongoDB. More are packages
+behind the same interface. A
 [plugin](#the-plugin) brings Sosie's MCP server, and how to read through it, to the agent's assistant. The
 [low-level design](lld.md) has the details.
 
@@ -49,8 +49,8 @@ that deliberately hunts for secrets on the machine Sosie runs on (see
 ## Architecture
 
 Sosie is a **core** that knows nothing about any database or API, and
-**sources** that each know one kind of upstream: Postgres, and the team's REST
-and GraphQL APIs. A source speaks its upstream's protocol to clients and reports which
+**sources** that each know one kind of upstream: Postgres, MySQL, MongoDB, and
+the team's REST and GraphQL APIs. A source speaks its upstream's protocol to clients and reports which
 field each value came from; the core decides every fake.
 
 ```mermaid
@@ -75,7 +75,7 @@ flowchart LR
       results --> faker
       rewrite -. lookup .-> faker
       faker --> endpoint
-      later["Other sources:<br/>MySQL, REST, GraphQL"] -.-> faker
+      later["Other sources:<br/>MySQL, MongoDB, REST, GraphQL"] -.-> faker
     end
   end
   upstream -->|read-only login| db[("Your database")]
@@ -98,6 +98,9 @@ flowchart LR
 | MySQL | Endpoint | Speaks MySQL's protocol on 127.0.0.1: statements as text, several to a query, and prepared statements |
 | MySQL | Guard | MySQL's dialect of sqlparser: allows reads; refuses everything else, and the tables and settings that hold queries, password hashes or where the database is |
 | MySQL | Rewriter and results | Turns back the literals compared with a column, in place; names each result column's field from the database, table and column MySQL reports |
+| MongoDB | Endpoint | Speaks MongoDB's wire protocol on 127.0.0.1, as a standalone server that takes no login; answers the handshake itself |
+| MongoDB | Guard | Allows read commands by name, and a pipeline's stages by name; refuses writes, JavaScript on the server, stages that write or show other sessions, and MongoDB's own databases |
+| MongoDB | Shapes, rewriter and faking | Reads where each value of a result comes from out of the find or the pipeline, stage by stage; turns back fakes compared by equality; fakes each value in its own BSON type |
 | REST | Endpoint and guard | The API's paths on a local HTTP address; `GET` and `HEAD` only, with Sosie's credentials |
 | REST | Fields | Names each value's field from the OpenAPI document, or from where it sits |
 | REST | Links | Points the API's links at Sosie, with nothing real in them, and reads them back |
@@ -120,8 +123,8 @@ same for every source.
 | First, the MVP | Postgres | Most personal data lives in databases, and teams least dare give an agent access to them |
 | Next, also in v0.1 | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
 | v0.2 | MySQL | The other database most teams run; its result metadata names each value's column, as Postgres's does |
-| Next | MongoDB | The most used database after the SQL ones, above all with the JavaScript developers `npx` reaches; its protocol is open, and its commands are documents, so its guard needs no parser |
-| Then | SQL Server, and Azure SQL with it | The database of most .NET and Microsoft teams. Its protocol is open but the largest yet, and its clients encrypt by default |
+| After v0.2 | MongoDB | The most used database after the SQL ones, above all with the JavaScript developers `npx` reaches; its protocol is open, and its commands are documents, so its guard needs no parser |
+| Next | SQL Server, and Azure SQL with it | The database of most .NET and Microsoft teams. Its protocol is open but the largest yet, and its clients encrypt by default |
 | Only on demand, and through MCP | Oracle | Its protocol is closed, and its results do not say which table a column came from, so it would be the one source that apps and tests cannot connect to unchanged |
 | Later | MariaDB; third-party APIs | On demand; many third-party APIs already offer a test mode |
 
@@ -136,18 +139,19 @@ field each value came from.
 
 | | MongoDB | SQL Server | Oracle |
 | --- | --- | --- | --- |
-| For clients | Its wire protocol, open: `OP_MSG` and BSON, with the first `hello` as `OP_QUERY`. `mongosh`, Compass, Mongoose and MongoDB's own MCP server connect unchanged; FerretDB shows a server of its own can satisfy them | TDS, open ([MS-TDS](https://learn.microsoft.com/openspecs/windows_protocols/ms-tds/)): login, batches, and RPC, which every driver uses for parameters (`sp_executesql`). ODBC Driver 18, JDBC and SqlClient encrypt by default, so the endpoint needs TLS from the start, carried in TDS's own packets | TNS and TTC: closed, known only from Oracle's own thin drivers. Sosie would have to imitate Oracle's logon and whatever each client checks: JDBC, OCI, ODP.NET |
+| For clients | Its wire protocol, open: `OP_MSG` and BSON, with the first `hello` as `OP_QUERY`. The Node driver, which Mongoose is built on, connects unchanged and is tested; `mongosh` was checked by hand; Compass and MongoDB's own MCP server are not checked yet. FerretDB shows a server of its own can satisfy them | TDS, open ([MS-TDS](https://learn.microsoft.com/openspecs/windows_protocols/ms-tds/)): login, batches, and RPC, which every driver uses for parameters (`sp_executesql`). ODBC Driver 18, JDBC and SqlClient encrypt by default, so the endpoint needs TLS from the start, carried in TDS's own packets | TNS and TTC: closed, known only from Oracle's own thin drivers. Sosie would have to imitate Oracle's logon and whatever each client checks: JDBC, OCI, ODP.NET |
 | Read-only | Commands are documents, allowed by name: `find`, `aggregate` without `$out` or `$merge`, `count`, `distinct`, the `list` commands. Server-side JavaScript (`$where`, `$function`, `$accumulator`) is refused. A login with the built-in `read` role is the layer under it | sqlparser's T-SQL dialect reads the usual reads (`TOP`, `CROSS APPLY`, `FOR JSON`); what it cannot parse is refused, as with MySQL. Writes hide in `SELECT INTO`, `EXEC`, `OUTPUT`, `OPENROWSET` and linked servers. SQL Server has no read-only session, so the login's grants (`db_datareader`, no `EXECUTE`) are the only layer under the guard | sqlparser's Oracle dialect reads the usual reads (`ROWNUM`, `CONNECT BY`, `(+)` joins). `SET TRANSACTION READ ONLY`; database links, `UTL_` and `DBMS_` packages refused |
 | Field of a value | No schema to read: the collection and the dotted path (`users.address.city`), as the REST source learns a body without a document, and `$jsonSchema` validators where a collection has them. `find` keeps paths; what an aggregation renames is read from its pipeline, and what it computes is faked by type. A fake in a filter is a value in a document, turned back with no parse | Results name only the column. Browse mode, or `sp_describe_first_result_set` with browse information, names its database, table and column through views and aliases, as MySQL's metadata does | Oracle names no table for a result column, so every column would rest on the parse, and anything it cannot place would be faked by type |
-| Size | Medium. The protocol is small and needs no parser, but documents and BSON's types (ObjectId, Decimal128, dates) are new to the core | Large: the Postgres source's size, with TLS and RPC from the first day | Very large and brittle as an endpoint; medium as an MCP-only source |
+| Size | Medium. The protocol is small and needs no parser, but documents are new to the core, and ObjectId a type of its own. Decimal128 and dates fit the types it had | Large: the Postgres source's size, with TLS and RPC from the first day | Very large and brittle as an endpoint; medium as an MCP-only source |
 | Tested on | `mongodb-memory-server`, as MySQL is on `mysql-memory-server` | SQL Server's container, x86 only: Rosetta on Apple silicon | Oracle Database Free's container, large and slow to start |
 
 So MongoDB comes first: it fits Sosie best, and gives the guard least room to be wrong. SQL Server follows, the same
 kind of source as Postgres and MySQL, only bigger. Oracle, if ever, comes as an MCP-only source: `describe` and
 `query`, with node-oracledb's Thin mode upstream. Agents could use it; apps and tests could not.
 
-Each starts with a spike before it is planned in detail. For MongoDB: the handshake with `mongosh`, Compass and
-Mongoose, and how an ObjectId is faked and turned back. For SQL Server: TLS with each driver's defaults, and which
+Each starts with a spike before it is planned in detail. MongoDB's showed the drivers and `mongosh` take a server of
+Sosie's own, and that an ObjectId needs a type of its own in the core, faked in one domain wherever it is held; it is
+built (see the [low-level design](lld.md#mongodb-source)). For SQL Server: TLS with each driver's defaults, and which
 metadata names the column.
 
 ## The plugin
@@ -161,9 +165,9 @@ VS Code, Cursor, Codex, Kiro and Devin. The repository is its marketplace.
   agent.
 - **The hooks**, in Claude Code, Copilot CLI and VS Code, close the loop the MVP left to the developer. A session
   starts knowing which Sosies run, or, in a project with a `sosie.yml` and none running, that it should ask for one.
-  When it ends, `sosie scan` checks its transcript, and the next session reports a real value it found. The MVP's "a
-  hook per assistant comes later" is this. Agent Plugins has no place for hooks, so each assistant reads its own
-  file, and all of them run the same scripts.
+  When it ends, `sosie scan` checks its transcript, and the next session reports a real value it found. The hooks
+  run the proof; what a shell prints is still not filtered. Agent Plugins has no place for hooks, so each assistant
+  reads its own file, and all of them run the same scripts.
 
 The plugin is a client of Sosie like any other. It starts no Sosie and holds no credentials: the connection string is
 typed in the developer's terminal, where the agent cannot read it.
@@ -198,7 +202,7 @@ sequenceDiagram
   queries by a fake work. Real values are sealed in the store and never leave
   Sosie's process.
 - **Schema first, detection last.** The database's schema says what each value
-  is. Automatic detection is not in v0.1; when it comes, it will only suggest
+  is. Automatic detection is not built; when it comes, it will only suggest
   rules for the team to review.
 
 ## Threat model
@@ -280,11 +284,17 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
   Where several statements in a query end, and where a prepared statement's parameters are, rest on the parse too,
   each with MySQL's check under it: each piece goes upstream alone, on a session that runs one statement per query,
   and MySQL's count of parameters must be the guard's.
+- **MongoDB says nothing of where a value came from.** Postgres's and MySQL's metadata name each column's table and
+  column; MongoDB's answers name nothing. So every value rests on Sosie's reading of the command: a find's documents
+  are its collection's, and a pipeline is read stage by stage, a stage it does not know refused. What it cannot place
+  (anything a stage computes) is faked by its type, and in what a stage computes, a key is faked unless the client
+  wrote it. A pipeline read differently from MongoDB could still let a value through in a field Sosie took for
+  another: the login's `read` role and the refused stages are the layers under it.
 - **Driver coverage.** The extended query protocol and binary formats vary
   between drivers. Sosie is tested with `psql`, `node-postgres`, `postgres.js`,
   Drizzle and Prisma 7; its binary format byte for byte against Postgres's
   own, and by hand with asyncpg and pgJDBC. pgx is not checked yet. A type
-  Sosie cannot write in binary from its text (`regclass`, composites, ranges)
+  Sosie cannot write in binary from its text (`regclass`, `money`, composites, ranges)
   is refused in binary, with an error that names it.
 - **Computed values.** A value a query computes (`length(email)`) has no
   column, so it is faked by type, which can surprise. `count(...)` passes.

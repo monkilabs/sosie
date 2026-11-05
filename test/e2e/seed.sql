@@ -57,6 +57,11 @@ CREATE FUNCTION check_user(uid int) RETURNS int LANGUAGE plpgsql STABLE AS $$
 BEGIN
   RAISE EXCEPTION 'user % is not allowed', (SELECT email FROM users WHERE id = uid);
 END $$;
+CREATE FUNCTION tag_session(uid int) RETURNS int LANGUAGE plpgsql VOLATILE AS $$
+BEGIN
+  PERFORM set_config('application_name', (SELECT email FROM users WHERE id = uid), false);
+  RETURN uid;
+END $$;
 CREATE FUNCTION greet(uid int) RETURNS int LANGUAGE plpgsql STABLE AS $$
 BEGIN
   RAISE NOTICE 'hello %', (SELECT full_name FROM users WHERE id = uid);

@@ -70,7 +70,11 @@ export function loadRules(text: string, schema: Schema, file = 'sosie.yml', { le
         if (pattern.endsWith('.*')) {
           const entity = entities.get(pattern.slice(0, -2))
           if (!entity) unknown(`${pattern.slice(0, -2)}.*`, () => rules.pass.add(pattern))
-          else for (const field of entity.fields) rules.pass.add(field.id)
+          else {
+            for (const field of entity.fields) rules.pass.add(field.id)
+            // A source that learns its fields (MongoDB) knows few or none of them yet: the pattern holds for those to come.
+            if (learns) rules.pass.add(pattern)
+          }
         } else if (fields.has(pattern)) {
           rules.pass.add(pattern)
         } else {

@@ -87,7 +87,7 @@ describe('a GraphQL API', () => {
   })
 
   it('is read by introspection, and its types become entities', () => {
-    expect(sosie.connection.summary).toBe('8 types, 17 queries')
+    expect(sosie.connection.summary).toBe('10 types, 19 queries')
     const user = sosie.connection.schema.entities.find((e) => e.id === 'User')!
     expect(user.fields.find((f) => f.name === 'email')).toMatchObject({ format: 'email' })
     expect(sosie.connection.schema.entities.find((e) => e.id === 'Order')!.fields.find((f) => f.name === 'userId')!.references).toBe('User.id')
@@ -337,12 +337,32 @@ describe('a GraphQL API', () => {
     await lenient.close()
   })
 
-  it('sends no field of the mutation type, under a query field either', async () => {
+  it('sends a page’s number as written, even where the answer says which page it is', async () => {
+    const shown = (await sosie.ask('{ pagedUsers(page: 1) { page users { email } } }')).body.data.pagedUsers.page as number
+    await sosie.ask(`{ pagedUsers(page: ${shown}) { page } }`)
+    expect(api.received.at(-1)!.query).toContain(`pagedUsers(page: ${shown})`)
+    await sosie.ask('query P($p: Int) { pagedUsers(page: $p) { page } }', { p: shown })
+    expect(api.received.at(-1)!.variables).toEqual({ p: shown })
+  })
+
+  it('sends no field of the mutation type, under a query field either, nor through an interface it implements', async () => {
     const before = api.operations.length
-    const { status, body } = await sosie.ask('{ admin { deleteUser(id: "1") } }')
-    expect(status).toBe(400)
-    expect(body.errors[0].extensions.code).toBe('SOSIE_READ_ONLY')
+    for (const query of [
+      '{ admin { deleteUser(id: "1") } }',
+      '{ operator { deleteUser(id: "1") } }',
+      'query { operator { ...O } } fragment O on Operator { deleteUser(id: "1") }',
+    ]) {
+      const { status, body } = await sosie.ask(query)
+      expect(status).toBe(400)
+      expect(body.errors[0].extensions.code).toBe('SOSIE_READ_ONLY')
+    }
     expect(api.operations.slice(before)).toEqual([])
+  })
+
+  it('sends a variable named __proto__ as the client’s value, not as an object’s prototype', async () => {
+    const [quill] = (await sosie.ask('{ users { email } }')).body.data.users
+    const { body } = await sosie.ask('query Q($__proto__: String) { users(email: $__proto__) { email } }', JSON.parse(`{"__proto__": ${JSON.stringify(quill.email)}}`))
+    expect(body.data.users.map((u: { email: string }) => u.email)).toEqual([quill.email])
   })
 
   it('keeps an alias that names an object’s own machinery, and adds none the API left out', async () => {

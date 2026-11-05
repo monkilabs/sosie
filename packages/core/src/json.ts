@@ -3,10 +3,11 @@ const raw = JSON as unknown as { rawJSON(text: string): object; isRawJSON(value:
 
 /**
  * JSON parsed with each integer beyond 2^53 kept as written, as raw JSON: a
- * 64-bit id read as a number would round, and its fake would name nothing.
+ * 64-bit id read as a number would round, and its fake would name nothing. A byte order mark before it, as some
+ * APIs send one, is skipped.
  */
 export function parseJson(text: string): unknown {
-  return JSON.parse(text, (_key, value, context?: { source?: string }) =>
+  return JSON.parse(text.replace(/^\uFEFF/, ''), (_key, value, context?: { source?: string }) =>
     typeof value === 'number' && !Number.isSafeInteger(value) && /^-?\d+$/.test(context?.source ?? '') ? raw.rawJSON(context!.source!) : value,
   )
 }

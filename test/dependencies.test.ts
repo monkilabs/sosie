@@ -1,13 +1,14 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 /**
  * The dependency rule: the core depends on no source; a source depends on the
  * core only, never on another source; the CLI brings them together.
  */
-const root = new URL('..', import.meta.url).pathname
-const SOURCES = ['@sosie/postgres', '@sosie/mysql', '@sosie/rest', '@sosie/graphql']
+const root = fileURLToPath(new URL('..', import.meta.url))
+const SOURCES = ['@sosie/postgres', '@sosie/mysql', '@sosie/mongodb', '@sosie/rest', '@sosie/graphql']
 
 function imports(pkg: string): string[] {
   const files: string[] = []
@@ -33,11 +34,11 @@ describe('the dependency rule', () => {
     expect(imports('core')).toContain('@faker-js/faker')
     for (const name of [...imports('core'), ...dependencies('core')]) {
       expect(name.startsWith('@sosie/')).toBe(false)
-      expect(['pg', 'pgsql-parser', 'postgres', 'mysql2', '@guanmingchiu/sqlparser-ts']).not.toContain(name)
+      expect(['pg', 'pgsql-parser', 'postgres', 'mysql2', '@guanmingchiu/sqlparser-ts', 'mongodb', 'bson']).not.toContain(name)
     }
   })
 
-  it.each(['postgres', 'mysql', 'rest', 'graphql'])('the %s source depends on the core only', (source) => {
+  it.each(['postgres', 'mysql', 'mongodb', 'rest', 'graphql'])('the %s source depends on the core only', (source) => {
     const sosie = [...imports(source), ...dependencies(source)].filter((n) => n.startsWith('@sosie/'))
     expect(new Set(sosie)).toEqual(new Set(['@sosie/core']))
   })
