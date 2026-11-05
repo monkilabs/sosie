@@ -122,7 +122,16 @@ const REFUSED_FUNCTIONS: Record<string, string> = {
 
 /** Settings that keep the session read-only, its text read as Sosie reads it, and its limits. */
 const READ_ONLY_SETTINGS = new Set(['transaction_read_only', 'tx_read_only'])
-const LEXICAL_MODES = /\b(ANSI_QUOTES|NO_BACKSLASH_ESCAPES|PIPES_AS_CONCAT|ANSI)\b/i
+/**
+ * The modes sql_mode may be set to: by name, never by number (each mode a bit), and none of those that change how
+ * MySQL reads a statement's text: ANSI_QUOTES, NO_BACKSLASH_ESCAPES (which would let a quote out of a literal Sosie
+ * writes), PIPES_AS_CONCAT, IGNORE_SPACE, HIGH_NOT_PRECEDENCE, and ANSI, which holds several of them.
+ */
+const SAFE_MODES = new Set([
+  'ALLOW_INVALID_DATES', 'ERROR_FOR_DIVISION_BY_ZERO', 'NO_AUTO_VALUE_ON_ZERO', 'NO_DIR_IN_CREATE', 'NO_ENGINE_SUBSTITUTION',
+  'NO_UNSIGNED_SUBTRACTION', 'NO_ZERO_DATE', 'NO_ZERO_IN_DATE', 'ONLY_FULL_GROUP_BY', 'PAD_CHAR_TO_FULL_LENGTH', 'REAL_AS_FLOAT',
+  'STRICT_ALL_TABLES', 'STRICT_TRANS_TABLES', 'TIME_TRUNCATE_FRACTIONAL', 'TRADITIONAL',
+])
 const CHARSETS = new Set(['character_set_client', 'character_set_connection', 'character_set_results', 'collation_connection', 'names'])
 
 /** SHOW … statements sqlparser reads as words: these show the schema, the login or counters, nothing from rows. */
@@ -545,8 +554,12 @@ class Analyzer {
     if (READ_ONLY_SETTINGS.has(setting) && !/^(1|on|true)$/i.test(literal)) {
       return this.#refuse({ ...DENIED, message: `Sosie keeps ${setting} on: the session stays read-only.` })
     }
-    if (setting === 'sql_mode' && (LEXICAL_MODES.test(literal) || /^default$/i.test(literal))) {
-      return this.#refuse({ ...DENIED, message: 'Sosie keeps sql_mode without ANSI_QUOTES, NO_BACKSLASH_ESCAPES and PIPES_AS_CONCAT: it must read each statement as MySQL does.' })
+    if (setting === 'sql_mode' && !literal.split(',').every((mode) => mode.trim() === '' || SAFE_MODES.has(mode.trim().toUpperCase()))) {
+      return this.#refuse({
+        ...DENIED,
+        message:
+          'Sosie sets sql_mode only to modes by name, without ANSI_QUOTES, NO_BACKSLASH_ESCAPES, PIPES_AS_CONCAT, IGNORE_SPACE or HIGH_NOT_PRECEDENCE: it must read each statement as MySQL does.',
+      })
     }
     if (CHARSETS.has(setting)) return this.#charset(literal)
     if (setting === 'max_execution_time') this.#timeout(literal)

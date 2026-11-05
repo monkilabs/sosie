@@ -7,7 +7,7 @@ export interface UpstreamOptions {
 }
 
 /** Modes that change how MySQL reads a statement's text: Sosie's parser reads it as MySQL does without them. */
-const LEXICAL_MODES = new Set(['ANSI_QUOTES', 'NO_BACKSLASH_ESCAPES', 'PIPES_AS_CONCAT', 'ANSI'])
+const LEXICAL_MODES = new Set(['ANSI_QUOTES', 'NO_BACKSLASH_ESCAPES', 'PIPES_AS_CONCAT', 'ANSI', 'IGNORE_SPACE', 'HIGH_NOT_PRECEDENCE'])
 
 /** mysql2's options from the connection string: TLS when it asks for it, never a password in an argument. */
 export function config(upstream: URL): mysql.ConnectionOptions {
