@@ -31,6 +31,12 @@ const NO_LOGIN = 'Sosie takes no login: connect without a user and password.'
 
 let connections = 0
 
+/** A client session's id, as text: its lsid's UUID. */
+function sessionKey(lsid: unknown): string | undefined {
+  const id = (lsid as { id?: { buffer?: Uint8Array; position?: number } } | undefined)?.id
+  return id?.buffer ? Buffer.from(id.buffer.subarray(0, id.position ?? id.buffer.length)).toString('hex') : undefined
+}
+
 /**
  * One client connection. Sosie answers the handshake itself, as a standalone server that takes any client without a
  * login, then runs each read upstream in a session of its own: checked, its fakes turned back into real values on
@@ -40,6 +46,8 @@ export class Session {
   readonly #reader: MessageReader
   readonly #id = ++connections
   #session: ClientSession | undefined
+  /** The command being answered: a connection answers one at a time. */
+  #current: Document = {}
 
   constructor(
     private readonly socket: Socket,
@@ -80,6 +88,14 @@ export class Session {
   }
 
   async #command(body: Document): Promise<Document> {
+    this.#current = body
+    if (commandName(body) === 'endSessions') {
+      for (const lsid of Array.isArray(body.endSessions) ? body.endSessions : []) {
+        const key = sessionKey(lsid)
+        if (key) await this.ctx.upstream.endSession(key)
+      }
+      return { ok: new Double(1) }
+    }
     const decided = plan(body)
     if (decided.kind === 'refused') return { ok: 0, ...decided.refusal }
     if (decided.kind === 'local') return this.#local(body)
@@ -134,7 +150,6 @@ export class Session {
       case 'ismaster':
         return this.#hello(name)
       case 'ping':
-      case 'endSessions':
       case 'refreshSessions':
       case 'logout':
         return ok
@@ -173,8 +188,15 @@ export class Session {
 
   /* Reads. */
 
+  /** Whose a cursor opened now is: the client's session, or this connection when it sends none. */
+  get #owner(): object | string {
+    return sessionKey(this.#current.lsid) ?? this
+  }
+
+  /** The upstream session the command runs in: its client session's, or this connection's own. */
   get #upstreamSession(): ClientSession {
-    return (this.#session ??= this.ctx.upstream.client.startSession())
+    const key = sessionKey(this.#current.lsid)
+    return key ? this.ctx.upstream.sessionFor(key) : (this.#session ??= this.ctx.upstream.client.startSession())
   }
 
   /** A command as it goes upstream: cleaned, and held to Sosie's time limit. */
@@ -241,7 +263,7 @@ export class Session {
 
   async #getMore(body: Document): Promise<Document> {
     const id = body.getMore as Long
-    const cursor = this.ctx.upstream.cursors.get(String(id))
+    const cursor = this.#owned(String(id))
     if (!cursor) return sosieError(43, 'CursorNotFound', `cursor id ${String(id)} not found`)
     const command = cleaned(body)
     // A time limit on getMore is for a tailable cursor only; the find's holds for the rest.
@@ -255,9 +277,18 @@ export class Session {
 
   async #killCursors(body: Document): Promise<Document> {
     const ids = (Array.isArray(body.cursors) ? body.cursors : []) as Long[]
-    const known = ids.filter((id) => this.ctx.upstream.cursors.has(String(id)))
+    const known = ids.filter((id) => this.#owned(String(id)))
     await this.ctx.upstream.kill(known)
     return { cursorsKilled: known, cursorsNotFound: ids.filter((id) => !known.includes(id)), cursorsAlive: [], cursorsUnknown: [], ok: new Double(1) }
+  }
+
+  /**
+   * A cursor of the client's session, as MongoDB ties a cursor to the session that opened it: a driver may continue it
+   * on any connection of its pool, and another client neither reads its batches nor closes it.
+   */
+  #owned(id: string) {
+    const cursor = this.ctx.upstream.cursors.get(id)
+    return cursor?.owner === this.#owner ? cursor : undefined
   }
 
   /** listCollections, listIndexes, listDatabases, dbStats: the schema and sizes, as they are. */
@@ -273,7 +304,7 @@ export class Session {
   /* Cursors. */
 
   #cursor(result: Document, opened: { db: string; collection: string; shape: Shape; scope: RequestScope | undefined; sent: string }): Promise<Document> {
-    const cursor = { ...opened, session: this.#upstreamSession, served: 0, owner: this }
+    const cursor = { ...opened, session: this.#upstreamSession, served: 0, owner: this.#owner }
     const id = String((result.cursor as Document).id)
     if (id !== '0') this.ctx.upstream.cursors.set(id, cursor)
     return this.#batch(result, id, cursor, 'firstBatch')

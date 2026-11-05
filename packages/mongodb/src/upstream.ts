@@ -51,14 +51,42 @@ export interface Cursor {
   sent: string
   /** Documents returned so far: past the cap, the cursor is closed. */
   served: number
-  owner: object
+  /** Whose it is: the client's own session (its lsid), or the connection of a client that sends none. */
+  owner: object | string
 }
+
+/** How long an upstream session for a client's session is kept unused: MongoDB's own logical session timeout. */
+const SESSION_IDLE = 30 * 60_000
 
 /** The upstream: one client, and the cursors open on it, by id, for any connection to continue. */
 export class Upstream {
   readonly cursors = new Map<string, Cursor>()
+  /** An upstream session for each of the clients' sessions, by lsid: a driver continues a cursor from any connection. */
+  readonly #sessions = new Map<string, { session: ClientSession; used: number }>()
+  #swept = Date.now()
 
   constructor(readonly client: MongoClient) {}
+
+  /** The upstream session for a client's session; one unused for half an hour is ended, as MongoDB ends its own. */
+  sessionFor(lsid: string): ClientSession {
+    const now = Date.now()
+    if (now - this.#swept > 60_000) {
+      this.#swept = now
+      for (const [key, held] of this.#sessions) if (now - held.used > SESSION_IDLE) void this.endSession(key)
+    }
+    let held = this.#sessions.get(lsid)
+    if (!held) this.#sessions.set(lsid, (held = { session: this.client.startSession(), used: now }))
+    held.used = now
+    return held.session
+  }
+
+  /** A client's session ended: its cursors closed, and the upstream session with them. */
+  async endSession(lsid: string): Promise<void> {
+    const held = this.#sessions.get(lsid)
+    this.#sessions.delete(lsid)
+    await this.killOwned(lsid).catch(() => {})
+    await held?.session.endSession().catch(() => {})
+  }
 
   /** Run a command, its answer in BSON's own types. A MongoDB error comes back as one; anything else throws. */
   async command(db: string, command: Document, session: ClientSession): Promise<Document | UpstreamError> {
@@ -82,8 +110,8 @@ export class Upstream {
     }
   }
 
-  /** Close every cursor a connection opened; without one, every cursor. */
-  async killOwned(owner?: object): Promise<void> {
+  /** Close every cursor of an owner; without one, every cursor. */
+  async killOwned(owner?: object | string): Promise<void> {
     const ids = [...this.cursors.entries()].filter(([, c]) => !owner || c.owner === owner).map(([id]) => id)
     for (const id of ids) {
       const cursor = this.cursors.get(id)!

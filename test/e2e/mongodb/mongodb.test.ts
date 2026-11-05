@@ -1,4 +1,5 @@
 import { Binary, BSON, Decimal128, Double, Int32, Long, MongoClient, ObjectId, type Db, type Document } from 'mongodb'
+import { connect } from 'node:net'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { canariesIn } from '../canaries.js'
 import { IDS } from './seed.js'
@@ -241,6 +242,49 @@ describe('cursors and limits', () => {
     const open = db.collection('users').find().batchSize(2)
     await open.next()
     await open.close()
+  })
+
+  it('continues a cursor of a client’s session from any connection, as a driver’s pool may', async () => {
+    /** One command over a socket of its own, as OP_MSG. */
+    const raw = async (doc: Record<string, unknown>) => {
+      const url = new URL(sosie.address)
+      const socket = connect(Number(url.port), url.hostname)
+      const body = BSON.serialize(doc)
+      const head = Buffer.alloc(21)
+      head.writeInt32LE(21 + body.length, 0)
+      head.writeInt32LE(1, 4)
+      head.writeInt32LE(2013, 12)
+      socket.write(Buffer.concat([head, body]))
+      let got = Buffer.alloc(0)
+      for await (const chunk of socket) {
+        got = Buffer.concat([got, chunk as Buffer])
+        if (got.length >= 4 && got.length >= got.readInt32LE(0)) break
+      }
+      socket.destroy()
+      return BSON.deserialize(got.subarray(21))
+    }
+    const lsid = { id: new BSON.UUID() }
+    const opened = await raw({ find: 'users', batchSize: 1, lsid, $db: sosie.database })
+    const next = await raw({ getMore: opened.cursor.id, collection: 'users', batchSize: 1, lsid, $db: sosie.database })
+    keep(next)
+    expect(next.cursor.nextBatch).toHaveLength(1)
+    // Another session's getMore finds no such cursor; the session's end closes it.
+    const stranger = await raw({ getMore: opened.cursor.id, collection: 'users', lsid: { id: new BSON.UUID() }, $db: sosie.database })
+    expect(stranger.code).toBe(43)
+    await raw({ endSessions: [lsid], $db: 'admin' })
+    expect((await raw({ getMore: opened.cursor.id, collection: 'users', lsid, $db: sosie.database })).code).toBe(43)
+  })
+
+  it('lets no client continue or close another client’s cursor', async () => {
+    const other = (await sosie.client()).db()
+    const opened = await db.command({ find: 'users', batchSize: 1 })
+    const id = opened.cursor.id
+    await expect(other.command({ getMore: id, collection: 'users' })).rejects.toMatchObject({ code: 43 })
+    expect((await other.command({ killCursors: 'users', cursors: [id] })).cursorsKilled).toEqual([])
+    const next = await db.command({ getMore: id, collection: 'users', batchSize: 1 })
+    keep(next)
+    expect(next.cursor.nextBatch).toHaveLength(1)
+    await db.command({ killCursors: 'users', cursors: [id] })
   })
 
   it('cuts a cursor at the cap on rows', async () => {
