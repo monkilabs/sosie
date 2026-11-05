@@ -46,12 +46,15 @@ export function at(shape: Shape, path: string): Shape {
   return path.split('.').reduce(child, shape)
 }
 
-/** One of several: the field they all are, or computed where they differ. */
+/**
+ * One of several: the field they all are; otherwise kept as several, so what is under each key is read in each
+ * (a $unionWith's documents are each collection's, their keys its fields), a leaf being a field only where all agree.
+ */
 export function either(of: Shape[]): Shape {
   const first = of[0]
   if (!first) return COMPUTED
   if (of.every((s) => same(s, first))) return first
-  return of.some((s) => s.kind === 'doc' || s.kind === 'either') ? { kind: 'either', of } : COMPUTED
+  return of.some((s) => s.kind === 'doc' || s.kind === 'either' || s.kind === 'field') ? { kind: 'either', of } : COMPUTED
 }
 
 function same(a: Shape, b: Shape): boolean {
