@@ -35,6 +35,8 @@ try {
       encoding: 'utf8',
       env: { ...process.env, NO_COLOR: '1' },
       timeout: SCAN_TIMEOUT,
+      // A session that leaked much prints much: a line per finding, with no cap on how many.
+      maxBuffer: Infinity,
       windowsHide: true,
     })
     const findings = [...plain(scan.stdout).matchAll(/✗ (.+):(\d+)\s+a real value from (\S+)/g)].map(([, file, line, field]) => ({
@@ -48,7 +50,8 @@ try {
       // Exit 1 with nothing found is the CLI's own error, its message on the first line; npm's is on its last.
       const lines = plain(scan.stderr).trim().split('\n')
       const why = (scan.status === 1 ? lines[0] : lines.at(-1)) || scan.error?.message || `exit ${scan.status ?? scan.signal}`
-      addScan(out, { transcript: paths[0], failed: why.replace(/^✗\s*/, '') })
+      // What it found before it failed is kept, beside why it failed.
+      addScan(out, { transcript: paths[0], findings, failed: why.replace(/^✗\s*/, '') })
     }
     if (existsSync(again)) continue
     rmSync(lock, { force: true })

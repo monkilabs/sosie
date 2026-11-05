@@ -172,7 +172,13 @@ const key = (f) => `${f.file}:${f.line}:${f.field}`
  */
 export function addScan(out, { transcript, findings = [], failed }) {
   const all = [...(read(out)?.findings ?? [])]
-  for (const f of findings) if (!all.some((k) => key(k) === key(f))) all.push(f)
+  // By key, in one pass: a scan may find thousands.
+  const known = new Set(all.map(key))
+  for (const f of findings) {
+    if (known.has(key(f))) continue
+    known.add(key(f))
+    all.push(f)
+  }
   if (all.length || failed) keep(out, { transcript, ...(all.length && { findings: all }), ...(failed && { failed }) })
   else rmSync(out, { force: true })
 }

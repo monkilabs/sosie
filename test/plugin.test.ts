@@ -291,6 +291,15 @@ describe('the plugin', () => {
         expect(start()).toMatch(new RegExp(`could not scan a session's transcript, ${transcript}: Error: the store is locked`))
       })
 
+      it('keep every finding of a scan that prints more than a megabyte of them', async () => {
+        const lines = Array.from({ length: 12_000 }, (_, i) => `✗ ${transcript}:${i + 1}  a real value from users.email`).join('\n')
+        run(4, { out: `${lines}\n  12000 real values found in 1 file.\n`, status: 1 })
+        stop()
+        await until(() => runs() === 4 && !existsSync(join(scans, 'v1.lock')), 'the scan runs')
+        // Line 4 was told by the first scan: the other 11,999 are new.
+        expect(start()).toMatch(/Sosie found 11999 real values in a session's transcript/)
+      }, 20_000)
+
       it('say so when Copilot CLI names a session Sosie cannot find', () => {
         const copilot = join(vscode, 'copilot', 'plugin-data', 'sosie', 'sosie')
         const copilotEnv = { ...env, CLAUDE_PLUGIN_DATA: copilot, COPILOT_PLUGIN_DATA: copilot, COPILOT_HOME: join(vscode, 'nowhere') }
