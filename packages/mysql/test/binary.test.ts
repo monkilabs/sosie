@@ -87,6 +87,10 @@ describe('the parameters of an execution', () => {
   it('refuses an execution cut short, or with no types', () => {
     const cut = execute(1, [{ type: TYPE.LONGLONG, value: int64(1n) }]).subarray(0, 16)
     expect(() => readExecute(cut, 1, undefined, new Map())).toThrow(ArgumentsError)
+    // A length that says more bytes of itself follow, and none do.
+    for (const prefix of [0xfc, 0xfd, 0xfe]) {
+      expect(() => readExecute(execute(1, [{ type: TYPE.VAR_STRING, value: Buffer.from([prefix]) }]), 1, undefined, new Map())).toThrow(ArgumentsError)
+    }
     expect(() => readExecute(execute(1, [{ type: TYPE.LONG }], false), 1, undefined, new Map())).toThrow(ArgumentsError)
   })
 })
