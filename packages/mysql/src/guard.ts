@@ -284,6 +284,8 @@ class Analyzer {
 
   #query(q: Node, outer: Scope | undefined, onTargets?: (t: Target[]) => void, onColumns?: (c: Columns | undefined) => void): void {
     const scope: Scope = { relations: [], ctes: new Map(outer?.ctes ?? []), ...(outer && { parent: outer }) }
+    // With RECURSIVE, a CTE's own query may read it: every one of the clause is in scope from the start.
+    if (q.with?.recursive) for (const cte of q.with.cte_tables ?? []) scope.ctes.set(String(cte.alias?.name?.value ?? '').toLowerCase(), undefined)
     for (const cte of q.with?.cte_tables ?? []) {
       let columns: Columns | undefined
       this.#query(cte.query, scope, undefined, (c) => (columns = c))

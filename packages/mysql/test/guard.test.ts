@@ -166,6 +166,9 @@ describe('the guard', () => {
 
   it('tells what reads data, and what only the catalog', () => {
     expect(check('SELECT 1, NOW()').catalogOnly).toBe(true)
+    // A recursive CTE reads itself, not a table: numbers made from nothing.
+    expect(check('WITH RECURSIVE g (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM g WHERE n < 3) SELECT n FROM g').catalogOnly).toBe(true)
+    expect(check('WITH RECURSIVE g (n) AS (SELECT id FROM users UNION ALL SELECT n + 1 FROM g WHERE n < 3) SELECT n FROM g').catalogOnly).toBe(false)
     expect(check('SELECT * FROM information_schema.TABLES').catalogOnly).toBe(true)
     expect(check('SELECT * FROM users').catalogOnly).toBe(false)
     expect(check('SELECT @x').catalogOnly).toBe(false)
