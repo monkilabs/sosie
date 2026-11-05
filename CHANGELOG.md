@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.0, 5 November 2026
+
+MongoDB, a source of its own; MySQL's prepared statements, several statements to
+a query, and its `query` tool; and the fixes a review of everything up to 0.2.0
+found, seven of them leaks or a write in released code. All seven packages move
+to 0.3.0 together; `@sosie/mongodb` is new, and `@sosie/cli` depends on it.
 
 - MySQL: prepared statements, as mysql2's `execute()` and the `mariadb` driver
   send them (both tested), answered in MySQL's binary protocol. Each runs as

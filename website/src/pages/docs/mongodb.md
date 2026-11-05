@@ -2,11 +2,8 @@
 layout: ../../layouts/Docs.astro
 title: MongoDB
 description: Sosie in front of MongoDB 6.0 to 8.0 - the protocol, which clients work, what the guard allows, how each value is faked, and the limits.
-lead: A local endpoint that speaks MongoDB's wire protocol. mongosh, the drivers, Mongoose and your app connect to it unchanged.
+lead: A local endpoint that speaks MongoDB's wire protocol. mongosh, the Node.js driver, Mongoose and your app connect to it unchanged.
 ---
-
-> **Not in 0.2.0.** MongoDB comes with the next release of `@sosie/cli`; until then, `npx @sosie/cli` is 0.2.0, which
-> does not read `mongodb://`.
 
 ## Start it
 

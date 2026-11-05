@@ -1,6 +1,6 @@
 {
   "name": "sosie",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Your AI agent sees a double of your data. Never the real thing. Sosie's MCP server, and a skill that tells the agent how to read your database or API through it.",
   "author": {
     "name": "MonkiLabs",
@@ -12,6 +12,7 @@
   "keywords": [
     "postgres",
     "mysql",
+    "mongodb",
     "rest",
     "graphql",
     "mcp",

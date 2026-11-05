@@ -36,7 +36,6 @@ Start Sosie first, in your own terminal. When none is running, every tool says s
 | `find` | MongoDB | `collection`; `filter`, `projection`, `sort`, `limit` (optional), as JSON | Up to 200 documents as Extended JSON |
 | `aggregate` | MongoDB | `collection`, `pipeline` as a JSON array | Up to 200 documents as Extended JSON |
 
-`query` on MySQL, `find` and `aggregate` come with the next release: 0.2.0 has `query` for Postgres only.
 | `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a `GET` through Sosie, up to 200 items of each list |
 | `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list |
 
