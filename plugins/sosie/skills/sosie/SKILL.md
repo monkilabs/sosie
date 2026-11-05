@@ -19,9 +19,7 @@ the hostnames stay on the developer's side. That is the point of it: keep it tha
   as JSON, up to 200 documents), `request` for REST (a `GET` path, or a link Sosie returned) and `graphql` for GraphQL
   (a query and its variables). When several Sosies run, pass the `address` that `describe` lists. Use the tool of the
   Sosie's kind: `query` reaches a Postgres or MySQL Sosie only, `find` and `aggregate` a MongoDB one. A MongoDB
-  Sosie learns its fields from the documents it serves, so `describe` lists what it has met so far. `query` on MySQL,
-  `find`, `aggregate` and MongoDB itself come with the CLI after 0.2.0: where a tool says it is not there, read the
-  Sosie through its address.
+  Sosie learns its fields from the documents it serves, so `describe` lists what it has met so far.
 - **A REST Sosie without an OpenAPI document** learns its fields from the API's answers, so `describe` lists only
   what it has met so far, and may list nothing. `request` the paths the API serves, such as `/users`, and read the
   fields from what comes back.

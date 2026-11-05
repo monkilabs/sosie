@@ -20,8 +20,8 @@ credentials and hostnames stay on your side.
 
 ## Status
 
-Sosie 0.2.0 is on npm as [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). It works end to end in front of
-PostgreSQL 15 to 18, MySQL 8.4 and 9, REST APIs and GraphQL APIs, on Node 26 and 24. The [MVP](docs/mvp.md), the
+Sosie 0.3.0 is on npm as [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). It works end to end in front of
+PostgreSQL 15 to 18, MySQL 8.4 and 9, MongoDB 6.0 to 8.0, REST APIs and GraphQL APIs, on Node 26 and 24. The [MVP](docs/mvp.md), the
 [high-level design](docs/hld.md) and the [low-level design](docs/lld.md) say what it does and how.
 
 ## How it works
@@ -142,15 +142,13 @@ npx @sosie/cli
 ```
 
 The `mysql` client and your app read through it: statements as text, several to a
-query, and prepared, as mysql2's `execute()` and the `mariadb` driver send them;
-the last two come with the next release, as 0.2.0 reads one statement at a time,
-as text. MySQL 8.4 and 9 are tested. Give the login `SELECT` and `SHOW VIEW`, so
+query, and prepared, as mysql2's `execute()` and the `mariadb` driver send them.
+MySQL 8.4 and 9 are tested. Give the login `SELECT` and `SHOW VIEW`, so
 a view's columns share their tables' fakes.
 
 ### In front of MongoDB
 
-Not in 0.2.0: MongoDB comes with the next release. The same command, with a
-`mongodb://` or `mongodb+srv://` connection string:
+The same command, with a `mongodb://` or `mongodb+srv://` connection string:
 
 ```sh
 export SOSIE_UPSTREAM='mongodb://readonly:…@db.internal:27017/app'

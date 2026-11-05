@@ -1,6 +1,6 @@
 {
   "name": "@sosie/mongodb",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The MongoDB source of Sosie: a read-only MongoDB endpoint that fakes every value.",
   "keywords": [
     "mongodb",
@@ -41,7 +41,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@sosie/core": "^0.2.0",
+    "@sosie/core": "^0.3.0",
     "bson": "^7.3.3",
     "mongodb": "^7.8.0"
   }

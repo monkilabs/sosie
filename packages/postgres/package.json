@@ -1,6 +1,6 @@
 {
   "name": "@sosie/postgres",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The Postgres source of Sosie: a read-only Postgres endpoint that fakes every value.",
   "keywords": [
     "postgres",
@@ -41,7 +41,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@sosie/core": "^0.2.0",
+    "@sosie/core": "^0.3.0",
     "pg": "^8.23.1",
     "pgsql-parser": "^18.3.0"
   }

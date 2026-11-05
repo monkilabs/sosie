@@ -52,9 +52,6 @@ when it starts.
 Tested with the `mysql` client, mysql2's `query()` and `execute()`, and the `mariadb` driver, which Prisma's MySQL
 adapter uses.
 
-> **Not in 0.2.0:** prepared statements, several statements in one query, and the MCP `query` tool come with the next
-> release. In 0.2.0, send each statement as text, one at a time (`query()` in mysql2).
-
 - **Statements as text** (`COM_QUERY`), as the `mysql` client and mysql2's `query()` send them. Several statements in
   one query run when the client turns them on (mysql2's `multipleStatements`). Each is checked before the first runs,
   so one that Sosie refuses stops them all, and the first that fails stops the rest, as MySQL does.
@@ -149,8 +146,8 @@ A computed column's name is its text as you wrote it. MySQL names one by the tex
 in it where Sosie turned a fake back (`email = 'real@…'`), a derived table's column in its `org_name` too; Sosie takes
 the name from your own text, at the same place. In a prepared statement a parameter shows as `?`, as MySQL names it.
 
-> **0.2.0 shows the real value in such a name.** Until the next release, give a computed column that compares with a
-> fake a name of your own: `SELECT email = '…' AS matches`.
+> **0.2.0 showed the real value in such a name.** Upgrade to 0.3.0, or on 0.2.0 give a computed column that compares
+> with a fake a name of your own: `SELECT email = '…' AS matches`.
 
 ## Errors and warnings
 
