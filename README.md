@@ -145,8 +145,8 @@ The `mysql` client and your app read through it, statements as text; prepared
 statements come later. MySQL 8.4 and 9 are tested. Give the login `SELECT` and
 `SHOW VIEW`, so a view's columns share their tables' fakes.
 
-Postgres, MySQL, REST and GraphQL are the first sources. More databases come next, each
-a package behind the same interface.
+Postgres, MySQL, REST and GraphQL are the first sources. MongoDB comes next, then SQL
+Server, each a package behind the same interface ([how Sosie grows](docs/hld.md#how-sosie-grows)).
 
 ### In your assistant
 
