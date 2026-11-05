@@ -1,6 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -22,9 +21,15 @@ const env = (more: Record<string, string | undefined> = {}) => {
   return out
 }
 
-/** Run the CLI to the end. */
+/**
+ * Run the CLI to the end, within 20 s: spawnSync holds the test's thread, where no test timeout can fire, so one
+ * that never ends is killed and fails the test with what it printed.
+ */
 function run(args: string[], more: Record<string, string | undefined> = {}, cwd?: string) {
-  const result = spawnSync(process.execPath, [CLI, ...args], { env: env(more), encoding: 'utf8', cwd, input: '' })
+  const result = spawnSync(process.execPath, [CLI, ...args], { env: env(more), encoding: 'utf8', cwd, input: '', timeout: 20_000, killSignal: 'SIGKILL' })
+  if (result.error || result.signal) {
+    throw new Error(`sosie ${args.join(' ')} did not end: ${result.error?.message ?? result.signal}\n${result.stdout}${result.stderr}`)
+  }
   return { status: result.status, stdout: result.stdout, stderr: result.stderr }
 }
 
@@ -246,8 +251,9 @@ describe('sosie, when something is wrong', () => {
     }
   })
 
-  it('says when it cannot connect', async () => {
-    const port = await closedPort()
+  it('says when it cannot connect', () => {
+    // Port 1: nothing listens there, and no test's server can take it meanwhile, as one could a port just closed.
+    const port = 1
     const result = run([], { SOSIE_UPSTREAM: `postgres://kim:secret@127.0.0.1:${port}/app`, SOSIE_HOME: home })
     expect(result.status).toBe(1)
     expect(result.stderr).toContain(`✗ Cannot connect to 127.0.0.1:${port}/app`)
@@ -339,13 +345,3 @@ describe('sosie, when something is wrong', () => {
     expect(run(['scan', '/no/such/path'], { SOSIE_HOME: home }).stderr).toContain('No such file or folder: /no/such/path')
   })
 })
-
-function closedPort(): Promise<number> {
-  return new Promise((resolve) => {
-    const server = createServer()
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address()
-      server.close(() => resolve(typeof address === 'object' && address ? address.port : 1))
-    })
-  })
-}
