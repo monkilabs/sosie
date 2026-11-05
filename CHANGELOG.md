@@ -52,6 +52,10 @@ Sosie says so when one of them is set, and a flag given says where it went.
   no operation gets `Unknown operation named "…"`.
 - MongoDB: a fake compared with a field in `$expr` (`$eq`, `$ne`, `$in`)
   turns back, as one in a filter does.
+- (0.1) A command could hang after its work was done, `sosie scan` most of
+  all, and with it the plugin's scans and CI: Node's `process.exit()` can wait
+  for good on one of V8's own threads (nodejs/node#54918). Each command now
+  ends by letting Node's event loop run dry, with its exit code.
 
 ## 0.3.0, 5 November 2026
 

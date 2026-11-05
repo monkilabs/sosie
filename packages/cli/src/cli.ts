@@ -435,17 +435,27 @@ async function scanCommand(paths: string[]): Promise<void> {
   process.stdout.write(`${ok(`No real values found in ${files}.`)}\n`)
 }
 
+/**
+ * End with this exit code by letting the event loop run dry, never by process.exit() alone: that joins V8's worker
+ * threads while one may be waiting on the main thread, and can hang there for good (nodejs/node#54918). A command
+ * that left a handle open would keep running, so after a second process.exit() ends it all the same.
+ */
+function end(code: number): void {
+  process.exitCode = code
+  setTimeout(() => process.exit(code), 1000).unref()
+}
+
 main(process.argv.slice(2)).then(
   () => {
     // By the command parsed, not by the first argument: `sosie -v mcp` is the version, `sosie mcp` serves.
-    if (!serving) process.exit(0)
+    if (!serving) end(0)
   },
   (error) => {
     if (error instanceof Exit) {
       if (error.message) process.stderr.write(`${error.message}\n`)
-      process.exit(error.code)
+      return end(error.code)
     }
     process.stderr.write(`${fail((error as Error).stack ?? String(error))}\n`)
-    process.exit(1)
+    end(1)
   },
 )
