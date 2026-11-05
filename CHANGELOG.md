@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- MySQL: prepared statements, as mysql2's `execute()`, Prisma's MySQL adapter
-  and Go's driver send them, answered in MySQL's binary protocol. Each runs as
+- MySQL: prepared statements, as mysql2's `execute()` and the `mariadb` driver
+  send them (both tested), answered in MySQL's binary protocol. Each runs as
   text upstream, its parameters written in as literals, so it is checked,
   turned back and faked as a statement sent as text is; a fake in a parameter
   finds its row as one in a literal does.
@@ -18,18 +18,82 @@
 - MySQL: a `tinyint` is faked within its own range, not a `smallint`'s.
 - MongoDB, a source of its own (`@sosie/mongodb`): `SOSIE_UPSTREAM=mongodb://…`
   or `mongodb+srv://…` starts a local MongoDB endpoint in front of MongoDB 6.0
-  and later (6.0, 7.0 and 8.0 tested). mongosh and the drivers read through it.
+  and later (6.0, 7.0 and 8.0 tested). The Node driver reads through it, as
+  the tests do; mongosh was checked by hand.
   Commands are allowed by name: `find`, `aggregate`, `count`, `distinct` and the
   schema's; writes, `explain`, JavaScript on the server, stages that write or
   show other sessions, and the `admin`, `local` and `config` databases are
   refused. Each value is faked by the collection field it comes from, read from
   the find's projection or the pipeline stage by stage, or by its BSON type
-  where a stage computed it, in its own BSON type. A fake compared by equality
-  in a filter or a `$match` is turned back. `sosie mcp` adds `find` and
-  `aggregate`.
+  where a stage computed it, in its own BSON type; in what a stage computed, a
+  key is faked too, unless the client wrote it. A fake compared by equality
+  in a filter or a `$match` is turned back. A cursor is its client session's,
+  as MongoDB's is. `sosie mcp` adds `find` and `aggregate`.
 - The core: an `objectid` type. An ObjectId's fake is 24 hex digits with its
   time shifted, and every field that holds one shares one domain, so a
   reference to a document is the fake of its `_id`.
+
+Fixes from a review of everything up to here. Those marked with a version were
+in that release and the ones after it; upgrade.
+
+- Postgres (0.1): `WITH users AS (SELECT * FROM users)` read the inner `users`
+  as the CTE, not the table, so the statement read no table and a computed
+  column (`users::text`) passed unfaked. A CTE's query now sees only the CTEs
+  before it, and with `RECURSIVE` all of them, as Postgres reads it.
+- MySQL (0.2.0): `sql_mode` set by number (`SET sql_mode = 1048576`) turned on
+  `NO_BACKSLASH_ESCAPES` or `ANSI_QUOTES`, which the guard refused only by name,
+  and a literal Sosie wrote could be ended early. `sql_mode` is now set only by
+  name, to modes that leave how a statement is read alone.
+- GraphQL (0.1): a mutation field asked for through an interface or union the
+  mutation type belongs to (`{ operator { deleteUser(id: "1") } }`) was let
+  through, and the API ran the write. It is refused now.
+- REST (0.1): a fake sent under a paging name (`?limit=<a fake>`) was turned
+  back for the API, which repeated the real value in its next link, and the
+  link kept it as written. A link now keeps a paging value only when the
+  request did not turn it back.
+- Postgres (0.1): `pg_roles` and `pg_user` are refused: their `rolconfig` and
+  `useconfig` hold the role settings `pg_db_role_setting` was refused for.
+- Postgres (0.1): a setting Postgres reports when it changes
+  (`application_name`, `search_path`) is relayed only when the client wrote
+  that value, and faked otherwise; a function could set one from a row.
+- Postgres (0.2.0): a binary array parameter's header is checked before the
+  array is built; one that asked for two billion empty arrays ran Sosie out of
+  memory.
+- MySQL (0.2.0): `SHOW STATUS` is refused, as `SHOW VARIABLES` is: it named
+  the server's socket, address and certificate files.
+- Postgres (0.1) and MySQL (0.2.0): more settings, views and functions that say
+  where the database is or who its clients are are refused (`ssl_crl_dir`,
+  `log_directory`, `pg_config`, `pg_stat_ssl`; `@@innodb_doublewrite_dir`,
+  `@@mysqlx_ssl_*`, the group replication addresses and more).
+- MySQL (0.2.0): a fake compared with a derived table's or a CTE's column turns
+  back in that column's field; a recursive CTE reads itself, not a table, so
+  what it makes from nothing is not faked.
+- REST and GraphQL (0.1): a page number of up to five digits under a paging
+  name goes to the API as written, as a link shows it. A page faked in the body
+  was turned back into another page, and a client that pages to the end could
+  loop.
+- REST (0.1): method overrides are read as frameworks read them
+  (`?.method=DELETE`, `?_method[]=DELETE`, a value with spaces around it), and
+  a path segment an API or a proxy could read as another path is refused (a
+  NUL, `..;`, `%252e`, `;params`).
+- GraphQL (0.1): a variable named `__proto__` is sent as the client's value; it
+  set the copy's prototype and the query asked for everything.
+- The core (0.1): JSON that starts with a byte order mark is read, not answered
+  with 502.
+- The plugin (0.2.0): a scan that finds thousands of real values reports them
+  all (past about 7,500 it failed with `ENOBUFS`); a session's findings are told
+  in its own project, not in whichever session starts next; and two turns that
+  end together start one scan.
+- The CLI (0.1): a `--rules` file that is not there is a usage error (exit 2)
+  before Sosie connects. A MongoDB list of hosts without ports gets the
+  one-host message too.
+- The core (0.1.1): `entity.*` in `sosie.yml` holds for the fields a source
+  learns later, as REST's without an OpenAPI document and MongoDB's are; it
+  passed only those known at start, none for such a source.
+- Postgres (0.1) and MySQL (0.2.0): a large message is joined once its chunks
+  have all come, not copied with each one.
+- MySQL: an execution whose parameter length is cut short gets MySQL's
+  `Incorrect arguments`, not a dropped connection.
 
 ## 0.2.0, 5 November 2026
 
