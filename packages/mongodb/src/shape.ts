@@ -136,6 +136,15 @@ export function expression(e: unknown, current: Shape): Shape {
   return doc(COMPUTED, keys.map((k) => [k, expression(e[k], current)]))
 }
 
+/**
+ * What $addFields and $set give a key: a document of plain keys merges into the one there ({ address: { zip: 1 } }
+ * keeps address.city), anything else is the expression's.
+ */
+function added(value: unknown, there: Shape, current: Shape): Shape {
+  if (!isOperator(value) || Object.keys(value).some((k) => k.startsWith('$'))) return expression(value, current)
+  return doc(there, Object.entries(value).map(([k, v]) => [k, added(v, child(there, k), current)]))
+}
+
 /** An accumulator of $group, $bucket or $setWindowFields. */
 function accumulator(spec: unknown, current: Shape): Shape {
   if (!isOperator(spec)) return COMPUTED
@@ -216,7 +225,7 @@ function stageShape(stage: Document, current: Shape, entityOf: (name: string) =>
       return projection(spec as Document, current)
     case '$addFields':
     case '$set':
-      return doc(current, Object.entries(spec as Document).map(([k, v]) => [k, expression(v, current)]))
+      return doc(current, Object.entries(spec as Document).map(([k, v]) => [k, added(v, child(current, k), current)]))
     case '$replaceRoot':
       return expression((spec as Document).newRoot, current)
     case '$replaceWith':

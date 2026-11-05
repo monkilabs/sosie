@@ -66,6 +66,9 @@ describe('where each value of a result comes from', () => {
     const made = pipeline([{ $documents: [{ x: 1, r: '$$USER_ROLES' }, { x: 2, t: '$$NOW' }] }], users, same)
     expect([where(made, 'x'), where(made, 'r'), where(made, 't')]).toEqual(['literal', 'computed', 'computed'])
     expect(where(pipeline([{ $addFields: { 'address.zip': { $concat: ['a', 'b'] } } }], users, same), 'address.city')).toBe('users.address.city')
+    // A nested document merges into the one there, as MongoDB merges it.
+    const merged = pipeline([{ $set: { address: { zip: 1, city2: '$address.city' } } }], users, same)
+    expect([where(merged, 'address.city'), where(merged, 'address.zip'), where(merged, 'address.city2')]).toEqual(['users.address.city', 'literal', 'users.address.city'])
   })
 })
 
