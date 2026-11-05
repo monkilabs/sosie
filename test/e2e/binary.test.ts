@@ -73,11 +73,14 @@ describe('binary results', () => {
       ARRAY[1, 2, NULL]::int4[], '{{a,b},{"c d",""}}'::text[], '[0:1]={5,6}'::int8[], '{}'::text[],
       '{2026-11-04,infinity}'::date[], '{1.5,NaN}'::numeric[], '{t,f}'::bool[], ARRAY['2026-11-04 12:00:00+01']::timestamptz[],
       '{"1 day"}'::interval[], ARRAY['a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11']::uuid[], ARRAY['{"a": 1}']::jsonb[],
-      '{"\\\\x01"}'::bytea[], '{"10.0.0.1/8"}'::inet[]`)
+      '{"\\\\x01"}'::bytea[], '{"10.0.0.1/8"}'::inet[], B'10110'::bit(5), B'1'::bit, B''::varbit, B'101100111'::varbit,
+      '{101,1}'::varbit[]`)
   })
 
   it('sends the fakes of every column of the seed as Postgres would send them', async () => {
-    for (const table of ['users', 'orders', 'events', 'countries', 'billing.invoices']) {
+    // Ranges are not written in binary: memberships' other columns are.
+    const memberships = '(SELECT id, user_id, code, role, labels, roles, lasts, flags, mask FROM memberships) AS memberships'
+    for (const table of ['users', 'orders', 'events', 'countries', 'billing.invoices', memberships]) {
       const { binary } = await asPostgresSends(`SELECT * FROM ${table} ORDER BY 1`, { exactJson: false })
       expect(binary.rows.length, table).toBeGreaterThan(0)
       expect(canariesIn(JSON.stringify(binary.rows.map((row) => row.map((v) => v?.toString('utf8')))))).toEqual([])

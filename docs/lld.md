@@ -256,9 +256,12 @@ export type FieldType =
   | { kind: 'boolean' }
   | { kind: 'enum'; labels: string[] }
   | { kind: 'date' | 'datetime' | 'time' }
+  | { kind: 'interval' }                             // a duration: Postgres's interval
+  | { kind: 'bits' }                                 // 0s and 1s: Postgres's bit and varbit
   | { kind: 'uuid' | 'bytes' | 'ip' | 'objectid' }  // objectid: MongoDB's, as 24 hex digits
   | { kind: 'json' }
   | { kind: 'array'; of: FieldType }
+  | { kind: 'range'; of: FieldType }                 // its bounds of that type: Postgres's ranges and multiranges
   | { kind: 'unknown' }
 ```
 
@@ -280,7 +283,8 @@ settled; until 1.0 it may change between minor versions.
 `--help` (`-h`) and `--version` (`-v`) for each. Flags for `sosie`: `--port` (7674; without it, a Sosie whose port is taken tries
 the next nine, so a second Sosie, for another upstream, just starts; `0` lets the system pick; at most 65535), `--host`
 (127.0.0.1), `--rules` (`./sosie.yml` when present), `--max-rows` (1000, at
-least 1). A `--host` other than this
+least 1), `--timeout` (30 s, from 1 to 3600: how long a statement, a command or a request may run upstream; the MCP
+tools still wait at most 50 s, less than MCP clients wait for a tool). A `--host` other than this
 machine is allowed, for running Sosie on a host of its own, with a warning:
 the endpoint has no password, so anyone who can reach it can query the fakes. Exit codes: 0, 1 for a failure (cannot
 connect, a problem in `sosie.yml`, a port in use, a real value found), 2 for a usage error: an unknown flag or
@@ -393,9 +397,12 @@ Values a query computes fake in `computed:<type>`.
 | `enum` | A label of the same enum, by a fixed shuffle per domain; the shuffle may leave a label in place |
 | `date`, `datetime` | Shifted by 1 to 365 days, earlier or later, a datetime by a time of day too; the same shift for the same value, in the same format. `infinity` stays |
 | `time` | Shifted by up to a day, wrapping at midnight |
+| `bits` | As many bits, each drawn; a single bit is a flag, flipped or not once per domain, as a boolean is |
+| `interval` | Another duration in the same form: each number another of as many digits, zero only for zero, minutes and seconds under 60 and the months of a year-month under 12; its words and signs kept, so every `IntervalStyle` reads it. `infinity` stays |
 | A value its type's faker cannot change (`''` or `-` in a field without a format, `NaN` and `Infinity` in a number, `infinity` in a date) | Itself: there is nothing in it to fake. A field with a format draws its fake whatever the value, so even `-` in a `city` becomes a city |
 | `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked. Anywhere, a key that holds a value the request turned back from a fake (`quillon`, `quillon_profile`, `QuillonSettings`) is faked, however it looks: an answer that holds it is echoing what the client sent |
 | `array` | Each element faked in the field's domain |
+| `range` | Each bound faked as its type, in the field's domain, then put in order; brackets, infinite bounds and `empty` kept, so the database reads it as a range again |
 | `ip` | An address from a documentation range |
 | `bytes` | Random bytes of the same length; derived, not stored |
 | `unknown` | `null` |
@@ -644,7 +651,7 @@ One `pg` connection per client, opened at its start-up. pg's Client connects
 it; Sosie then takes over the connection's messages and relays each frontend
 message with a Flush, so its own errors fall in the right place among
 upstream's replies. The session is read-only from its start-up options:
-`default_transaction_read_only=on`, `statement_timeout=30s`,
+`default_transaction_read_only=on`, `statement_timeout` at `--timeout` (30 s),
 `idle_in_transaction_session_timeout=5min` (a transaction an agent leaves open
 would hold locks on the database), ISO dates, hex bytea. A client may lower
 either timeout, never lift it. Two more settings are pinned because they change how Postgres reads a
@@ -680,10 +687,12 @@ own domain and passes only if `sosie.yml` lists it.
 | `numeric`, `float4`, `float8`, `money` | `decimal` |
 | `bool` | `boolean` |
 | An enum type | `enum` |
-| `date`, `timestamp`, `timestamptz`, `time`, `timetz` | `date`, `datetime`, `time` |
+| `date`, `timestamp`, `timestamptz`, `time`, `timetz`, `interval` | `date`, `datetime`, `time`, `interval` |
+| `bit`, `varbit` | `bits` |
 | `uuid`, `json`, `jsonb`, `bytea`, `inet`, `cidr` | `uuid`, `json`, `json`, `bytes`, `ip`, `ip` |
-| A domain | its base type |
+| A domain | its base type, through a domain over another, an enum or an array |
 | Arrays of any of these | `array` |
+| A range or a multirange of any of these (`int4range`, `tstzrange`, `datemultirange`) | `range` |
 | Anything else | `unknown` |
 
 ### Guard
@@ -783,7 +792,7 @@ views.
 | A column of a table Sosie does not know | `Faker.computed` with its type |
 | Postgres's own `count(…)`, a bigint, over rows that come from tables | Unchanged: it holds no value from a row. A count over rows a value made (any set-returning function in the catalog, such as `generate_series`, `unnest` or `ts_parse`; a recursive CTE; user code) is faked |
 | A column of `UNION`, `INTERSECT` or `EXCEPT` | `Faker.computed` with its type: Postgres reports no source for it, and the arms differ |
-| Anything else a query computes | `Faker.computed` with the type of its OID |
+| Anything else a query computes | `Faker.computed` with the type of its OID, read from `pg_type` at start-up: a domain as its base type, an array of an enum (`array_agg(role)`) as one |
 | From a catalog-only read | Unchanged |
 
 Postgres reports some settings when they change (ParameterStatus). Those it checks the values of (encodings, date
@@ -806,7 +815,7 @@ domain sends as its base type, an enum as its label, an array by its element.
 Written: every type Sosie fakes but `money`, and the catalog's own a driver reads: the
 integers, `oid`, `xid`, `float4` and `float8`, `numeric`, the text types,
 `name`, `"char"`, `bytea`, `bool`, `uuid`, `json` and `jsonb`, `date`, `time`,
-`timetz`, `timestamp`, `timestamptz`, `interval`, `inet`, `cidr`, `pg_lsn`,
+`timetz`, `timestamp`, `timestamptz`, `interval`, `bit`, `varbit`, `inet`, `cidr`, `pg_lsn`,
 `int2vector`, `oidvector`, `void`, and arrays of them. A column of another
 type asked for in binary is refused before its rows, naming the column and
 its type (`0A000`): `regclass` and its family, whose text is a name and
@@ -939,7 +948,7 @@ One session per client, opened with mysql2 at the handshake, and set at its star
 | Setting | Value |
 | --- | --- |
 | `transaction_read_only` | `ON` |
-| `max_execution_time` | The statement timeout, 30 s |
+| `max_execution_time` | The statement timeout: `--timeout`, 30 s by default |
 | `sql_mode` | The server's, without `ANSI_QUOTES`, `NO_BACKSLASH_ESCAPES`, `PIPES_AS_CONCAT`, `IGNORE_SPACE`, `HIGH_NOT_PRECEDENCE` and `ANSI`: MySQL reads each statement's text as Sosie's parser does |
 | `sql_select_limit` | `--max-rows` plus one; a `SELECT` with a `LIMIT` of its own is read to its end, the rows past the cap dropped |
 | Character set | `utf8mb4` |
@@ -959,8 +968,8 @@ From `information_schema`, every database the login can see but MySQL's own (`in
 primary key, foreign keys, and stored functions. A field's id is `table.column` in the database the connection string
 names, `database.table.column` elsewhere. Types map as `tinyint(1)` to boolean; the integers by size, `year` as a `smallint`; `decimal`,
 `float` and `double` to decimal; `char`, `varchar`, the texts and `set` to string, `char` and `varchar` with their length;
-the binaries and blobs to bytes; `enum` to an enum with its labels; `json`; the dates and times. `bit`, spatial types
-and `vector` have none: their values come back `NULL`.
+the binaries and blobs to bytes; `enum` to an enum with its labels; `json`; the dates and times. `bit` to bits, of its
+length; spatial types and `vector` have none: their values come back `NULL`.
 
 A view's column shares its table's values when it is named as a column of exactly one table the view reads, from
 `VIEW_TABLE_USAGE`. MySQL shows that only to a login with `SHOW VIEW`: without it, a view's column shares the values
@@ -1023,7 +1032,8 @@ its type. A column with no table was computed, and is faked by its protocol type
 catalog, or it is `COUNT(…)` or a literal the client wrote. MySQL names no table for a `UNION`'s columns: each is a
 count or a literal only where every branch has one in its place, and is otherwise faked by type. A column of MySQL's
 data dictionary, a table with no database (`DESCRIBE`, `SHOW INDEX`), passes in a statement that reads only the
-catalog. `SHOW` and `DESCRIBE` pass whole. Bytes are faked in hex and written back as bytes.
+catalog. `SHOW` and `DESCRIBE` pass whole. Bytes are faked in hex and written back as bytes; a `BIT`'s bytes are read as
+its bits, faked, and written back in as many bytes.
 
 MySQL names a computed column by its text as it received it, at most 255 characters, and a derived table's or a CTE's
 column in its `org_name` too: with a real value in it where Sosie turned one back, or wrote a parameter's in. So each
@@ -1058,7 +1068,7 @@ result cut at the cap.
 - `LOCK IN SHARE MODE`, `INTO OUTFILE`, the `MOD` operator and `TABLE t` are refused: the parser does not read them.
 - A literal compared through a function (`LOWER(email) = '…'`), or in a row (`(id, email) = (1, '…')`), is used as
   written.
-- `BIT`, spatial and `VECTOR` values come back `NULL`.
+- Spatial and `VECTOR` values come back `NULL`. A literal compared with a `BIT` column is used as written.
 - A prepared statement's parameter changes a computed value's type where MySQL's would not: `? + 1` with a `DOUBLE`
   of 5 runs as `5 + 1`. What a statement computes is faked by its type all the same.
 - `SHOW CREATE VIEW` and `information_schema.VIEWS` show a view's definition, a literal in it included; so do
@@ -1169,8 +1179,9 @@ document a stage built (its named keys, and what any other key was before), or o
 ### Rewriting
 
 A value compared by equality with a field is looked up in that field's domain: `{ path: value }`, `$eq`, `$ne`, `$in`,
-`$nin`, `$all`, inside `$and`, `$or`, `$nor`, `$not` and `$elemMatch` (of values or of documents), and a document or
-an array compared whole, leaf by leaf. A filter is read against the shape of the documents it filters: a `find`'s,
+`$nin`, `$all`, inside `$and`, `$or`, `$nor`, `$not` and `$elemMatch` (of values or of documents), a document or
+an array compared whole, leaf by leaf, and in `$expr` a field path (`$email`, `$$ROOT.email`) compared by `$eq` or
+`$ne` with a value, either way round, or by `$in` with an array of them, inside its `$and`, `$or` and `$not` too. A filter is read against the shape of the documents it filters: a `find`'s,
 `count`'s and `distinct`'s against the collection's (a view's through its pipeline), each `$match` of a pipeline
 against the documents before it, so one after a `$group` compares with what the group made; a `$lookup`'s and a
 `$unionWith`'s own pipelines, and a `$graphLookup`'s `restrictSearchWithMatch`, against the collection each reads. A real value goes back in the BSON type of the fake: an ObjectId as an
@@ -1201,7 +1212,7 @@ this message, which may quote a value from your documents.` An upstream that can
 
 ### Limits
 
-- Order and ranges follow the real values; a regular expression, `$text` and `$expr` filter on them.
+- Order and ranges follow the real values; a regular expression, `$text` and what `$expr` computes filter on them.
 - A cursor cut at `--max-rows` says so in the terminal only: MongoDB has no warnings to carry it.
 - `listIndexes` and `listCollections` show an index's `partialFilterExpression` and a view's pipeline as written,
   a value in them included.
@@ -1254,7 +1265,7 @@ with every request and is never shown, links included. Headers the client sends,
 Sosie, within the API's origin and its base path only, never to an address with
 a user name in it nor through a segment that decodes to a `/` or `..`, so
 credentials never go elsewhere and the client never sees a real URL. What the
-terminal says when the API cannot be read leaves the query credentials out. Each request has the statement timeout (30 s) and
+terminal says when the API cannot be read leaves the query credentials out. Each request has the statement timeout (`--timeout`, 30 s) and
 a body cap (20 MB), counted as the body arrives; at most 5 redirects are followed. A `401` or `403` from the API tells
 the terminal to check `SOSIE_UPSTREAM_HEADERS`. Sosie sends `Accept: application/json` and `User-Agent: sosie`,
 which those headers may replace. A `SOSIE_OPENAPI` URL on the API's origin is read like any request; one on another
@@ -1319,7 +1330,7 @@ instead, with nothing real in it, so following it reads the record it names:
 
 - A path segment stays as written when it is a word Sosie knows as a name of
   the API's: a fixed segment of an OpenAPI path, a collection's name
-  (lowercase, plural, in snake case: `line_items`, not `line-items`) a client asked for as the last word of a path and the
+  (lowercase, plural, in snake or kebab case: `line_items`, `line-items`) a client asked for as the last word of a path and the
   API answered with a list (`/users`, `/users/87/orders`), or a word of the
   request the answer is for. Another word a client sent (a tenant's slug from
   an app's settings, `/jones/profile`) is never shown to another request. A
@@ -1499,7 +1510,9 @@ query that repeats a field, so one that needs more is refused
 everyone else; while both work on costly queries, others wait their turn, at
 most 2 seconds for each costly query ahead of them, since each is refused by
 then. A Sosie that cannot listen on its port stops its threads, and one that
-stops answers what they were still checking (`Sosie is stopping.`).
+stops answers what they were still checking (`Sosie is stopping.`, a `503` tagged `SOSIE_STOPPING`); a query graphql-js
+itself fails on is a `500` (`INTERNAL_SERVER_ERROR`). An `operationName` that names none of the document's operations
+gets `Unknown operation named "…".`
 Only queries reach the API, and only the operation to run with the fragments
 it uses: a mutation or a subscription is answered with an error, and its text
 never leaves Sosie, and so is a field of the mutation or subscription type
@@ -1507,7 +1520,7 @@ asked for under a query field (`Query.admin: Mutation`), or through an interface
 (`{ operator { deleteUser } }`, where `Mutation implements Operator`), by a fragment or not. Variables that nest
 deeper than 100 levels get `400`. A persisted query without its text is refused. POSTs are
 not redirected: the body and the credentials stay with the API. The API's answer is read up to 20 MB, within the
-statement timeout (30 s).
+statement timeout (`--timeout`, 30 s).
 
 Introspection is answered from the schema Sosie holds, with what the client
 sent, and never reaches the API; so clients introspect an API that has
@@ -1682,23 +1695,16 @@ source learns. Format domains make a person's email the same fake from the datab
 | Address | 127.0.0.1:7674 (7674 spells "sosi" on a phone keypad), and ::1, where `localhost` often goes first; a port another program holds on ::1 counts as taken |
 | Rows per query; items per list of an API's answer | 1,000 |
 | Rows per MCP query | 200 |
-| Statement timeout upstream | 30 s |
+| Statement timeout upstream | 30 s, or `--timeout` |
 | Store | `$SOSIE_HOME/store/`, or `~/.sosie/store/` |
 
 ## Open items
 
-- Enum arrays a query computes come back as `NULL`; enum array columns are
-  faked.
 - Prisma's own schema engine (`prisma db pull`, migrations) is not checked:
   migrations write, and `db pull` reads the catalogs, which pass.
-- Postgres types without a neutral type come back `NULL`: `interval`, `xml`, `bit`, `tsvector`, ranges, and a domain
-  over an enum, an array or another domain.
-- REST: a collection named in kebab case (`/line-items`) is never learned as the API's word, so links fake it.
-- GraphQL: every refusal from the check threads is tagged `SOSIE_TOO_COSTLY`, `Sosie is stopping.` and a failure of
-  graphql-js's own included; and an `operationName` that names no operation is answered as if the document had
-  several.
-- The statement timeout is 30 s, with no flag to change it.
+- Postgres types without a neutral type come back `NULL`: `xml` and `tsvector`. An array of ranges is shaped,
+  not faked bound by bound; a range compared in a query is used as written.
 - MySQL: MariaDB, refused at start-up.
-- MongoDB: a fake in `$expr`, a `$lookup`'s `let`, or an index bound (`min`, `max`, `hint` by value) is used as
+- MongoDB: a fake in a `$lookup`'s `let`, an index bound (`min`, `max`, `hint` by value), or what `$expr` computes is used as
   written; Compass and the drivers other than Node's are not checked; a cursor cut at `--max-rows` says so only in the
   terminal.

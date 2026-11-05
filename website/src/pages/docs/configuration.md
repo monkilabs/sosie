@@ -86,6 +86,7 @@ Options for `sosie`:
 | `--host <host>` | `127.0.0.1` | Another address is allowed, with a warning: the endpoint has no password |
 | `--rules <file>` | `./sosie.yml` when present | |
 | `--max-rows <n>` | `1000` | Rows a query returns, and items of each list in an API's answer |
+| `--timeout <s>` | `30` | Seconds a statement, a command or a request may run upstream, from 1 to 3600. The MCP tools wait 50 s at most either way |
 
 Exit codes: `0`; `1` for a failure (cannot connect, a problem in `sosie.yml`, a real value found by `scan`); `2` for a
 usage error.
@@ -119,5 +120,5 @@ fields that pass. Nothing real: no upstream, no credentials, no values. It is re
 | Address | `127.0.0.1:7674`, and `::1` |
 | Rows per query; items per list of an API's answer | 1,000 |
 | Rows per MCP query | 200 |
-| Statement timeout upstream | 30 s |
-| Store | `$SOSIE_HOME`, or `~/.sosie` |
+| Statement timeout upstream | 30 s, or `--timeout` |
+| Store | `$SOSIE_HOME/store/`, or `~/.sosie/store/` |

@@ -14,6 +14,8 @@ export interface Catalog {
   enums: Map<number, string[]>
   /** How each type is sent in binary, by OID: for clients that ask for binary results or send binary parameters. */
   sends: Map<number, TypeSend>
+  /** A type, by OID, in neutral terms: through domains, arrays and enums, for columns and values a query computes. */
+  typeOf(oid: number, typmod?: number): FieldType
   /** Names of functions, operators and types outside the system schemas: their code may read rows the guard cannot see. */
   functions: Set<string>
   operators: Set<string>
@@ -43,6 +45,8 @@ export interface ColumnRow {
   attrelid: number
   attnum: number
   attname: string
+  /** The column's type; absent in tests that build a catalog by hand, which name it below instead. */
+  atttypid?: number
   atttypmod: number
   typname: string
   typtype: string
@@ -79,7 +83,7 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
   const oids = relations.rows.map((r) => r.oid)
   const columns = await client.query<ColumnRow>(
     `
-    SELECT a.attrelid::int AS attrelid, a.attnum::int AS attnum, a.attname, a.atttypmod,
+    SELECT a.attrelid::int AS attrelid, a.attnum::int AS attnum, a.attname, a.atttypid::int AS atttypid, a.atttypmod,
            t.typname, t.typtype, t.typcategory,
            e.typname AS element, e.typtype AS element_type,
            b.typname AS basetype,
@@ -113,9 +117,12 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     SELECT DISTINCT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname IN ('pg_catalog', 'information_schema')`)
   // Every type, the system's too: a result column of any of them may be asked for in binary.
-  const sends = await client.query<TypeSend & { oid: number }>(
-    `SELECT oid::int AS oid, typname::text AS name, typsend::text AS send, typelem::int AS elem, typbasetype::int AS base FROM pg_type`,
+  const sends = await client.query<TypeRow>(
+    `SELECT oid::int AS oid, typname::text AS name, typsend::text AS send, typelem::int AS elem, typbasetype::int AS base,
+            typtype::text AS typtype, typcategory::text AS category, typtypmod::int AS typmod
+     FROM pg_type`,
   )
+  const ranges = await client.query<RangeRow>(`SELECT rngtypid::int AS oid, rngsubtype::int AS subtype, rngmultitypid::int AS multi FROM pg_range`)
   const types = await client.query<{ typname: string }>(`
     SELECT DISTINCT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE ${SYSTEM}`)
   const role = await client.query<{ admin: boolean }>(
@@ -132,6 +139,7 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     constraints: constraints.rows,
     enums: new Map(enums.rows.map((e) => [e.oid, e.labels])),
     sends: sends.rows,
+    ranges: ranges.rows,
     views: views.rows,
     functions: functions.rows.map((f) => f.proname),
     operators: operators.rows.map((o) => o.oprname),
@@ -143,13 +151,32 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
   })
 }
 
+/** A range type, its subtype and its multirange's type. */
+export interface RangeRow {
+  oid: number
+  subtype: number
+  multi: number
+}
+
+/** A row of pg_type. */
+export interface TypeRow extends TypeSend {
+  oid: number
+  /** 'b' base, 'd' domain, 'e' enum, 'r' range, 'c' composite; absent where only the send function is known. */
+  typtype?: string
+  /** 'A' for an array. */
+  category?: string
+  /** A domain's own modifier: varchar(20)'s length. */
+  typmod?: number
+}
+
 export interface CatalogRows {
   relations: RelationRow[]
   columns: ColumnRow[]
   constraints: ConstraintRow[]
   enums: Map<number, string[]>
-  /** Every type's send function, element and base type; none in tests that build a catalog by hand. */
-  sends?: (TypeSend & { oid: number })[]
+  /** Every type: its send function, element, base type and kind; none in tests that build a catalog by hand. */
+  sends?: TypeRow[]
+  ranges?: RangeRow[]
   views: ViewRow[]
   functions: string[]
   operators: string[]
@@ -167,12 +194,29 @@ export function buildCatalog(rows: CatalogRows): Catalog {
   const columnsOf = new Map<number, ColumnRow[]>()
   for (const c of rows.columns) columnsOf.set(c.attrelid, [...(columnsOf.get(c.attrelid) ?? []), c])
 
+  const types = new Map((rows.sends ?? []).map((t) => [t.oid, t]))
+  const subtypes = new Map((rows.ranges ?? []).flatMap((r) => [[r.oid, r.subtype] as const, [r.multi, r.subtype] as const]))
+  const typeOf = (oid: number, typmod = -1, depth = 0): FieldType => {
+    const labels = rows.enums.get(oid)
+    if (labels) return { kind: 'enum', labels }
+    // A range and its multirange, by their subtype.
+    const subtype = subtypes.get(oid)
+    if (subtype !== undefined && depth <= 16) return { kind: 'range', of: typeOf(subtype, -1, depth + 1) }
+    const row = types.get(oid)
+    if (!row?.typtype || depth > 16) return typeByOid(oid, rows.enums)
+    // A domain is its base type, with its own modifier where the column has none; over an enum, an array or a domain too.
+    if (row.typtype === 'd') return typeOf(row.base, typmod >= 0 ? typmod : (row.typmod ?? -1), depth + 1)
+    // An array is named for its element with a _ before it; int2vector and the like are not arrays in text.
+    if (row.category === 'A' && row.elem && row.name.startsWith('_')) return { kind: 'array', of: typeOf(row.elem, typmod, depth + 1) }
+    return typeByName(row.name, typmod)
+  }
   const catalog: Catalog = {
     schema: { entities: [] },
     columns: new Map(),
     relations: new Map(),
     enums: rows.enums,
-    sends: new Map((rows.sends ?? []).map((t) => [t.oid, t])),
+    sends: types,
+    typeOf: (oid, typmod) => typeOf(oid, typmod),
     functions: new Set(rows.functions),
     operators: new Set(rows.operators),
     types: new Set(rows.types),
@@ -189,7 +233,11 @@ export function buildCatalog(rows: CatalogRows): Catalog {
     if (relation.parent !== null) continue // A partition shares its parent's fields.
     const id = entityId(relation)
     const fields = (columnsOf.get(relation.oid) ?? []).map(
-      (c): Field => ({ id: `${id}.${c.attname}`, name: c.attname, type: neutralType(c, rows.enums) }),
+      (c): Field => ({
+        id: `${id}.${c.attname}`,
+        name: c.attname,
+        type: c.atttypid !== undefined && types.size ? typeOf(c.atttypid, c.atttypmod) : neutralType(c, rows.enums),
+      }),
     )
     const entity: Entity = { id, name: relation.relname, fields }
     catalog.schema.entities.push(entity)
@@ -309,6 +357,9 @@ const SIMPLE: Record<string, FieldType> = {
   timestamptz: { kind: 'datetime' },
   time: { kind: 'time' },
   timetz: { kind: 'time' },
+  interval: { kind: 'interval' },
+  bit: { kind: 'bits' },
+  varbit: { kind: 'bits' },
   uuid: { kind: 'uuid' },
   json: { kind: 'json' },
   jsonb: { kind: 'json' },
@@ -343,12 +394,12 @@ const OIDS: Record<number, string> = {
   16: 'bool', 17: 'bytea', 18: 'char', 19: 'name', 20: 'int8', 21: 'int2', 23: 'int4', 25: 'text', 26: 'oid',
   114: 'json', 3802: 'jsonb', 700: 'float4', 701: 'float8', 790: 'money', 1700: 'numeric', 1042: 'bpchar',
   1043: 'varchar', 1082: 'date', 1083: 'time', 1114: 'timestamp', 1184: 'timestamptz', 1266: 'timetz',
-  2950: 'uuid', 869: 'inet', 650: 'cidr',
+  1186: 'interval', 1560: 'bit', 1562: 'varbit', 2950: 'uuid', 869: 'inet', 650: 'cidr',
 }
 const ARRAY_OIDS: Record<number, number> = {
   1000: 16, 1001: 17, 1002: 18, 1003: 19, 1016: 20, 1005: 21, 1007: 23, 1009: 25, 1028: 26, 199: 114, 3807: 3802,
   1021: 700, 1022: 701, 791: 790, 1231: 1700, 1014: 1042, 1015: 1043, 1182: 1082, 1183: 1083, 1115: 1114,
-  1185: 1184, 1270: 1266, 2951: 2950, 1041: 869, 651: 650,
+  1185: 1184, 1270: 1266, 1187: 1186, 1561: 1560, 1563: 1562, 2951: 2950, 1041: 869, 651: 650,
 }
 
 /** The neutral type of a result column no field holds. */

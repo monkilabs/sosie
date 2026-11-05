@@ -16,7 +16,8 @@ export type CheckJob =
 export type CheckAnswer =
   | { id: number; errors: { message: string; locations?: readonly { line: number; column: number }[] }[] }
   | { id: number; text: string }
-  | { id: number; refused: string }
+  /** Why a job was refused: it asked for too much, Sosie is stopping, or graphql-js failed on it. */
+  | { id: number; refused: string; reason: 'costly' | 'stopping' | 'failed' }
 
 const { introspection, maxTokens, maxAnswer } = workerData as { introspection: IntrospectionQuery; maxTokens: number; maxAnswer: number }
 const schema = buildClientSchema(introspection)
@@ -26,7 +27,7 @@ parentPort!.on('message', async (job: CheckJob) => {
     parentPort!.postMessage(await answer(job))
   } catch (error) {
     // The endpoint parsed the same text first, so this is graphql-js failing: the message names no value of the data.
-    parentPort!.postMessage({ id: job.id, refused: (error as Error).message })
+    parentPort!.postMessage({ id: job.id, refused: (error as Error).message, reason: 'failed' })
   }
 })
 
@@ -38,6 +39,8 @@ async function answer(job: CheckJob): Promise<CheckAnswer> {
     return { id: job.id, errors }
   }
   const text = JSON.stringify(await execute({ schema, document, operationName: job.operationName, variableValues: job.variables }))
-  if (text.length > maxAnswer) return { id: job.id, refused: `The answer is larger than ${maxAnswer / 1024 / 1024} MB: ask for less of the schema at once.` }
+  if (text.length > maxAnswer) {
+    return { id: job.id, refused: `The answer is larger than ${maxAnswer / 1024 / 1024} MB: ask for less of the schema at once.`, reason: 'costly' }
+  }
   return { id: job.id, text }
 }

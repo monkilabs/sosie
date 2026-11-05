@@ -49,10 +49,16 @@ export type FieldType =
   | { kind: 'boolean' }
   | { kind: 'enum'; labels: string[] }
   | { kind: 'date' | 'datetime' | 'time' }
+  /** A duration, as its source writes it: Postgres's interval. */
+  | { kind: 'interval' }
+  /** A string of bits, as 0s and 1s: Postgres's bit and varbit, MySQL's BIT; `length`, where the type fixes it. */
+  | { kind: 'bits'; length?: number }
   /** objectid: MongoDB's 12-byte id, as 24 hex digits. */
   | { kind: 'uuid' | 'bytes' | 'ip' | 'objectid' }
   | { kind: 'json' }
   | { kind: 'array'; of: FieldType }
+  /** A range of a type, and its bounds of that type: Postgres's ranges and multiranges. Each bound is faked as `of`. */
+  | { kind: 'range'; of: FieldType }
   | { kind: 'unknown' }
 
 export interface Faker {

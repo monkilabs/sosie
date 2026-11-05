@@ -51,12 +51,27 @@ function expand(targets: Target[] | undefined, count: number): Target[] | undefi
   return [...targets.slice(0, at), ...Array<Target>(width).fill('star'), ...targets.slice(at + 1)]
 }
 
+/**
+ * A BIT value: MySQL sends its bits as bytes, the first the highest, padded with zeros above. They are faked as the
+ * column's number of bits, and written back in as many bytes.
+ */
+function fakeBits(value: Buffer, length: number | undefined, fake: (text: string) => Value): Buffer | null {
+  if (!value.length) return value
+  const all = [...value].map((b) => b.toString(2).padStart(8, '0')).join('')
+  const width = Math.min(length ?? all.length, all.length)
+  const faked = fake(all.slice(all.length - width))
+  if (faked === null) return null
+  const bits = String(faked).padStart(all.length, '0').slice(-all.length)
+  return Buffer.from(bits.match(/.{8}/g)!.map((b) => Number.parseInt(b, 2)))
+}
+
 /** One row of the text protocol, faked column by column: text as text, bytes as bytes. */
 export function fakeRow(values: (Buffer | null)[], plans: ColumnPlan[], faker: Faker, sent = '', scope?: RequestScope): (Buffer | null)[] {
   return values.map((value, i) => {
     const plan = plans[i]
     if (value === null || !plan || 'pass' in plan) return value
     const type = 'field' in plan ? plan.field.type : plan.type
+    if (type.kind === 'bits') return fakeBits(value, type.length, (text) => ('field' in plan ? faker.value(text, plan.field, scope) : faker.computed(text, plan.type, sent, scope)))
     const bytes = type.kind === 'bytes'
     // The core fakes bytes in their hex text form, as Postgres writes them.
     const text = bytes ? `\\x${value.toString('hex')}` : value.toString('utf8')

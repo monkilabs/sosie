@@ -55,6 +55,8 @@ Values a query computes are faked by their type, in a domain of their own.
 | Boolean | Flipped or not, decided once per field |
 | Enum | A label of the same enum, by a fixed shuffle per field |
 | Date, time | Shifted by up to a year, the same shift for the same value |
+| Interval | Another duration in the same form, each number of as many digits |
+| Range | Each bound faked as its type, then put in order |
 | JSON | The same structure; each leaf faked by its JSON type, or by the format its key names. A key that looks like a word (`city`, `createdAt`) stays; one that is a value (an email, a name) is faked |
 | Array | Each element faked in the field's domain |
 | IP address | An address from a documentation range |

@@ -164,6 +164,15 @@ describe('a GraphQL API', () => {
     expect(api.received.at(-1)!.query).not.toMatch(/mutation|deleteUser/)
   })
 
+  it('says an operationName names no operation, apart from a document of several that names none', async () => {
+    const before = api.received.length
+    const unknown = await sosie.ask({ query: 'query Q { users { id } }', operationName: 'Nope' })
+    expect(unknown).toMatchObject({ status: 400, body: { errors: [{ message: 'Unknown operation named "Nope".' }] } })
+    const several = await sosie.ask('query A { users { id } } query B { users { id } }')
+    expect(several).toMatchObject({ status: 400, body: { errors: [{ message: 'Name the operation to run: the document has several.' }] } })
+    expect(api.received.length).toBe(before)
+  })
+
   it('turns back a fake in a variable’s default, and in an operator’s object', async () => {
     const [quill] = (await sosie.ask('{ users { id email } }')).body.data.users
     const byDefault = await sosie.ask(`query ($id: ID! = "${quill.id}") { user(id: $id) { id email } }`)
@@ -220,7 +229,8 @@ describe('a GraphQL API', () => {
     const asked = s.ask(`{ ${Array(1100).fill('user(id: 1) { id }').join(' ')} }`)
     await new Promise((resolve) => setTimeout(resolve, 200))
     await s.close()
-    expect(await asked).toMatchObject({ status: 400, body: { errors: [{ message: 'Sosie is stopping.' }] } })
+    // Not the client's query that asked too much: Sosie's own state, said as such.
+    expect(await asked).toMatchObject({ status: 503, body: { errors: [{ message: 'Sosie is stopping.', extensions: { code: 'SOSIE_STOPPING' } }] } })
   })
 
   it('fakes a large JSON value a slice at a time, and answers other clients meanwhile', async () => {

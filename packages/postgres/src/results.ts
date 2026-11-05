@@ -1,8 +1,9 @@
 import type { Faker, Field, FieldType, RequestScope, Value } from '@sosie/core'
 import { parseArray, serializeArray } from './arrays.js'
+import { after, parseRanges, serializeRanges, type Range } from './ranges.js'
 import type { Analysis, Target } from './guard.js'
 import type { ColumnDescription } from './protocol.js'
-import { typeByOid, type Catalog } from './schema.js'
+import type { Catalog } from './schema.js'
 
 /** How one result column is faked. */
 export type ColumnPlan = { pass: true } | { field: Field } | { type: FieldType }
@@ -23,14 +24,14 @@ export function planColumns(columns: ColumnDescription[], analysis: Analysis, ca
     const field = column.tableID ? catalog.columns.get(`${column.tableID}:${column.columnID}`) : undefined
     if (field) return { field }
     // A system catalog's column passes. Any other table Postgres names is one Sosie does not know: faked by type.
-    if (column.tableID) return column.tableID < FIRST_NORMAL_OID ? { pass: true } : { type: typeByOid(column.dataTypeID, catalog.enums) }
+    if (column.tableID) return column.tableID < FIRST_NORMAL_OID ? { pass: true } : { type: catalog.typeOf(column.dataTypeID) }
     if (analysis.catalogOnly) return { pass: true }
     const target = targets?.[i]
     // count(…) holds no value from a row: a bigint, from Postgres's own count. Nor does a constant the client wrote.
     if (target === 'count' && column.dataTypeID === INT8) return { pass: true }
     if (target === 'constant') return { pass: true }
     if (typeof target === 'object') return { field: target }
-    return { type: typeByOid(column.dataTypeID, catalog.enums) }
+    return { type: catalog.typeOf(column.dataTypeID) }
   })
 }
 
@@ -57,6 +58,20 @@ export function fakeRow(values: (string | null)[], plans: ColumnPlan[], faker: F
       try {
         const { bounds, items } = parseArray(value)
         return serializeArray(fake(items) as Value[], bounds)
+      } catch {
+        return faker.computed(value, { kind: 'string' }, sent) as string
+      }
+    }
+    if (type.kind === 'range') {
+      try {
+        const { multi, ranges } = parseRanges(value)
+        // Each bound faked as the range's subtype, in the field's domain; put back in order, as a range is.
+        const faked = ranges.map((r): Range | 'empty' => {
+          if (r === 'empty') return r
+          const [lower, upper] = fake([r.lower, r.upper]) as (string | null)[]
+          return lower != null && upper != null && after(lower, upper, type.of.kind) ? { ...r, lower: upper, upper: lower } : { ...r, lower: lower ?? null, upper: upper ?? null }
+        })
+        return serializeRanges(multi, faked)
       } catch {
         return faker.computed(value, { kind: 'string' }, sent) as string
       }

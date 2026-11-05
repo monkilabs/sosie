@@ -32,7 +32,7 @@ credentials in `SOSIE_UPSTREAM_HEADERS`.
 | `sosie scan <path>…` | Search files and folders for real values; exit 1 if one is found |
 
 Options: `--port` (7674), `--host` (127.0.0.1), `--rules` (`./sosie.yml`),
-`--max-rows` (1000). PostgreSQL 15 to 18, MySQL 8.4 and 9, MongoDB 6.0 to 8.0;
+`--max-rows` (1000), `--timeout` (30 s upstream). PostgreSQL 15 to 18, MySQL 8.4 and 9, MongoDB 6.0 to 8.0;
 Node 24 or later.
 
 The [docs](https://monkilabs.github.io/sosie/docs/) say more, and the [repository](https://github.com/monkilabs/sosie) has the code.

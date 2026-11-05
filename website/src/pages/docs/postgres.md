@@ -82,7 +82,7 @@ One connection upstream per client, read-only from its start, with:
 | Setting | Value |
 | --- | --- |
 | `default_transaction_read_only` | `on` |
-| `statement_timeout` | 30 s; a client may lower it, never lift it |
+| `statement_timeout` | 30 s, or `--timeout`; a client may lower it, never lift it |
 | `idle_in_transaction_session_timeout` | 5 min, so a transaction an agent leaves open does not hold locks |
 | Rows per query | `--max-rows`, 1,000 by default; a result cut at the cap ends with a notice |
 

@@ -81,7 +81,7 @@ describe('sosie', () => {
 
   it('prints where it reads from and where clients connect, and no credentials', () => {
     const out = sosie.stdout()
-    expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 5 tables, 2 views/)
+    expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 6 tables, 2 views/)
     expect(out).toContain('✓ Every value is faked')
     expect(out).toMatch(/Your agent, app and psql:\s+postgres:\/\/localhost:\d+\/sosie_test_\w+/)
     // The plugin for Claude Code, from this repository's marketplace; the bare server for any other client.
@@ -307,6 +307,18 @@ describe('sosie, when something is wrong', () => {
     await stop(sosie.child)
   })
 
+  it('stops a statement at the --timeout it was started with, and refuses lifting it', async () => {
+    const sosie = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home }, ['--port', '0', '--timeout', '1'])
+    const client = new pg.Client({ connectionString: sosie.address })
+    await client.connect()
+    const slow = await client.query('SELECT pg_sleep(3)').catch((error: { code: string }) => error)
+    expect((slow as { code: string }).code).toBe('57014')
+    const lifted = await client.query("SET statement_timeout = '2s'").catch((error: { message: string }) => error)
+    expect((lifted as { message: string }).message).toContain('1000')
+    await client.end()
+    await stop(sosie.child)
+  })
+
   it('explains its commands', () => {
     expect(run(['--help']).stdout).toContain('sosie scan <path>...')
     expect(run(['--version']).stdout.trim()).toBe(VERSION)
@@ -317,6 +329,9 @@ describe('sosie, when something is wrong', () => {
     expect(high.status).toBe(2)
     expect(high.stderr).toContain('--port takes a whole number from 0 to 65535, not 70000.')
     expect(run(['--max-rows', '0'], { SOSIE_UPSTREAM: 'postgres://x' }).stderr).toContain('--max-rows takes a whole number from 1, not 0.')
+    const forever = run(['--timeout', '0'], { SOSIE_UPSTREAM: 'postgres://x' })
+    expect(forever.status).toBe(2)
+    expect(forever.stderr).toContain('--timeout takes a whole number from 1 to 3600, not 0.')
     expect(run(['scan']).status).toBe(2)
     const empty = run(['scan', '.'], { SOSIE_HOME: mkdtempSync(join(tmpdir(), 'sosie-empty-')) })
     expect(empty.status).toBe(2)

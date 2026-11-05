@@ -248,6 +248,15 @@ describe('an API without an OpenAPI document', () => {
     await fresh.close()
   })
 
+  it('learns a collection named in kebab case, as one in snake case, and shows it in links', async () => {
+    const fresh = await startRest(api)
+    expect((await fresh.get('/item-links')).body.items).not.toMatch(/\/line-items$/)
+    await fresh.get('/users')
+    await fresh.get('/line-items')
+    expect((await fresh.get('/item-links')).body.items).toMatch(new RegExp(`^${fresh.address}/users/\\d+/line-items$`))
+    await fresh.close()
+  })
+
   it('sends a value compared with a field that passes as written, so no other field’s real value comes back in it', async () => {
     const lenient = await startRest(api, { rules: 'pass:\n  - report.country\n  - report.note\n' })
     const [quill] = (await lenient.get('/users')).body.data

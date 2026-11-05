@@ -99,6 +99,13 @@ const MAX_DEPTH = 100
 
 const TOO_MUCH = `A batch's introspection answers, together, are larger than Sosie sends at once (${MAX_ANSWER / 1024 / 1024} MB). Ask for less.`
 
+/** A job the check threads refused, tagged by why: a query that asks too much is the client's to change; the rest is not. */
+function refusal(answer: { refused: string; reason: 'costly' | 'stopping' | 'failed' }): { status: number; body: unknown } {
+  if (answer.reason === 'stopping') return failed(503, answer.refused, 'SOSIE_STOPPING')
+  if (answer.reason === 'failed') return failed(500, `Sosie could not check the query: ${answer.refused}`, 'INTERNAL_SERVER_ERROR')
+  return failed(400, answer.refused, 'SOSIE_TOO_COSTLY')
+}
+
 /** JSON already written, by the thread that answered introspection: sent as it is, never parsed again. */
 class Written {
   constructor(readonly text: string) {}
@@ -137,10 +144,13 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     }
     // Errors of the request against the schema hold only what the client wrote, and the schema.
     const valid = await checker.validate(query)
-    if ('refused' in valid) return failed(400, valid.refused, 'SOSIE_TOO_COSTLY')
+    if ('refused' in valid) return refusal(valid)
     if ('errors' in valid && valid.errors.length) return { status: 400, body: { errors: valid.errors } }
     const operation = getOperationAST(document, operationName ?? undefined)
-    if (!operation) return failed(400, 'Name the operation to run: the document has several.')
+    if (!operation) {
+      // An operationName that names none of the document's operations is the client's mistake, said as graphql-js says it.
+      return failed(400, operationName ? `Unknown operation named "${operationName}".` : 'Name the operation to run: the document has several.')
+    }
     if (operation.operation !== 'query') {
       return failed(400, 'Sosie is read-only: only queries reach the API, not mutations or subscriptions.', 'SOSIE_READ_ONLY')
     }
@@ -157,7 +167,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const roots = rootFields(operation.selectionSet.selections, fragments)
     if (roots.every((f) => f.name.value.startsWith('__'))) {
       const answer = await checker.introspect(query, operationName ?? undefined, given)
-      if ('refused' in answer) return failed(400, answer.refused, 'SOSIE_TOO_COSTLY')
+      if ('refused' in answer) return refusal(answer)
       return { status: 200, body: new Written('text' in answer ? answer.text : '{}') }
     }
     // Anywhere in the query, a field of type Query (PostGraphile's query: Query!) included.

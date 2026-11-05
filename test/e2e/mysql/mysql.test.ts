@@ -226,6 +226,23 @@ describe('prepared statements', () => {
     expect(rows[0]!.email).toMatch(/@example\./)
   })
 
+  it('fakes BIT as as many bits, in text and in binary, and a BIT(1) flag as a flag', async () => {
+    const text = await query('SELECT id, gift, marks FROM orders ORDER BY id')
+    const [rows] = await execute('SELECT id, gift, marks FROM orders ORDER BY id')
+    expect(rows).toEqual(text)
+    const [real] = (await truth.query('SELECT gift, marks FROM orders ORDER BY id')) as [Row[], unknown]
+    for (const [i, row] of text.entries()) {
+      expect(row.gift).toHaveLength(1)
+      expect(row.gift[0]).toBeLessThanOrEqual(1)
+      if (real[i]!.marks === null) expect(row.marks).toBeNull()
+      else expect(row.marks.readUInt16BE(0)).toBeLessThan(4096)
+    }
+    // A flag's two values stay two: each flips, or does not, as one.
+    const flips = new Set(text.map((row, i) => `${real[i]!.gift[0]}>${row.gift[0]}`))
+    expect(flips.size).toBe(2)
+    expect(new Set(text.map((row) => row.gift[0])).size).toBe(2)
+  })
+
   it('finds a row by a fake in a parameter: an email, an id, a datetime', async () => {
     const [first] = await query('SELECT id, email, created_at, full_name FROM users ORDER BY id LIMIT 1')
     const [[byEmail]] = await execute('SELECT full_name FROM users WHERE email = ?', [first!.email])

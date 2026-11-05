@@ -51,13 +51,13 @@ export class Checker {
       if (slot.busy) this.#queue.push(slot.busy)
       slot.busy = undefined
     }
-    for (const pending of this.#queue.splice(0)) pending.done({ id: pending.job.id, refused: 'Sosie is stopping.' })
+    for (const pending of this.#queue.splice(0)) pending.done({ id: pending.job.id, refused: 'Sosie is stopping.', reason: 'stopping' })
     await Promise.all(this.#slots.map((slot) => slot.worker.terminate()))
   }
 
   #run(job: Job): Promise<CheckAnswer> {
     return new Promise((done) => {
-      if (this.#closed) return done({ id: 0, refused: 'Sosie is stopping.' })
+      if (this.#closed) return done({ id: 0, refused: 'Sosie is stopping.', reason: 'stopping' })
       this.#queue.push({ job: { ...job, id: ++this.#next } as CheckJob, done })
       this.#dispatch()
     })
@@ -102,7 +102,7 @@ export class Checker {
     slot.busy = undefined
     slot.worker = this.#start()
     void worker.terminate()
-    pending?.done({ id: pending.job.id, refused: TOO_COSTLY })
+    pending?.done({ id: pending.job.id, refused: TOO_COSTLY, reason: 'costly' })
     this.#dispatch()
   }
 }

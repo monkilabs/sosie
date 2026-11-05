@@ -122,6 +122,74 @@ describe('reading through Sosie', () => {
     expect(direct.e).not.toBe('quill.vantablack@canary-mail.test')
   })
 
+  it('fakes a column of a domain over a domain, an enum or an array, and an enum array a query computes', async () => {
+    const rows = await query('SELECT id, code, role, labels, roles FROM memberships ORDER BY id')
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      expect(row.code).toMatch(/^.{1,12}$/)
+      expect(['admin', 'editor', 'viewer']).toContain(row.role)
+      expect(Array.isArray(row.labels) || typeof row.labels === 'string').toBe(true)
+      expect(row.roles).not.toBeNull()
+    }
+    expect(rows[0].code).toMatch(/^\d{10}$/)
+    // role[] and array_agg(role) are arrays of an enum: each label one of the enum's.
+    const [computed] = await query("SELECT array_agg(role ORDER BY id) AS roles, ARRAY['admin'::role] AS one FROM users WHERE id <= 3")
+    expect(computed.roles).not.toBeNull()
+    expect(computed.one).not.toBeNull()
+    for (const label of String(computed.roles).replace(/[{}]/g, '').split(',')) expect(['admin', 'editor', 'viewer']).toContain(label)
+    // A domain's base type is the field's: a fake of the code finds its row.
+    const [found] = await query('SELECT id FROM memberships WHERE code = $1', [rows[0].code])
+    expect(found.id).toBe(rows[0].id)
+  })
+
+  it('fakes an interval as an interval, a computed one too, and finds its row by the fake', async () => {
+    // As text, as Postgres writes it: the fake is looked up as it was written.
+    const asText = { getTypeParser: () => (value: string) => value }
+    const { rows } = await client.query({ text: 'SELECT m.id, m.lasts, age(u.born_on) AS age FROM memberships m JOIN users u ON u.id = m.user_id ORDER BY m.id', types: asText })
+    seen.push(rows)
+    const { rows: real } = await truth.query({ text: 'SELECT m.lasts, age(u.born_on) AS age FROM memberships m JOIN users u ON u.id = m.user_id ORDER BY m.id', types: asText })
+    const DURATION = /^(-?\d+ (years?|mons?|days?) ?)*(-?\d{2,}:\d{2}:\d{2}(\.\d+)?)?$/
+    for (const [i, row] of rows.entries()) {
+      for (const column of ['lasts', 'age'] as const) {
+        expect(row[column]).toMatch(DURATION)
+        expect(row[column]).not.toBe(real[i]![column])
+      }
+    }
+    const [found] = await query('SELECT id FROM memberships WHERE lasts = $1', [rows[0]!.lasts])
+    expect(String(found.id)).toBe(rows[0]!.id)
+  })
+
+  it('fakes a range bound by bound, in order, so Postgres reads it as a range again', async () => {
+    const asText = { getTypeParser: () => (value: string) => value }
+    const text = 'SELECT during, seats, spans FROM memberships ORDER BY id'
+    const { rows } = await client.query({ text, types: asText })
+    seen.push(rows)
+    const { rows: real } = await truth.query({ text, types: asText })
+    expect(rows[0]!.during).not.toBe(real[0]!.during)
+    expect(rows[0]!.seats).not.toBe(real[0]!.seats)
+    expect(rows[0]!.spans).not.toBe(real[0]!.spans)
+    expect(rows[0]!.during).toMatch(/^\["\d{4}-\d\d-\d\d \d\d:\d\d:\d\d[+-]\d\d","\d{4}-.+"\)$/)
+    expect(rows[0]!.spans).toMatch(/^\{\[\d{4}-\d\d-\d\d,\d{4}-\d\d-\d\d\),\[.+\)\}$/)
+    // An infinite bound stays infinite, and empty ranges stay empty.
+    expect(rows[1]!.during).toMatch(/^\(,".+"\]$/)
+    expect(rows[1]!.seats).toBe('empty')
+    expect(rows[1]!.spans).toBe('{}')
+    // Postgres reads every fake as its type: each range's bounds in order.
+    for (const row of rows) await truth.query('SELECT $1::tstzrange, $2::int4range, $3::datemultirange', [row.during, row.seats, row.spans])
+  })
+
+  it('fakes bits as as many bits', async () => {
+    const asText = { getTypeParser: () => (value: string) => value }
+    const text = 'SELECT flags, mask FROM memberships ORDER BY id'
+    const { rows } = await client.query({ text, types: asText })
+    const { rows: real } = await truth.query({ text, types: asText })
+    for (const [i, row] of rows.entries()) {
+      expect(row.flags).toMatch(/^[01]{4}$/)
+      expect(row.mask).toMatch(new RegExp(`^[01]{${real[i]!.mask.length}}$`))
+    }
+    expect(rows[0]!.mask).not.toBe(real[0]!.mask)
+  })
+
   it('fakes a setting a function set from a row, as Postgres reports it', async () => {
     const c = await sosie.client()
     const reported: Record<string, string> = {}
@@ -294,7 +362,7 @@ describe('the guard', () => {
     const writer = await startSosie({ upstream: new URL(inject('admin')) })
     expect(writer.warnings).toEqual([
       'The login is a superuser or can replicate. Sosie refuses the admin functions it knows, but a read-only login is safer.',
-      "The login can write to 5 tables. Sosie's session is read-only, but a read-only login is safer.",
+      "The login can write to 6 tables. Sosie's session is read-only, but a read-only login is safer.",
     ])
     const c = await writer.client()
     const fail = (sql: string) => c.query(sql).catch((e: { code: string; message: string }) => e)

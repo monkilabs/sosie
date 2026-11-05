@@ -347,6 +347,19 @@ describe('fakes by type', async () => {
     expect(faker.computed('Quillon', { kind: 'integer' })).not.toBe('Quillon')
   })
 
+  it('intervals: another duration in the same style, minutes and seconds under 60', async () => {
+    const { faker } = await serve()
+    const fake = (real: string) => faker.computed(real, { kind: 'interval' }) as string
+    expect(fake('1 year 2 mons 3 days 04:05:06.5')).toMatch(/^[1-9] years? [1-9] mons? [1-9] days? \d\d:[0-5]\d:[0-5]\d\.[1-9]$/)
+    expect(fake('-00:45:00')).toMatch(/^-00:[0-5]\d:00$/)
+    expect(fake('@ 3 days 4 hours ago')).toMatch(/^@ [1-9] days [1-9] hours ago$/)
+    expect(fake('P1Y2M3DT4H5M6S')).toMatch(/^P[1-9]Y[1-9]M[1-9]DT[1-9]H[1-9]M[1-9]S$/)
+    expect(fake('+1-2 +3 +4:05:06')).toMatch(/^\+[1-9]-([1-9]|1[01]) \+[1-9] \+[1-9]:[0-5]\d:[0-5]\d$/)
+    expect(fake('00:00:00')).toBe('00:00:00')
+    expect(fake('infinity')).toBe('infinity')
+    expect(fake('Quillon 3 days')).not.toMatch(/Quillon/)
+  })
+
   it('values with nothing to fake stay as they are; digits of any script are faked', async () => {
     const { faker } = await serve()
     expect(faker.computed('', { kind: 'string' })).toBe('')
