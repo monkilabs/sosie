@@ -65,7 +65,8 @@ packages/
   core/src/
     index.ts         what the core exports to sources and the CLI
     source.ts        the Source interface, the neutral schema, the Faker
-    rules.ts         sosie.yml, checked against the neutral schema
+    config.ts        sosie.yml: its sources and settings, every problem at once, the variables they name
+    rules.ts         sosie.yml's rules, each source's checked against its schema
     domains.ts       which domain a field's values fake in
     naming.ts        which field shares another's values, by name, for sources without foreign keys
     fake/
@@ -141,7 +142,6 @@ packages/
     mcp.ts           the graphql tool
   cli/src/
     cli.ts           sosie, sosie init, sosie mcp, sosie scan
-    config.ts        sosie.yml: its sources and settings, every problem at once, each ${VAR} read
     init.ts          sosie init: the first source, asked for at a hidden prompt, and the sosie.yml that names it
     sources.ts       the sources this CLI knows
     prompt.ts        the prompts, hidden or not
