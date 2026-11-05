@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, resolve } from 'node:path'
 import { parse } from 'yaml'
 import { suggest, type RuleSet } from './rules.js'
 
@@ -56,8 +56,25 @@ const WHOLE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/
 /** The variable a source's upstream would be kept in, by its name: shop, SHOP_URL. */
 export const variableFor = (name: string) => `${name.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_URL`
 
-/** Read and check sosie.yml's text: every problem at once, each naming where it is. */
-export function readConfig(text: string, file: string, kinds: Kind[]): Config {
+/** Whether a name may name a source: lowercase letters, digits, - and _, a letter first. */
+export const isSourceName = (name: string) => NAME.test(name)
+
+/** The names of sosie.yml's sources; undefined when it has no `sources` key, so that one can be added. */
+export function sourceNames(text: string, file = 'sosie.yml'): string[] | undefined {
+  let doc: unknown
+  try {
+    doc = parse(text)
+  } catch (error) {
+    throw new ConfigError([`${file}: ${(error as Error).message.split('\n')[0]}`])
+  }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !('sources' in doc)) return undefined
+  const sources = (doc as { sources: unknown }).sources
+  return sources && typeof sources === 'object' && !Array.isArray(sources) ? Object.keys(sources) : []
+}
+
+/** Read and check sosie.yml's text: every problem at once, each naming where it is. `location` is the file's, for its schemas. */
+export function readConfig(text: string, location: string, kinds: Kind[]): Config {
+  const file = basename(location)
   const problems: string[] = []
   const at = (path: string, what: string) => problems.push(`${file}: ${path}${what}`)
   let doc: unknown
@@ -133,7 +150,7 @@ export function readConfig(text: string, file: string, kinds: Kind[]): Config {
       let schema: string | undefined
       if (source.schema !== undefined) {
         if (typeof source.schema !== 'string' || !source.schema.trim()) at(`${path}.schema`, ' is a file, by its path from sosie.yml, or a URL.')
-        else schema = /^https?:\/\//i.test(source.schema) || isAbsolute(source.schema) ? source.schema : resolve(dirname(file), source.schema)
+        else schema = /^https?:\/\//i.test(source.schema) || isAbsolute(source.schema) ? source.schema : resolve(dirname(location), source.schema)
       }
 
       const headers: Record<string, string> = {}

@@ -69,19 +69,19 @@ sources:
     for (const written of ['postgres://kim:s3cret@db.internal/app', 'postgres://kim:${PASSWORD}@db.internal/app', '${A}${B}', 'SHOP_URL']) {
       const found = problems(`sources:\n  shop:\n    upstream: "${written}"\n`)
       expect(found).toEqual([
-        '/work/app/sosie.yml: sources.shop.upstream is one variable, such as ${SHOP_URL}, set in the terminal Sosie starts in: an upstream is never written in sosie.yml, not even in part.',
+        'sosie.yml: sources.shop.upstream is one variable, such as ${SHOP_URL}, set in the terminal Sosie starts in: an upstream is never written in sosie.yml, not even in part.',
       ])
       expect(found.join()).not.toContain('s3cret')
     }
     expect(problems('sources:\n  shop:\n    kind: postgres\n')).toEqual([
-      '/work/app/sosie.yml: sources.shop has no upstream: upstream: ${SHOP_URL}, the variable that holds its connection string.',
+      'sosie.yml: sources.shop has no upstream: upstream: ${SHOP_URL}, the variable that holds its connection string.',
     ])
   })
 
   it('reads variables only in upstream and headers', () => {
     expect(problems('host: ${HOST}\nsources:\n  shop:\n    upstream: ${SHOP_URL}\n    schema: ./${FILE}\n')).toEqual([
-      '/work/app/sosie.yml: host reads no variable: only upstream and headers do.',
-      '/work/app/sosie.yml: sources.shop.schema reads no variable: only upstream and headers do.',
+      'sosie.yml: host reads no variable: only upstream and headers do.',
+      'sosie.yml: sources.shop.schema reads no variable: only upstream and headers do.',
     ])
   })
 
@@ -106,25 +106,25 @@ sources:
     port: 7700
 `),
     ).toEqual([
-      '/work/app/sosie.yml: max_rows is not a key. Did you mean max-rows? Keys: sources, pass, format, host, max-rows, timeout.',
-      '/work/app/sosie.yml: timeout is a whole number from 1 to 3600, not 0.',
-      '/work/app/sosie.yml: sources.Shop: a source is named in lowercase letters, digits, - and _, a letter first.',
-      '/work/app/sosie.yml: sources.crm.upstrem is not a key of a source. Did you mean upstream? Keys: upstream, kind, schema, headers, port, host, max-rows, timeout, pass, format.',
-      '/work/app/sosie.yml: sources.crm.kind is one of postgres, mysql, rest, graphql. Did you mean postgres?',
-      '/work/app/sosie.yml: sources.crm.port is a whole number from 0 to 65535, not 70000.',
-      "/work/app/sosie.yml: sources.api.port: 7700 is web's port too.",
+      'sosie.yml: max_rows is not a key. Did you mean max-rows? Keys: sources, pass, format, host, max-rows, timeout.',
+      'sosie.yml: timeout is a whole number from 1 to 3600, not 0.',
+      'sosie.yml: sources.Shop: a source is named in lowercase letters, digits, - and _, a letter first.',
+      'sosie.yml: sources.crm.upstrem is not a key of a source. Did you mean upstream? Keys: upstream, kind, schema, headers, port, host, max-rows, timeout, pass, format.',
+      'sosie.yml: sources.crm.kind is one of postgres, mysql, rest, graphql. Did you mean postgres?',
+      'sosie.yml: sources.crm.port is a whole number from 0 to 65535, not 70000.',
+      "sosie.yml: sources.api.port: 7700 is web's port too.",
     ])
   })
 
   it('says a file without sources names none, and how to add one', () => {
     for (const text of ['', 'pass: [orders.status]\n', 'sources: {}\n']) {
-      expect(problems(text)).toEqual(['/work/app/sosie.yml names no sources. Add one under sources:, or run sosie init.'])
+      expect(problems(text)).toEqual(['sosie.yml names no sources. Add one under sources:, or run sosie init.'])
     }
   })
 
   it('refuses a key a source’s kind does not take, saying why', () => {
     expect(problems('sources:\n  shop:\n    upstream: ${SHOP_URL}\n    kind: postgres\n    headers:\n      X-Team: core\n')).toEqual([
-      '/work/app/sosie.yml: sources.shop.headers: shop is a postgres source, which takes no headers.',
+      'sosie.yml: sources.shop.headers: shop is a postgres source, which takes no headers.',
     ])
     // A source whose kind its URL says is checked once the URL is read.
     expect(settingsProblems({ name: 'db', headers: {}, schema: '/x.sql' }, { kind: 'mysql' })).toEqual([

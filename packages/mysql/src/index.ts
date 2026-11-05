@@ -9,6 +9,8 @@ import { config } from './upstream.js'
 /** The MySQL source: a local MySQL endpoint in front of a real database, read-only, every value faked. */
 export const mysql: Source = {
   kind: 'mysql',
+  title: 'MySQL database',
+  schemes: ['mysql:'],
   matches: (url) => url.protocol === 'mysql:',
   tools: [queryTool],
   async connect(upstream, options): Promise<Connection> {

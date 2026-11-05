@@ -21,6 +21,8 @@ const endpoints = new Map<string, MemoryEndpoint>()
 export function memorySource(data: MemoryData): Source {
   return {
     kind: 'memory',
+    title: 'memory source',
+    schemes: ['memory:'],
     matches: (url) => url.protocol === 'memory:',
     async connect(upstream) {
       return memoryConnection(data, upstream.pathname || 'memory')

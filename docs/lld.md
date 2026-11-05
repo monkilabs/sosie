@@ -165,6 +165,10 @@ A source is everything that knows one kind of upstream. The core gives it a
 export interface Source {
   /** 'postgres', 'mysql', 'mongodb', 'rest', 'graphql'. */
   readonly kind: string
+  /** What it reads, for the terminal: 'Postgres database', 'REST API'. */
+  readonly title: string
+  /** The URL schemes it reads: 'postgres:'. A `kind` given for another is an error. */
+  readonly schemes: readonly string[]
   /** Whether this source reads this upstream, when sosie.yml gives it no kind; or serves this endpoint address. */
   matches(url: URL): boolean
   /** The keys of a source in sosie.yml it takes beyond every source's: 'headers', 'schema'. Any other is an error. */
@@ -180,7 +184,7 @@ export interface SourceOptions {
   statementTimeout: number
   /** sosie.yml's `headers` for an HTTP upstream, each ${VAR} read: credentials, sent upstream and never shown. */
   headers?: Record<string, string>
-  /** sosie.yml's `schema`: a file, its path from sosie.yml's folder, or a URL. */
+  /** sosie.yml's `schema`: a file, by an absolute path, or a URL. */
   schema?: string
 }
 

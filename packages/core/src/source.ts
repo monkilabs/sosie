@@ -117,6 +117,10 @@ export interface SourceOptions {
 export interface Source {
   /** 'postgres', 'mysql', 'mongodb', 'rest', 'graphql'. */
   readonly kind: string
+  /** What it reads, for the terminal: 'Postgres database', 'REST API'. */
+  readonly title: string
+  /** The URL schemes it reads, as URL's protocol writes them: 'postgres:'. A `kind` given for another is an error. */
+  readonly schemes: readonly string[]
   /** Whether this source reads this upstream, when sosie.yml gives it no kind; or serves this endpoint address. */
   matches(url: URL): boolean
   /** The keys of a source in sosie.yml it takes beyond every source's. Any other is an error. */

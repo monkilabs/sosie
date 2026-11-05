@@ -11,6 +11,8 @@ const DISCOVER = ['openapi.json', 'openapi.yaml', 'swagger.json', 'v3/api-docs',
 /** The REST source: a local HTTP endpoint in front of the team's own API, GET only, every JSON value faked. */
 export const rest: Source = {
   kind: 'rest',
+  title: 'REST API',
+  schemes: ['http:', 'https:'],
   matches: (url) => url.protocol === 'http:' || url.protocol === 'https:',
   settings: ['headers', 'schema'],
   async connect(upstream, options): Promise<Connection> {

@@ -11,6 +11,8 @@ export const graphql: Source = {
   kind: 'graphql',
   // An http(s) URL with graphql in its path: /graphql, /v1/graphql, /graphql/v1 (Supabase), /graphql.json
   // (Shopify). At another path (gqlgen's /query), kind: graphql in sosie.yml says it is GraphQL. Any other is REST's.
+  title: 'GraphQL API',
+  schemes: ['http:', 'https:'],
   matches: (url) => (url.protocol === 'http:' || url.protocol === 'https:') && /\/graphql(\.json)?(\/|$)/i.test(url.pathname),
   settings: ['headers', 'schema'],
   async connect(upstream, options): Promise<Connection> {
