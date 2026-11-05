@@ -47,12 +47,22 @@ when it starts.
 
 ## Clients
 
-Tested with the `mysql` client and mysql2. Each statement is sent as text, with `COM_QUERY`, one per query, as both
-send them.
+Tested with the `mysql` client, mysql2's `query()` and `execute()`, and the `mariadb` driver, which Prisma's MySQL
+adapter uses.
 
-Not yet: **prepared statements** (`COM_STMT_PREPARE`), which mysql2's `execute()`, Prisma, and Go's driver with
-arguments use. They get an error that says so; send the statement as text (`query()` in mysql2). Several statements in
-one query are refused too: send them one at a time.
+- **Statements as text** (`COM_QUERY`), as the `mysql` client and mysql2's `query()` send them. Several statements in
+  one query run when the client turns them on (mysql2's `multipleStatements`). Each is checked before the first runs,
+  so one that Sosie refuses stops them all, and the first that fails stops the rest, as MySQL does.
+- **Prepared statements** (`COM_STMT_PREPARE`, `COM_STMT_EXECUTE`), as mysql2's `execute()`, Prisma and Go's driver
+  use them, answered in MySQL's binary protocol. MySQL says what a statement returns and how many parameters it has;
+  each execution then runs as text, its parameters written in as literals, so it is checked, turned back and faked
+  as a statement sent as text is. Sosie opens no cursor: a client that asks for one gets the rows at once, as MySQL
+  answers a statement that cannot have one.
+
+## Over MCP
+
+`sosie mcp`'s `query` tool runs SQL on a running MySQL Sosie, as on a Postgres one: up to 200 rows of each statement
+as JSON, several statements at once, bytes as hex, and Sosie's notes (a result cut at the cap) as warnings.
 
 ## What the guard allows
 
@@ -105,6 +115,9 @@ the rest of the statement goes upstream exactly as the client wrote it.
 SELECT o.id, o.total FROM orders o JOIN users u ON u.id = o.user_id WHERE u.email = 'van29@example.com';
 ```
 
+A prepared statement's parameter compared the same way (`WHERE email = ?`) is turned back too. A date or time is
+looked up with its fraction of a second as long as its column's, so a `Date` a driver read from a fake finds its row.
+
 ## What each result column becomes
 
 MySQL names the database, table and column of each result column. Such a column is faked by its field, whatever
@@ -123,6 +136,10 @@ your data.
 | A `UNION`'s column | A fake by its type, unless every branch has a `COUNT(…)` or a literal there |
 | `information_schema`, `SHOW` and `DESCRIBE` | Unchanged |
 | Anything else a query computes (`UPPER(email)`, `MAX(id)`) | A fake by its type |
+
+A computed column's name is its text as you wrote it. MySQL names one by the text it received, with the real value
+in it where Sosie turned a fake back (`email = 'real@…'`), a derived table's column in its `org_name` too; Sosie takes
+the name from your own text, at the same place. In a prepared statement a parameter shows as `?`, as MySQL names it.
 
 ## Errors and warnings
 

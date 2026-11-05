@@ -44,7 +44,7 @@ export interface Field {
 
 export type FieldType =
   | { kind: 'string'; maxLength?: number }
-  | { kind: 'integer'; bytes?: 2 | 4 | 8 }
+  | { kind: 'integer'; bytes?: 1 | 2 | 4 | 8 }
   | { kind: 'decimal' }
   | { kind: 'boolean' }
   | { kind: 'enum'; labels: string[] }

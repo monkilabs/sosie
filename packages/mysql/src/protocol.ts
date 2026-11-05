@@ -2,8 +2,8 @@ import type { Socket } from 'node:net'
 
 /**
  * The server side of MySQL's client/server protocol, as much as Sosie speaks: packets of up to 16 MB with a
- * sequence id, the version 10 handshake, and the text protocol's results. Every client this serves negotiates
- * protocol 4.1 and pluggable authentication, as every MySQL client since 5.7 does.
+ * sequence id, the version 10 handshake, the text protocol's results, and prepared statements (binary.ts). Every
+ * client this serves negotiates protocol 4.1 and pluggable authentication, as every MySQL client since 5.7 does.
  */
 
 /** Capability flags, as the protocol numbers them. */
@@ -26,7 +26,7 @@ export const CLIENT = {
   QUERY_ATTRIBUTES: 0x8000000,
 } as const
 
-/** What Sosie offers: no TLS, no compression, one statement per query, and the classic EOF packets. */
+/** What Sosie offers: no TLS, no compression, no query attributes, and the classic EOF packets. */
 export const SERVER_CAPABILITIES =
   CLIENT.LONG_PASSWORD |
   CLIENT.FOUND_ROWS |
@@ -35,6 +35,7 @@ export const SERVER_CAPABILITIES =
   CLIENT.PROTOCOL_41 |
   CLIENT.TRANSACTIONS |
   CLIENT.SECURE_CONNECTION |
+  CLIENT.MULTI_STATEMENTS |
   CLIENT.MULTI_RESULTS |
   CLIENT.PS_MULTI_RESULTS |
   CLIENT.PLUGIN_AUTH |
@@ -60,6 +61,7 @@ export const COMMAND = {
   STMT_CLOSE: 0x19,
   STMT_RESET: 0x1a,
   SET_OPTION: 0x1b,
+  STMT_FETCH: 0x1c,
   RESET_CONNECTION: 0x1f,
 } as const
 
@@ -225,6 +227,11 @@ export function ok({
 
 export function err(code: number, sqlState: string, message: string): Buffer {
   return Buffer.concat([Buffer.from([0xff]), u16(code), Buffer.from(`#${sqlState.padEnd(5, '0').slice(0, 5)}`), Buffer.from(message, 'utf8')])
+}
+
+/** COM_STMT_PREPARE's answer: the statement's id, and how many columns and parameters it has; their definitions follow. */
+export function prepareOk(id: number, columns: number, params: number): Buffer {
+  return Buffer.concat([Buffer.from([0]), u32(id), u16(columns), u16(params), Buffer.from([0]), u16(0)])
 }
 
 export function eof(status: number = STATUS.AUTOCOMMIT, warnings = 0): Buffer {

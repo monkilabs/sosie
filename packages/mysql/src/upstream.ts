@@ -157,6 +157,28 @@ export class Upstream {
     })
   }
 
+  /**
+   * What MySQL makes of a statement it is asked to prepare, without running it: its result columns and its
+   * parameters. Sosie keeps nothing prepared upstream: it runs each execution as text.
+   */
+  async prepare(sql: string): Promise<{ columns: Column[]; params: Column[] }> {
+    await this.#killing
+    return new Promise((resolve, reject) => {
+      this.connection.prepare(sql, (error, statement) => {
+        if (error) {
+          const e = error as mysql.QueryError & { sqlState?: string; errno?: number; fatal?: boolean }
+          if (e.fatal) return reject(error)
+          return reject({ code: e.errno ?? 1105, sqlState: e.sqlState ?? 'HY000', message: e.message, reading: false } satisfies UpstreamError)
+        }
+        const info = statement as unknown as { columns?: mysql.FieldPacket[]; parameters?: mysql.FieldPacket[] }
+        const described = { columns: (info.columns ?? []).map(column), params: (info.parameters ?? []).map(column) }
+        // Closed upstream, and out of mysql2's cache, which close() alone would leave it in: each prepare asks MySQL.
+        this.connection.unprepare(sql)
+        resolve(described)
+      })
+    })
+  }
+
   /** Stop the statement running on this session, from a connection of its own; if that fails, end the session. */
   async #kill(): Promise<void> {
     const killer = mysql.createConnection(config(this.upstream))

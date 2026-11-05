@@ -45,7 +45,7 @@ describe('what each result column becomes', () => {
   })
 
   it('a column from a table of yours makes the statement one that reads data, whatever the guard made of it', () => {
-    const misread: Analysis = { catalogOnly: true, answer: 'rows', consts: [], params: new Map() }
+    const misread: Analysis = { catalogOnly: true, answer: 'rows', consts: [], params: new Map(), placeholders: [] }
     const plan = planColumns([of('users', 'email'), column()], misread, catalog)
     expect(plan[1]).toEqual({ type: { kind: 'string' } })
   })

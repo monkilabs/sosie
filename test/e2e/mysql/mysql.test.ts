@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import mariadb from 'mariadb'
 import mysql2 from 'mysql2/promise'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { canariesIn } from '../canaries.js'
@@ -197,9 +198,110 @@ describe('the guard', () => {
     expect((await status('SET autocommit = 1')) & 2).toBe(2)
   })
 
-  it('answers prepared statements, which come later, with an error that says so', async () => {
-    await expect(client.execute('SELECT 1')).rejects.toThrow(/does not run prepared statements on MySQL yet/)
+})
+
+describe('prepared statements', () => {
+  const execute = async (sql: string, values: unknown[] = [], c: mysql2.Connection = client): Promise<[Row[], mysql2.FieldPacket[]]> => {
+    const [rows, fields] = await c.execute(sql, values as never)
+    seen.push(rows, (fields ?? []).map((f) => f.name))
+    return [rows as Row[], fields]
+  }
+  const COLUMNS = 'id, email, full_name, phone, created_at, born_on, active, role, score, avatar, profile'
+
+  it('answers mysql2’s execute() in binary, each value the same fake as in text', async () => {
+    const text = await query(`SELECT ${COLUMNS} FROM users ORDER BY id LIMIT 3`)
+    const [rows] = await execute(`SELECT ${COLUMNS} FROM users ORDER BY id LIMIT ?`, [3])
+    expect(rows).toEqual(text)
+    expect(rows[0]!.email).toMatch(/@example\./)
+  })
+
+  it('finds a row by a fake in a parameter: an email, an id, a datetime', async () => {
+    const [first] = await query('SELECT id, email, created_at, full_name FROM users ORDER BY id LIMIT 1')
+    const [[byEmail]] = await execute('SELECT full_name FROM users WHERE email = ?', [first!.email])
+    const [[byId]] = await execute('SELECT full_name FROM users WHERE id = ?', [first!.id])
+    // mysql2 reads a DATETIME(3) into a Date, and sends it back with its milliseconds as microseconds.
+    const [[byTime]] = await execute('SELECT full_name FROM users WHERE created_at = ? AND email = ?', [first!.created_at, first!.email])
+    for (const row of [byEmail, byId, byTime]) expect(row!.full_name).toBe(first!.full_name)
+    const [orders] = await execute('SELECT COUNT(*) AS n FROM orders WHERE user_id IN (?, ?)', [first!.id, 999999])
+    expect(orders).toEqual([{ n: 2 }])
+  })
+
+  it('names a computed column as MySQL names it in a prepared statement, never with a real value in it', async () => {
+    const [first] = await query('SELECT id, email FROM users ORDER BY id LIMIT 1')
+    const [, fields] = await execute('SELECT email = ?, CONCAT(?, full_name) FROM users WHERE id = ?', [first!.email, 'x', first!.id])
+    expect(fields.map((f) => f.name)).toEqual(['email = ?', 'CONCAT(?, full_name)'])
+  })
+
+  it('leaves nothing prepared upstream: MySQL’s cap on prepared statements is the whole server’s', async () => {
+    const open = async () => Number(((await truth.query("SHOW GLOBAL STATUS LIKE 'Prepared_stmt_count'")) as [Row[], unknown])[0][0]!.Value)
+    const before = await open()
+    for (let i = 0; i < 20; i++) await execute(`SELECT ? + ${i} AS n`, [i])
+    for (let i = 0; i < 5; i++) await execute('SELECT email FROM users WHERE id = ?', [i])
+    expect(await open()).toBe(before)
+  })
+
+  it('refuses at PREPARE what it refuses as text', async () => {
+    await expect(client.execute('DELETE FROM users WHERE id = ?', [1])).rejects.toMatchObject({ errno: 1792 })
+    await expect(client.execute('SELECT LOAD_FILE(?)', ['/etc/passwd'])).rejects.toMatchObject({ errno: 1227 })
     expect(await query('SELECT 1 AS one')).toEqual([{ one: 1 }])
+  })
+
+  it('answers the mariadb driver, which Prisma’s MySQL adapter uses, in binary too', async () => {
+    const [first] = await query(`SELECT ${COLUMNS} FROM users ORDER BY id LIMIT 1`)
+    const conn = await mariadb.createConnection({ host: '127.0.0.1', port: sosie.port, user: 'kim', password: 'any', database: sosie.database })
+    try {
+      const rows = await conn.execute(`SELECT ${COLUMNS} FROM users WHERE email = ?`, [first!.email])
+      seen.push(rows)
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({ id: first!.id, email: first!.email, full_name: first!.full_name, role: first!.role, score: first!.score })
+    } finally {
+      await conn.end()
+    }
+  })
+})
+
+describe('several statements in a query', () => {
+  let multi: mysql2.Connection
+  beforeAll(async () => {
+    multi = await sosie.client({ multipleStatements: true })
+  })
+
+  it('answers each, when the client turns them on', async () => {
+    const [first] = await query('SELECT email FROM users ORDER BY id LIMIT 1')
+    const [results] = (await multi.query(`SELECT 1 AS a; SELECT email FROM users WHERE email = '${first!.email}'; SET @n = 2; SELECT 'x;y' AS s -- ;\n`)) as unknown as [unknown[]]
+    seen.push(results)
+    expect(results).toHaveLength(4)
+    expect(results[0]).toEqual([{ a: 1 }])
+    expect(results[1]).toEqual([{ email: first!.email }])
+    expect(results[3]).toEqual([{ s: 'x;y' }])
+  })
+
+  it('checks every statement before the first runs, and stops at the first that fails', async () => {
+    // A setting shows what ran: a user variable would not, as what it gives is faked like a value.
+    await query("SET time_zone = '+01:00'", multi)
+    expect((await failure("SET time_zone = '+02:00'; DELETE FROM users", multi)).errno).toBe(1792)
+    expect(await query('SELECT @@time_zone AS tz', multi)).toEqual([{ tz: '+01:00' }])
+    expect((await failure("SELECT 1; SELECT nope FROM users; SET time_zone = '+03:00'", multi)).errno).toBe(1054)
+    expect(await query('SELECT @@time_zone AS tz', multi)).toEqual([{ tz: '+01:00' }])
+  })
+
+  it('says to send them one at a time when the client did not turn them on', async () => {
+    expect((await failure('SELECT 1; SELECT 2')).message).toMatch(/did not turn on multiple statements/)
+  })
+})
+
+describe('result columns', () => {
+  it('names a computed column by the client’s text, never with the real value Sosie turned back in it', async () => {
+    const [first] = await query('SELECT email FROM users ORDER BY id LIMIT 1')
+    const [, fields] = await client.query(`SELECT email   =  '${first!.email}' FROM users LIMIT 1`)
+    const [, derived] = await client.query(`SELECT * FROM (SELECT email IN ('${first!.email}') FROM users) t LIMIT 1`)
+    const names = [...fields, ...derived].map((f) => [f.name, f.orgName])
+    seen.push(names)
+    // As written, spaces and all; a derived table's column carries it in its org_name too.
+    expect(names).toEqual([
+      [`email   =  '${first!.email}'`, ''],
+      [`email IN ('${first!.email}')`, `email IN ('${first!.email}')`],
+    ])
   })
 })
 

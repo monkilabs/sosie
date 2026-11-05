@@ -180,7 +180,9 @@ export function typeOf(dataType: string, columnType = '', maxLength: number | nu
   const type = dataType.toLowerCase()
   // BOOL and BOOLEAN are tinyint(1).
   if (type === 'tinyint' && /^tinyint\(1\)/i.test(columnType)) return { kind: 'boolean' }
-  if (type === 'tinyint' || type === 'smallint' || type === 'year') return { kind: 'integer', bytes: 2 }
+  // A tinyint's fake fits its one byte: a binary result has no room for more.
+  if (type === 'tinyint') return { kind: 'integer', bytes: 1 }
+  if (type === 'smallint' || type === 'year') return { kind: 'integer', bytes: 2 }
   if (type === 'mediumint' || type === 'int' || type === 'integer') return { kind: 'integer', bytes: 4 }
   if (type === 'bigint') return { kind: 'integer', bytes: 8 }
   if (['decimal', 'numeric', 'float', 'double', 'real'].includes(type)) return { kind: 'decimal' }
@@ -211,7 +213,7 @@ export function typeOfColumn(code: number, charset: number, flags: number, lengt
   if (flags & FLAG_ENUM) return { kind: 'string' }
   switch (code) {
     case 1: // TINY
-      return length === 1 ? { kind: 'boolean' } : { kind: 'integer', bytes: 2 }
+      return length === 1 ? { kind: 'boolean' } : { kind: 'integer', bytes: 1 }
     case 2: // SHORT
     case 13: // YEAR
       return { kind: 'integer', bytes: 2 }

@@ -32,7 +32,7 @@ Start Sosie first, in your own terminal. When none is running, every tool says s
 | Tool | From | Input | Returns |
 | --- | --- | --- | --- |
 | `describe` | Every Sosie | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
-| `query` | Postgres | `sql` | Up to 200 rows per statement as JSON, the row count and any notice |
+| `query` | Postgres, MySQL | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice or warning |
 | `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a `GET` through Sosie, up to 200 items of each list |
 | `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list |
 

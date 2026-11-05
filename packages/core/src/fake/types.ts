@@ -64,10 +64,10 @@ function guess(real: string, draw: Draw): string {
   return shape(real, random)
 }
 
-const INTEGER_MAX = { 2: 32767n, 4: 2147483647n, 8: 9223372036854775807n } as const
+const INTEGER_MAX = { 1: 127n, 2: 32767n, 4: 2147483647n, 8: 9223372036854775807n } as const
 
 /** Same sign and number of digits; a digit more each time a key's range is crowded. */
-function integer(real: string, bytes: 2 | 4 | 8 | undefined, { random, attempt }: Draw): string {
+function integer(real: string, bytes: 1 | 2 | 4 | 8 | undefined, { random, attempt }: Draw): string {
   if (!/^-?\d+$/.test(real)) return decimal(real, random)
   const negative = real.startsWith('-')
   const digits = real.replace('-', '').replace(/^0+(?=\d)/, '').length + Math.floor(attempt / 16)

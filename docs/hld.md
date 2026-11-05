@@ -95,7 +95,7 @@ flowchart LR
 | Postgres | Rewriter | Asks the core for the real value behind each fake in a query |
 | Postgres | Upstream client | One read-only session per client, with a timeout and a row cap |
 | Postgres | Results | Names the field of each result column, from the table and position Postgres reports |
-| MySQL | Endpoint | Speaks MySQL's protocol on 127.0.0.1, statements as text |
+| MySQL | Endpoint | Speaks MySQL's protocol on 127.0.0.1: statements as text, several to a query, and prepared statements |
 | MySQL | Guard | MySQL's dialect of sqlparser: allows reads; refuses everything else, and the tables and settings that hold queries, password hashes or where the database is |
 | MySQL | Rewriter and results | Turns back the literals compared with a column, in place; names each result column's field from the database, table and column MySQL reports |
 | REST | Endpoint and guard | The API's paths on a local HTTP address; `GET` and `HEAD` only, with Sosie's credentials |
@@ -120,7 +120,7 @@ same for every source.
 | First, the MVP | Postgres | Most personal data lives in databases, and teams least dare give an agent access to them |
 | Next, also in v0.1 | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
 | v0.2 | MySQL | The other database most teams run; its result metadata names each value's column, as Postgres's does |
-| Next | MySQL's prepared statements, then MongoDB | Prisma, mysql2's `execute()` and Go's driver need the first. MongoDB is the most used database after the SQL ones, above all with the JavaScript developers `npx` reaches; its protocol is open, and its commands are documents, so its guard needs no parser |
+| Next | MongoDB | The most used database after the SQL ones, above all with the JavaScript developers `npx` reaches; its protocol is open, and its commands are documents, so its guard needs no parser |
 | Then | SQL Server, and Azure SQL with it | The database of most .NET and Microsoft teams. Its protocol is open but the largest yet, and its clients encrypt by default |
 | Only on demand, and through MCP | Oracle | Its protocol is closed, and its results do not say which table a column came from, so it would be the one source that apps and tests cannot connect to unchanged |
 | Later | MariaDB; third-party APIs | On demand; many third-party APIs already offer a test mode |
@@ -277,6 +277,9 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
   (anything computed, and a `UNION`'s) rests on the parse, which reads what it cannot place, an unknown function or
   table, as data. A statement read differently from MySQL could still be let through, or a value computed from
   rows passed: the session's read-only start, the login's grants and the result metadata are the layers under it.
+  Where several statements in a query end, and where a prepared statement's parameters are, rest on the parse too,
+  each with MySQL's check under it: each piece goes upstream alone, on a session that runs one statement per query,
+  and MySQL's count of parameters must be the guard's.
 - **Driver coverage.** The extended query protocol and binary formats vary
   between drivers. Sosie is tested with `psql`, `node-postgres`, `postgres.js`,
   Drizzle and Prisma 7; its binary format byte for byte against Postgres's

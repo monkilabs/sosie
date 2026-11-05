@@ -177,7 +177,7 @@ describe('sosie, in front of an API', () => {
     expect(result.body.data).toHaveLength(3)
     expect(canariesIn(JSON.stringify([users, result]))).toEqual([])
     const query = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT 1' } })
-    expect(text(query)).toBe('Sosie serves rest here, not postgres: query is for postgres.')
+    expect(text(query)).toBe('Sosie serves rest here, not postgres or mysql: query is for postgres or mysql.')
     await mcp.close()
     expect(await stop(sosie.child)).toBe(0)
     await api.close()

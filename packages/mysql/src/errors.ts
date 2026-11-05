@@ -1,5 +1,5 @@
 import type { RequestScope } from '@sosie/core'
-import { inClientText, type Edit } from './rewrite.js'
+import { inClientText, inClientTextEnd, type Edit } from './rewrite.js'
 import type { Catalog } from './schema.js'
 
 /** A statement as the client wrote it, as Sosie sent it upstream, and the scope its fakes were turned back in. */
@@ -47,6 +47,22 @@ export function scrubbed(code: number, message: string, sent: Sent, catalog: Cat
   if (from === undefined) return `${shown} near '…'`
   const line = sent.text.slice(0, from).split('\n').length
   return `${shown} near '${[...sent.text.slice(from)].slice(0, 80).join('')}' at line ${line}`
+}
+
+/**
+ * A result column's name, for the client. MySQL names a computed column by its text as Sosie sent it, a derived
+ * table's or a CTE's in its org_name too, at most 255 characters: with a real value in it where Sosie put one. The
+ * name is taken from the client's own text, at the same place, so a literal Sosie put there reads as the client
+ * wrote it (a parameter's, as ?, as MySQL names it in a prepared statement). A name not found in what Sosie sent
+ * is scrubbed of what was turned back, and anything quoted in it that the client did not write is hidden.
+ */
+export function columnName(name: string, sent: Sent, catalog: Catalog): string {
+  if (!name || !sent.edits.length || sent.text.includes(name)) return name
+  const at = sent.sql.indexOf(name)
+  if (at < 0) return masked(sent.scope.scrub(name), sent.text, catalog)
+  const start = inClientText(at, sent.edits)
+  const end = inClientTextEnd(at + name.length, sent.edits)
+  return [...sent.text.slice(start, end)].slice(0, 255).join('')
 }
 
 /** Where in the client's text MySQL's quote of the statement Sosie sent starts. */
