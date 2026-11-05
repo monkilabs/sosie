@@ -148,6 +148,7 @@ describe('the guard', () => {
     ['EXPLAIN SELECT * FROM users', 1235],
     ["SET SESSION sql_mode = 'ANSI_QUOTES'", 1227],
     ['SET sql_mode = 1048576', 1227],
+    ["SHOW GLOBAL STATUS LIKE 'Mysqlx%'", 1227],
     ['SET GLOBAL TRANSACTION READ ONLY', 1227],
     ['SELECT /*+ MAX_EXECUTION_TIME(100000) */ SLEEP(1)', 1227],
     ['SELECT /*+ SET_VAR(max_execution_time = 100000) */ SLEEP(1)', 1227],

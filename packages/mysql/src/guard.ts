@@ -188,7 +188,6 @@ class Analyzer {
       case 'ShowDatabases':
       case 'ShowSchemas':
       case 'ShowCollation':
-      case 'ShowStatus':
       case 'ShowFunctions':
       case 'ShowObjects':
       case 'ExplainTable':
@@ -209,6 +208,10 @@ class Analyzer {
       }
       case 'ShowVariables':
         this.#refuse({ ...DENIED, message: 'Sosie does not run SHOW VARIABLES: some say where your database is. Ask for one with SELECT @@name.' })
+        break
+      case 'ShowStatus':
+        // Mysqlx_socket holds a path, Mysqlx_address and Mysqlx_port where the server listens, Current_tls_* its files.
+        this.#refuse({ ...DENIED, message: 'Sosie does not run SHOW STATUS: some of it says where your database is.' })
         break
       case 'ShowProcessList':
         this.#refuse({ ...DENIED, message: `Sosie does not run SHOW PROCESSLIST: it ${QUERIES}.` })
