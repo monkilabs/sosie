@@ -84,8 +84,8 @@ One SQLite file on the machine Sosie runs on: `~/.sosie/store/store.db`, or unde
   only inside Sosie's process.
 - **One key.** `~/.sosie/store/key` holds 32 random bytes, made on first start, readable only by your user. The hashing,
   sealing and seeding keys are derived from it.
-- **One store for every upstream.** Several Sosies share it, so a person is the same fake from the database and from
-  the API.
+- **One store for every upstream.** Every source of a Sosie, and every Sosie on the machine, shares it, so a person is
+  the same fake from the database and from the API.
 
 Booleans, enums and bytes are not stored: their fakes come from the key.
 

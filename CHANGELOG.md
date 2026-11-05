@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+**One Sosie for every source of a project, all set up in `sosie.yml`.** This
+changes how Sosie starts: see Upgrading, below.
+
+- `sosie.yml` names every source of the project, two databases, a REST API, a
+  GraphQL one, each by a name of the team's, with the same keys: `upstream`,
+  and where needed `kind`, `schema`, `headers` and `port`. One Sosie serves
+  them all, each at an address of its own, from 7674 up; every source connects
+  before any serves, and one that cannot stops Sosie, named. Settings at the top
+  (`pass`, `format`, `host`, `max-rows`, `timeout`) hold for every source, and
+  a source may set its own: a rule at the top holds where its table exists.
+- Credentials are never written in `sosie.yml`, nor arguments: each `${NAME}`
+  the file names is read from the terminal Sosie starts in, or asked for at a
+  hidden prompt. `upstream` is always one whole variable, so a file an agent can
+  edit never sends a credential to a host it chose.
+- `sosie init` writes `sosie.yml` with the first source, its connection string
+  asked for at a hidden prompt; `sosie` without a `sosie.yml` runs it, then
+  starts.
+- MCP: `describe` lists each source by its name, and a tool takes a `source`
+  by that name. With several of its kind, it asks for one rather than guess.
+- The plugin's session start names each source, and its kind and address.
+
+Upgrading: `SOSIE_UPSTREAM`, `SOSIE_UPSTREAM_HEADERS`, `SOSIE_OPENAPI`,
+`SOSIE_GRAPHQL_SCHEMA` and the flags `--port`, `--host`, `--rules`,
+`--max-rows` and `--timeout` are gone, each a key of `sosie.yml` now. A
+`sosie.yml` of rules only gets its first source from `sosie init`, its rules
+kept. With `SOSIE_UPSTREAM` still set, `upstream: ${SOSIE_UPSTREAM}` reads it;
+Sosie says so when one of them is set, and a flag given says where it went.
+
 - Postgres: a column of a domain over another domain, an enum or an array,
   and an enum array a query computes (`array_agg(role)`), are faked by their
   type; they came back `NULL`.
@@ -14,7 +42,7 @@
 - Postgres: `bit` and `varbit` are faked as as many bits, in text and in
   binary; MySQL's `BIT` too, and a single bit, as Hibernate maps a boolean to
   `BIT(1)`, is a flag that flips as a boolean does. They came back `NULL`.
-- `--timeout` sets how long a statement, a command or a request may run
+- `timeout` sets how long a statement, a command or a request may run
   upstream, from 1 to 3600 seconds; it was 30 s, with no way to change it.
 - REST: a collection named in kebab case (`/line-items`) is learned as one in
   snake case is, so links show it as it is.

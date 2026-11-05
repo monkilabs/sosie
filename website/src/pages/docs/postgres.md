@@ -7,20 +7,29 @@ lead: A local endpoint that speaks the Postgres protocol. psql, your ORM and any
 
 ## Start it
 
+A source in `sosie.yml`, its connection string in a variable of yours. `npx @sosie/cli` writes this for you the first
+time.
+
+```yaml
+sources:
+  app:
+    upstream: ${APP_URL}
+```
+
 ```sh
-export SOSIE_UPSTREAM='postgres://readonly:…@db.internal:5432/app'
+export APP_URL='postgres://readonly:…@db.internal:5432/app'
 npx @sosie/cli
 ```
 
 ```
-  ✓ db.internal:5432/app, read-only: 42 tables, 3 views
-  ✓ Every value is faked; 3 fields pass (sosie.yml)
+  ✓ app  db.internal:5432/app, read-only: 42 tables, 3 views
+  ✓ Every value is faked
 
-  Your agent, app and psql:  postgres://localhost:7674/app
+  app:                      postgres://localhost:7674/app
 ```
 
-The address takes any user and database name and no password. It listens on `127.0.0.1` and `::1` only, unless you
-pass `--host`.
+The address takes any user and database name and no password. It listens on `127.0.0.1` and `::1` only, unless
+`sosie.yml` gives another `host`.
 
 ## A read-only login
 
@@ -82,9 +91,9 @@ One connection upstream per client, read-only from its start, with:
 | Setting | Value |
 | --- | --- |
 | `default_transaction_read_only` | `on` |
-| `statement_timeout` | 30 s, or `--timeout`; a client may lower it, never lift it |
+| `statement_timeout` | 30 s, or the source's `timeout`; a client may lower it, never lift it |
 | `idle_in_transaction_session_timeout` | 5 min, so a transaction an agent leaves open does not hold locks |
-| Rows per query | `--max-rows`, 1,000 by default; a result cut at the cap ends with a notice |
+| Rows per query | `max-rows`, 1,000 by default; a result cut at the cap ends with a notice |
 
 ## Query by what you saw
 

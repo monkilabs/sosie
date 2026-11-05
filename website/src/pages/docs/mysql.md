@@ -7,26 +7,36 @@ lead: A local endpoint that speaks MySQL's protocol. The mysql client, your app 
 
 ## Start it
 
+A source in `sosie.yml`, its connection string in a variable of yours. `npx @sosie/cli` writes this for you the first
+time.
+
+```yaml
+sources:
+  app:
+    upstream: ${APP_URL}
+```
+
 ```sh
-export SOSIE_UPSTREAM='mysql://readonly:…@db.internal:3306/app'
+export APP_URL='mysql://readonly:…@db.internal:3306/app'
 npx @sosie/cli
 ```
 
 ```
-  ✓ db.internal:3306/app, read-only: 42 tables, 3 views
+  ✓ app  db.internal:3306/app, read-only: 42 tables, 3 views
   ✓ Every value is faked
 
-  Your agent, app and mysql: mysql://127.0.0.1:7674/app
+  app:                      mysql://127.0.0.1:7674/app
 ```
 
-The address takes any user and no password, and listens on `127.0.0.1` and `::1` only, unless you pass `--host`. It is
+The address takes any user and no password, and listens on `127.0.0.1` and `::1` only, unless `sosie.yml` gives another
+`host`. It is
 `127.0.0.1`, not `localhost`: MySQL's own client takes `localhost` for its Unix socket.
 
 ```sh
 mysql --protocol=tcp -h 127.0.0.1 -P 7674 app
 ```
 
-`?ssl-mode=REQUIRED` (or `VERIFY_CA`, `VERIFY_IDENTITY`) on `SOSIE_UPSTREAM` makes the connection upstream use TLS.
+`?ssl-mode=REQUIRED` (or `VERIFY_CA`, `VERIFY_IDENTITY`) on the connection string makes the connection upstream use TLS.
 `REQUIRED` encrypts without checking the server's certificate, and without `ssl-mode` there is no TLS at all, unlike
 the `mysql` client's own default: for a server across a network, use `VERIFY_IDENTITY`.
 Sosie's own address speaks no TLS: it is on your machine.
@@ -98,9 +108,9 @@ One connection upstream per client, read-only from its start, with:
 | Setting | Value |
 | --- | --- |
 | `transaction_read_only` | `ON` |
-| `max_execution_time` | 30 s, or `--timeout`; a client may lower it, never lift it |
+| `max_execution_time` | 30 s, or the source's `timeout`; a client may lower it, never lift it |
 | `sql_mode` | The server's, without the modes that change how a statement is read |
-| `sql_select_limit` | One more than `--max-rows`: a result cut at the cap says so in `SHOW WARNINGS` |
+| `sql_select_limit` | One more than `max-rows`: a result cut at the cap says so in `SHOW WARNINGS` |
 
 MySQL's `max_execution_time` stops a `SELECT` only. Any other statement that runs past the limit (a `SET @x = (SELECT
 …)`, a `SHOW`), Sosie stops a second later, with `KILL QUERY` from a connection of its own: it gets error 3024, as a

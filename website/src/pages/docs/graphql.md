@@ -7,19 +7,28 @@ lead: Your API's GraphQL endpoint on a local address. Queries only, checked agai
 
 ## Start it
 
-`SOSIE_UPSTREAM` is the endpoint. Credentials work as for [REST](../rest/#credentials):
+A source in `sosie.yml`: its `upstream` is the endpoint, and credentials work as for [REST](../rest/#credentials), in
+its `headers`.
+
+```yaml
+sources:
+  graph:
+    upstream: ${GRAPH_URL}
+    headers:
+      Authorization: Bearer ${GRAPH_TOKEN}
+```
 
 ```sh
-export SOSIE_UPSTREAM='https://api.internal/graphql'
-export SOSIE_UPSTREAM_HEADERS="$(cat ~/.config/api.headers)"   # Authorization: Bearer …
+export GRAPH_URL='https://api.internal/graphql'
+export GRAPH_TOKEN="$(cat ~/.config/graph.token)"
 npx @sosie/cli
 ```
 
 ```
-  ✓ api.internal/graphql, read-only: 31 types, 12 queries
+  ✓ graph  api.internal/graphql, read-only: 31 types, 12 queries
   ✓ Every value is faked
 
-  Your agent, app and curl:  http://localhost:7674/graphql
+  graph:                     http://localhost:7674/graphql
 ```
 
 Sosie serves GraphQL at the API's own path, by `GET` and `POST`, batches included.
@@ -35,13 +44,13 @@ An `http(s)` URL with a `graphql` or `graphql.json` segment in its path is Graph
 | `/graphql/v1` | Supabase |
 | `/admin/api/…/graphql.json` | Shopify |
 
-An endpoint at another path, such as gqlgen's `/query`, is GraphQL when `SOSIE_GRAPHQL_SCHEMA` gives its schema.
+An endpoint at another path, such as gqlgen's `/query`, is GraphQL with `kind: graphql` in its source.
 Without it, the URL goes to the REST source. Sosie never sends a `POST` to find out: on a REST API, it could write.
 
 ## The schema
 
-By introspection, with Sosie's credentials, at start-up. An API with introspection off is read from
-`SOSIE_GRAPHQL_SCHEMA`: a file with its SDL, or with an introspection result as JSON.
+By introspection, with Sosie's credentials, at start-up. An API with introspection off is read from the
+source's `schema`: a file with its SDL, or with an introspection result as JSON.
 
 - Each object and interface type is an entity; each field that holds a scalar or an enum is a field.
 - Custom scalars map by name: `DateTime`, `Date`, `UUID`, `JSON`, `BigInt` and the like. `Email` and `EmailAddress`
@@ -72,7 +81,7 @@ Every leaf of `data` is faked by the schema field it is, through aliases, fragme
 
 - An object of an interface or a union is faked by its own type: Sosie asks for its `__typename` under an alias the
   client never sees.
-- A list keeps its first `--max-rows` items; `extensions.sosie` says the rest were cut.
+- A list keeps its first `max-rows` items; `extensions.sosie` says the rest were cut.
 - An integer beyond 2^53 keeps its digits, so its fake leads back to its record.
 
 **Errors.** Since Sosie checked the query itself, anything the API says beyond that may quote data. Every message is

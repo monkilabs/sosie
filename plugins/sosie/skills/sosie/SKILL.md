@@ -13,26 +13,29 @@ the hostnames stay on the developer's side. That is the point of it: keep it tha
 
 ## Reach it
 
-- **The MCP tools.** Start with `describe`: every running Sosie, its entities, their fields, types, keys and
-  references, and which fields pass unchanged. Then `query` for Postgres and MySQL (SQL in the database's own
+- **The MCP tools.** Start with `describe`: every source Sosie serves, by its name, kind and address, with its
+  entities, their fields, types, keys and references, and which fields pass unchanged. Then `query` for Postgres and MySQL (SQL in the database's own
   dialect, up to 200 rows per statement), `find` and `aggregate` for MongoDB (a collection, and a filter or a pipeline
   as JSON, up to 200 documents), `request` for REST (a `GET` path, or a link Sosie returned) and `graphql` for GraphQL
-  (a query and its variables). When several Sosies run, pass the `address` that `describe` lists. Use the tool of the
-  Sosie's kind: `query` reaches a Postgres or MySQL Sosie only, `find` and `aggregate` a MongoDB one. A MongoDB
-  Sosie learns its fields from the documents it serves, so `describe` lists what it has met so far.
-- **A REST Sosie without an OpenAPI document** learns its fields from the API's answers, so `describe` lists only
+  (a query and its variables). Use the tool of the source's kind: `query` reaches a Postgres or MySQL source only,
+  `find` and `aggregate` a MongoDB one. When several sources of a kind run, pass the `source` by its name, as
+  `describe` lists it: the tool asks for one rather than guess. A MongoDB source learns its fields from the documents
+  it serves, so `describe` lists what it has met so far.
+- **A REST source without an OpenAPI document** learns its fields from the API's answers, so `describe` lists only
   what it has met so far, and may list nothing. `request` the paths the API serves, such as `/users`, and read the
   fields from what comes back.
-- **Its address**, for `psql`, `mongosh`, `curl`, the app and its tests: the one Sosie printed when it started, on
-  127.0.0.1 from port 7674 up, such as `postgres://localhost:7674/app`, `mysql://127.0.0.1:7674/app` or
+- **Each source's address**, for `psql`, `mongosh`, `curl`, the app and its tests: the one Sosie printed when it
+  started, on 127.0.0.1 from port 7674 up, such as `postgres://localhost:7674/app`, `mysql://127.0.0.1:7674/app` or
   `mongodb://127.0.0.1:7674/app?directConnection=true`. Point code at it as it would point at the real thing.
 
 ## When Sosie is not running
 
-The tools say so. Ask the developer to start it **in their own terminal** with `npx @sosie/cli`, then try again.
+The tools say so. Ask the developer to start it **in their own terminal**, in the project's folder, with
+`npx @sosie/cli`, then try again. The first time, it asks them for the first source and writes `sosie.yml`.
 
-Never start Sosie yourself, and never ask for, look for or handle what it reads: the connection string,
-`SOSIE_UPSTREAM`, `SOSIE_UPSTREAM_HEADERS`, an API token, a `.env` file. Sosie exists so that none of these reach you.
+Never start Sosie yourself, and never ask for, look for or handle what it reads: a connection string, a variable
+`sosie.yml` names, an API token, a `.env` file. Never change a source's `upstream` or `headers` in `sosie.yml`. Sosie
+exists so that none of these reach you.
 Never connect to the real database or API directly, even when you could.
 
 ## Read the fakes right
@@ -94,12 +97,15 @@ Code written against the fakes runs unchanged on the real data: the same tables,
     - countries.*
   format:
     users.handle: username
+  sources:
+    app:
+      upstream: ${APP_URL}
   ```
 
   A field's id is `table.column` for Postgres and MySQL, `collection.path` for MongoDB (`users.address.city`),
   `Schema.property` for REST with an OpenAPI document (`entity.key` without one) and `Type.field` for GraphQL;
-  `describe` lists them. Sosie reads `sosie.yml` when it starts, so a change
-  applies once the developer restarts it.
+  `describe` lists them. A rule at the top holds for every source that has the table; under a source, for that one.
+  Sosie reads `sosie.yml` when it starts, so a change applies once the developer restarts it.
 
 ## Checking files for real values
 

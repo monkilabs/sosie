@@ -26,26 +26,33 @@ PostgreSQL 15 to 18, MySQL 8.4 and 9, MongoDB 6.0 to 8.0, REST APIs and GraphQL 
 
 ## How it works
 
-In your own terminal, not the agent's:
+In your project's folder, in your own terminal, not the agent's:
 
 ```sh
-export SOSIE_UPSTREAM='postgres://readonly:…@db.internal:5432/app'
 npx @sosie/cli
 ```
 
-```
-  ✓ db.internal:5432/app, read-only: 42 tables, 3 views
-  ✓ Every value is faked; 3 fields pass (sosie.yml)
+The first time, Sosie asks for your first source's connection string at a hidden prompt, and writes a `sosie.yml`
+that names the variable to keep it in, never the string itself:
 
-  Your agent, app and psql:  postgres://localhost:7674/app
+```
+  Its connection string, or the API's URL (hidden):
+  ✓ A Postgres database: db.internal:5432/app
+  A name for it (app):
+  The variable to keep it in (APP_URL):
+  ✓ Wrote sosie.yml: app, its upstream read from ${APP_URL}, never written there. Commit it.
+
+  ✓ app  db.internal:5432/app, read-only: 42 tables, 3 views
+  ✓ Every value is faked
+
+  app:                       postgres://localhost:7674/app
   Claude Code:               claude plugin marketplace add monkilabs/sosie
                              claude plugin install sosie@sosie
   Any MCP client:            npx @sosie/cli mcp
 ```
 
-Without `SOSIE_UPSTREAM`, Sosie asks for the connection string at a hidden
-prompt. It is never an argument: arguments show in shell history and the
-process list, where an agent can read them.
+The connection string is never an argument: arguments show in shell history and the process list, where an agent can
+read them. Next time, set `APP_URL` in your terminal, or type it at the prompt again.
 
 Then point the agent, the app and its tests at the address Sosie printed:
 
@@ -73,22 +80,32 @@ npx @sosie/cli scan ~/.claude/projects
   ✓ No real values found in 412 files.
 ```
 
-That is the whole tool: three commands, no config to start, and an optional
-`sosie.yml` for the fields you decide may pass unchanged:
+### One file: sosie.yml
+
+That is the whole tool: three commands, and one file. `sosie.yml` names every source of the project, two databases, a
+REST API, a GraphQL one, and the fields you decide may pass unchanged. One Sosie serves them all, each at an address of
+its own, from 7674 up; a person is the same fake in each, and `sosie mcp` serves them all.
 
 ```yaml
 pass:
   - orders.status
   - countries.*
-format:
-  users.handle: username
+
+sources:
+  app:
+    upstream: ${APP_URL}
+  billing:
+    upstream: ${BILLING_API_URL}
+    headers:
+      Authorization: Bearer ${BILLING_TOKEN}
+  catalog:
+    upstream: ${CATALOG_URL}     # https://api.internal/graphql
 ```
 
+A connection string or a token is never written in it: each `${NAME}` is read from the terminal Sosie starts in, or
+asked for at a hidden prompt. It is all there is to configure, so there are no flags and no variables of Sosie's own.
 Installed once with `npm i -g @sosie/cli`, the command is just `sosie`.
-Options: `--port` (7674, or the next free one), `--host` (127.0.0.1), `--rules`
-(`./sosie.yml`), `--max-rows` (1000) and `--timeout` (30 s upstream). Several Sosies, one per upstream, share
-one store, so a person is the same fake in each, and `sosie mcp` serves them
-all.
+[Configuration](https://monkilabs.github.io/sosie/docs/configuration/) has every key.
 
 Tested with `psql`, `node-postgres`, `postgres.js`, Drizzle and Prisma; in
 binary, checked by hand with asyncpg and pgJDBC.
@@ -96,78 +113,32 @@ binary, checked by hand with asyncpg and pgJDBC.
 ### In front of your API
 
 The same, for your team's own REST API: the agent reads it through Sosie, and a
-person is the same fake from the API as from the database.
-
-```sh
-export SOSIE_UPSTREAM='https://api.internal/v1'
-export SOSIE_UPSTREAM_HEADERS="$(cat ~/.config/api.headers)"   # Authorization: Bearer …
-npx @sosie/cli
-```
-
-```
-  ✓ api.internal/v1, read-only: OpenAPI 3.1, 24 schemas, 41 GET paths
-  ✓ Every value is faked
-
-  Your agent, app and curl:  http://localhost:7675/v1
-```
-
-Only `GET` and `HEAD` reach the API, with Sosie's credentials, never the
-agent's; read them from a file or a secret manager, as above, so they stay out
-of your shell's history. Sosie reads the API's OpenAPI document when it serves one, or the one
-in `SOSIE_OPENAPI`; without one, it names each value by where it sits. Links in
+person is the same fake from the API as from the database. Only `GET` and `HEAD`
+reach the API, with Sosie's credentials from the source's `headers`, never the
+agent's. Sosie reads the API's OpenAPI document when it serves one, or the one the
+source's `schema` names; without one, it names each value by where it sits. Links in
 the API's answers point at Sosie with every value in them faked, and following
 one reads the record it names; a word that is the API's own, a collection's
 name or a query name its document or its answers show, stays as written.
 
-A GraphQL API works the same way: point `SOSIE_UPSTREAM` at its endpoint
-(`https://api.internal/graphql`, or Supabase's `/graphql/v1`). Sosie reads the schema by introspection, or
-from `SOSIE_GRAPHQL_SCHEMA`, answers the client's introspection from it, and
-sends only queries on, never mutations. A query field that writes, like a `GET`
-that writes, is the API's to guard.
+A GraphQL API works the same way, at its endpoint (`https://api.internal/graphql`, or Supabase's `/graphql/v1`; one
+at another path with `kind: graphql`). Sosie reads the schema by introspection, or from the source's `schema`, answers
+the client's introspection from it, and sends only queries on, never mutations. A query field that writes, like a
+`GET` that writes, is the API's to guard.
 
 ### In front of MySQL
 
-The same command, with a `mysql://` connection string:
-
-```sh
-export SOSIE_UPSTREAM='mysql://readonly:…@db.internal:3306/app'
-npx @sosie/cli
-```
-
-```
-  ✓ db.internal:3306/app, read-only: 42 tables, 3 views
-  ✓ Every value is faked
-
-  Your agent, app and mysql: mysql://127.0.0.1:7674/app
-```
-
-The `mysql` client and your app read through it: statements as text, several to a
-query, and prepared, as mysql2's `execute()` and the `mariadb` driver send them.
-MySQL 8.4 and 9 are tested. Give the login `SELECT` and `SHOW VIEW`, so
-a view's columns share their tables' fakes.
+A source with a `mysql://` connection string. The `mysql` client and your app read through it: statements as text,
+several to a query, and prepared, as mysql2's `execute()` and the `mariadb` driver send them. MySQL 8.4 and 9 are
+tested. Give the login `SELECT` and `SHOW VIEW`, so a view's columns share their tables' fakes.
 
 ### In front of MongoDB
 
-The same command, with a `mongodb://` or `mongodb+srv://` connection string:
-
-```sh
-export SOSIE_UPSTREAM='mongodb://readonly:…@db.internal:27017/app'
-npx @sosie/cli
-```
-
-```
-  ✓ db.internal:27017/app, read-only: 12 collections
-  ✓ Every value is faked
-
-  Your agent, app and mongosh: mongodb://127.0.0.1:7674/app?directConnection=true
-```
-
-The Node.js driver (Mongoose's), mongosh and your app read through it. MongoDB says nothing of where a
-value came from, so Sosie reads it from the command: each value of a `find` or a
-pipeline is faked by the collection field it comes from, or by its BSON type when
-a stage computed it. Every ObjectId shares one domain, so references between
-collections hold. MongoDB 6.0, 7.0 and 8.0 are tested. Give the login the `read`
-role.
+A source with a `mongodb://` or `mongodb+srv://` connection string. The Node.js driver (Mongoose's), mongosh and your
+app read through it. MongoDB says nothing of where a value came from, so Sosie reads it from the command: each value of
+a `find` or a pipeline is faked by the collection field it comes from, or by its BSON type when a stage computed it.
+Every ObjectId shares one domain, so references between collections hold. MongoDB 6.0, 7.0 and 8.0 are tested. Give
+the login the `read` role.
 
 Postgres, MySQL, MongoDB, REST and GraphQL are the first sources. SQL Server comes
 next, each a package behind the same interface ([how Sosie grows](docs/hld.md#how-sosie-grows)).
@@ -196,7 +167,7 @@ ends, or in VS Code after each turn, it scans the session's transcript, and the
 next session tells you if a real value reached it.
 
 The plugin starts no Sosie and holds no credentials: Sosie still starts in your
-own terminal, as above.
+own terminal, in the project's folder, as above.
 
 ## Good to know
 

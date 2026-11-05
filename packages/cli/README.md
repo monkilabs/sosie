@@ -13,26 +13,35 @@ agent, your app and `psql`, `mysql`, `mongosh` or `curl` query it as they would
 the real thing; the same real value is always the same fake, so joins hold and a
 value the agent saw finds its record again.
 
-In your own terminal, not the agent's:
+In your project's folder, in your own terminal, not the agent's:
 
 ```sh
-export SOSIE_UPSTREAM='postgres://readonly:…@db.internal:5432/app'
 npx @sosie/cli
 ```
 
-For MySQL and MongoDB, `SOSIE_UPSTREAM` is a `mysql://` or `mongodb://`
-connection string. For an API, it is the API's address
-(`https://api.internal/v1`, or `https://api.internal/graphql`), with Sosie's
-credentials in `SOSIE_UPSTREAM_HEADERS`.
+The first time, it asks for your first source's connection string at a hidden prompt and writes `sosie.yml`, the only
+configuration there is. It names every source of the project, a database or an API, and the variable that holds each
+one's connection string, never the string:
+
+```yaml
+sources:
+  app:
+    upstream: ${APP_URL}
+  billing:
+    upstream: ${BILLING_API_URL}
+    headers:
+      Authorization: Bearer ${BILLING_TOKEN}
+```
+
+One Sosie serves them all, each at an address of its own.
 
 | Command | What it does |
 | --- | --- |
-| `sosie` | Start. Reads `SOSIE_UPSTREAM`, or asks for it at a hidden prompt |
-| `sosie mcp` | MCP server over stdio, for the running `sosie` |
+| `sosie` | Start every source `sosie.yml` names; without one, write it first |
+| `sosie init` | Write `sosie.yml`, with the first source |
+| `sosie mcp` | MCP server over stdio, for every running `sosie` |
 | `sosie scan <path>…` | Search files and folders for real values; exit 1 if one is found |
 
-Options: `--port` (7674), `--host` (127.0.0.1), `--rules` (`./sosie.yml`),
-`--max-rows` (1000), `--timeout` (30 s upstream). PostgreSQL 15 to 18, MySQL 8.4 and 9, MongoDB 6.0 to 8.0;
-Node 24 or later.
+PostgreSQL 15 to 18, MySQL 8.4 and 9, MongoDB 6.0 to 8.0, REST and GraphQL APIs; Node 24 or later.
 
 The [docs](https://monkilabs.github.io/sosie/docs/) say more, and the [repository](https://github.com/monkilabs/sosie) has the code.

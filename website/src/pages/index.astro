@@ -123,7 +123,7 @@ const columns = ['full_name', 'email', 'status', 'total'];
     <section class="section" id="how">
       <div class="wrap">
         <span class="section__label">How it works</span>
-        <h2 class="section__title">One local address in front of your data.</h2>
+        <h2 class="section__title">A local address in front of each source.</h2>
         <p class="section__lead">
           A core that knows no database decides every fake; each source speaks its upstream's own protocol. One store,
           keyed and sealed on your machine, keeps each fake consistent and lets a query by a fake find the real row.
@@ -164,8 +164,8 @@ const columns = ['full_name', 'email', 'status', 'total'];
         <span class="section__label">Sources</span>
         <h2 class="section__title">Your database and your APIs, one person, one fake.</h2>
         <p class="section__lead">
-          Run one Sosie per upstream. They share one store, so a person's email is the same fake from the database and
-          from the API, and <code>sosie mcp</code> serves them all.
+          One Sosie serves every source of a project, each at an address of its own, each named in <code>sosie.yml</code>.
+          A person's email is the same fake from the database and from the API, and <code>sosie mcp</code> serves them all.
         </p>
         <div class="sources">
           <div class="source">
@@ -175,13 +175,10 @@ const columns = ['full_name', 'email', 'status', 'total'];
               <a class="source__link" href={url('docs/postgres/')}>Postgres docs →</a>
             </div>
             <div class="term">
-              <div class="term__bar"><i></i><i></i><i></i><span>your terminal</span></div>
-              <pre><span class="cmd">export SOSIE_UPSTREAM='postgres://readonly:…@db.internal/app'</span>
-<span class="cmd">npx @sosie/cli</span>
-  <span class="ok">✓</span> db.internal:5432/app, read-only: 42 tables, 3 views
-  <span class="ok">✓</span> Every value is faked; 3 fields pass (sosie.yml)
-
-  Your agent, app and psql:  postgres://localhost:7674/app</pre>
+              <div class="term__bar"><i></i><i></i><i></i><span>sosie.yml</span></div>
+              <pre>sources:
+  shop:
+    upstream: {'${SHOP_URL}'}   <span class="dim"># postgres://…, in your terminal</span></pre>
             </div>
           </div>
           <div class="source">
@@ -191,14 +188,11 @@ const columns = ['full_name', 'email', 'status', 'total'];
               <a class="source__link" href={url('docs/rest/')}>REST docs →</a>
             </div>
             <div class="term">
-              <div class="term__bar"><i></i><i></i><i></i><span>your terminal</span></div>
-              <pre><span class="cmd">export SOSIE_UPSTREAM='https://api.internal/v1'</span>
-<span class="cmd">export SOSIE_UPSTREAM_HEADERS="$(cat ~/.config/api.headers)"</span>
-<span class="cmd">npx @sosie/cli</span>
-  <span class="ok">✓</span> api.internal/v1, read-only: OpenAPI 3.1, 24 schemas, 41 GET paths
-  <span class="ok">✓</span> Every value is faked
-
-  Your agent, app and curl:  http://localhost:7675/v1</pre>
+              <div class="term__bar"><i></i><i></i><i></i><span>sosie.yml</span></div>
+              <pre>  billing:
+    upstream: {'${BILLING_URL}'}
+    headers:
+      Authorization: Bearer {'${BILLING_TOKEN}'}</pre>
             </div>
           </div>
           <div class="source">
@@ -209,13 +203,15 @@ const columns = ['full_name', 'email', 'status', 'total'];
             </div>
             <div class="term">
               <div class="term__bar"><i></i><i></i><i></i><span>your terminal</span></div>
-              <pre><span class="cmd">export SOSIE_UPSTREAM='https://api.internal/graphql'</span>
-<span class="cmd">export SOSIE_UPSTREAM_HEADERS="$(cat ~/.config/api.headers)"</span>
-<span class="cmd">npx @sosie/cli</span>
-  <span class="ok">✓</span> api.internal/graphql, read-only: 31 types, 12 queries
-  <span class="ok">✓</span> Every value is faked
+              <pre><span class="cmd">npx @sosie/cli</span>
+  <span class="ok">✓</span> shop     db.internal:5432/shop, read-only: 42 tables
+  <span class="ok">✓</span> billing  api.internal/v1, read-only: OpenAPI 3.1
+  <span class="ok">✓</span> catalog  api.internal/graphql, read-only: 31 types
+  <span class="ok">✓</span> Every value is faked; 3 fields pass (sosie.yml)
 
-  Your agent, app and curl:  http://localhost:7676/graphql</pre>
+  shop:                      postgres://localhost:7674/shop
+  billing:                   http://localhost:7675/v1
+  catalog:                   http://localhost:7676/graphql</pre>
             </div>
           </div>
         </div>
@@ -254,13 +250,14 @@ const columns = ['full_name', 'email', 'status', 'total'];
     <section class="section" id="rules">
       <div class="wrap">
         <span class="section__label">sosie.yml</span>
-        <h2 class="section__title">No config to start. Rules your team reviews like code.</h2>
+        <h2 class="section__title">One file, written for you. Reviewed like code.</h2>
         <div class="split">
           <div>
             <p class="section__lead" style="margin-top:0">
-              When a fake breaks your app's logic, a status that must be a real one, list that field. The file is committed
-              with the code and checked against the schema at start-up: a typo is an error that names it (a warning, for
-              a source that learns its fields), never a value passing silently.
+              <code>sosie.yml</code> is all there is to configure: the project's sources, and the fields that must stay
+              real. Sosie writes it with your first source as it starts, naming the variable that holds the connection
+              string, never the string. It is committed with the code and checked against each schema at start-up: a
+              typo is an error that names it, never a value passing silently.
             </p>
             <p class="section__lead"><a href={url('docs/configuration/')}>Every rule and format →</a></p>
           </div>
@@ -274,7 +271,10 @@ pass:
 <span class="dim"># Formats for fields Sosie cannot tell from their names.</span>
 format:
   users.handle: username
-  accounts.iban: iban</pre>
+
+sources:
+  shop:
+    upstream: {'${SHOP_URL}'}</pre>
           </div>
         </div>
       </div>
@@ -303,10 +303,10 @@ format:
     <section class="section cta" id="start">
       <div class="wrap">
         <span class="section__label">Get started</span>
-        <h2 class="section__title">Three commands. No config file.</h2>
-        <p class="section__lead">In your own terminal, not the agent's, with the connection string in <code>SOSIE_UPSTREAM</code> or typed at a hidden prompt.</p>
+        <h2 class="section__title">Three commands. Sosie writes its own sosie.yml.</h2>
+        <p class="section__lead">In your own terminal and your project's folder, not the agent's. The connection string is typed at a hidden prompt, or read from a variable you name: never written down.</p>
         <div class="cta__steps">
-          <div class="cta__step"><code>npx @sosie/cli</code><span>Start Sosie. It prints one local address for your agent, your app and psql.</span></div>
+          <div class="cta__step"><code>npx @sosie/cli</code><span>Start Sosie. The first time, it asks for your first source and writes <code>sosie.yml</code>; then it prints a local address for each source, for your agent, your app and psql.</span></div>
           <div class="cta__step"><code>claude plugin install sosie@sosie</code><span>After <code>claude plugin marketplace add monkilabs/sosie</code>: Sosie's MCP server in Claude Code, and a skill that tells the agent how to read through it. Or connect any MCP client to <code>npx @sosie/cli mcp</code>, or point psql, your app or curl at the address.</span></div>
           <div class="cta__step"><code>npx @sosie/cli scan ~/.claude/projects</code><span>Check that nothing real reached a transcript.</span></div>
         </div>
