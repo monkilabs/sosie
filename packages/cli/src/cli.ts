@@ -248,13 +248,14 @@ async function readUpstream(): Promise<URL> {
       throw new Exit(2, fail((error as Error).message))
     }
   }
+  // A replica set's string may list its hosts, with ports (no URL) or without (a URL whose host is h1,h2): one is
+  // enough, as the driver finds the others from it.
+  if (/^mongodb:\/\/[^/?#]*,/.test(text)) {
+    throw new Exit(2, fail('Give one host of the replica set, with its replicaSet option: mongodb://user:password@host:27017/database?replicaSet=rs0. The driver finds the others.'))
+  }
   try {
     return new URL(text)
   } catch {
-    // A replica set's string may list its hosts: one is enough, as the driver finds the others from it.
-    if (/^mongodb:\/\/[^/]*,/.test(text)) {
-      throw new Exit(2, fail('Give one host of the replica set, with its replicaSet option: mongodb://user:password@host:27017/database?replicaSet=rs0. The driver finds the others.'))
-    }
     throw new Exit(
       2,
       fail('The upstream is not a URL. It looks like postgres://user:password@host:5432/database, or https://api.example.com/v1.'),

@@ -237,6 +237,13 @@ describe('sosie, when something is wrong', () => {
     const notUrl = run([], { SOSIE_UPSTREAM: 'host=db password=secret', SOSIE_HOME: home })
     expect(notUrl.stderr).toContain('The upstream is not a URL.')
     expect(notUrl.stderr).not.toContain('secret')
+    // A replica set's hosts, with their ports or without: one is enough.
+    for (const hosts of ['h1:27017,h2:27017', 'h1,h2']) {
+      const listed = run([], { SOSIE_UPSTREAM: `mongodb://kim:secret@${hosts}/app?replicaSet=rs0`, SOSIE_HOME: home })
+      expect(listed.status).toBe(2)
+      expect(listed.stderr).toContain('Give one host of the replica set')
+      expect(listed.stderr).not.toContain('secret')
+    }
   })
 
   it('says when it cannot connect', async () => {
