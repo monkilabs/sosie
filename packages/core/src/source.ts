@@ -49,7 +49,8 @@ export type FieldType =
   | { kind: 'boolean' }
   | { kind: 'enum'; labels: string[] }
   | { kind: 'date' | 'datetime' | 'time' }
-  | { kind: 'uuid' | 'bytes' | 'ip' }
+  /** objectid: MongoDB's 12-byte id, as 24 hex digits. */
+  | { kind: 'uuid' | 'bytes' | 'ip' | 'objectid' }
   | { kind: 'json' }
   | { kind: 'array'; of: FieldType }
   | { kind: 'unknown' }
@@ -106,7 +107,7 @@ export interface SourceOptions {
 }
 
 export interface Source {
-  /** 'postgres', 'rest', 'graphql'; 'mysql' later. */
+  /** 'postgres', 'mysql', 'mongodb', 'rest', 'graphql'. */
   readonly kind: string
   /** Whether this source handles this upstream, or this endpoint address; `env` can say so where the URL cannot. */
   matches(url: URL, env?: Record<string, string | undefined>): boolean

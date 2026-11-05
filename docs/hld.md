@@ -4,8 +4,8 @@ Sosie is a read-only endpoint in front of a data source that fakes every value
 on the way out. An AI agent, the developer's app and their tools connect to it
 as they would to the real source, and get the real shape with fake contents.
 Postgres was its first source, the [MVP](mvp.md); the team's own REST and
-GraphQL APIs came next, and v0.1, the first release, has all three; MySQL followed. More are packages behind the same
-interface. A
+GraphQL APIs came next, and v0.1, the first release, has all three; MySQL followed, then MongoDB. More are packages
+behind the same interface. A
 [plugin](#the-plugin) brings Sosie's MCP server, and how to read through it, to the agent's assistant. The
 [low-level design](lld.md) has the details.
 
@@ -98,6 +98,9 @@ flowchart LR
 | MySQL | Endpoint | Speaks MySQL's protocol on 127.0.0.1: statements as text, several to a query, and prepared statements |
 | MySQL | Guard | MySQL's dialect of sqlparser: allows reads; refuses everything else, and the tables and settings that hold queries, password hashes or where the database is |
 | MySQL | Rewriter and results | Turns back the literals compared with a column, in place; names each result column's field from the database, table and column MySQL reports |
+| MongoDB | Endpoint | Speaks MongoDB's wire protocol on 127.0.0.1, as a standalone server that takes no login; answers the handshake itself |
+| MongoDB | Guard | Allows read commands by name, and a pipeline's stages by name; refuses writes, JavaScript on the server, stages that write or show other sessions, and MongoDB's own databases |
+| MongoDB | Shapes, rewriter and faking | Reads where each value of a result comes from out of the find or the pipeline, stage by stage; turns back fakes compared by equality; fakes each value in its own BSON type |
 | REST | Endpoint and guard | The API's paths on a local HTTP address; `GET` and `HEAD` only, with Sosie's credentials |
 | REST | Fields | Names each value's field from the OpenAPI document, or from where it sits |
 | REST | Links | Points the API's links at Sosie, with nothing real in them, and reads them back |
@@ -120,8 +123,8 @@ same for every source.
 | First, the MVP | Postgres | Most personal data lives in databases, and teams least dare give an agent access to them |
 | Next, also in v0.1 | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
 | v0.2 | MySQL | The other database most teams run; its result metadata names each value's column, as Postgres's does |
-| Next | MongoDB | The most used database after the SQL ones, above all with the JavaScript developers `npx` reaches; its protocol is open, and its commands are documents, so its guard needs no parser |
-| Then | SQL Server, and Azure SQL with it | The database of most .NET and Microsoft teams. Its protocol is open but the largest yet, and its clients encrypt by default |
+| After v0.2 | MongoDB | The most used database after the SQL ones, above all with the JavaScript developers `npx` reaches; its protocol is open, and its commands are documents, so its guard needs no parser |
+| Next | SQL Server, and Azure SQL with it | The database of most .NET and Microsoft teams. Its protocol is open but the largest yet, and its clients encrypt by default |
 | Only on demand, and through MCP | Oracle | Its protocol is closed, and its results do not say which table a column came from, so it would be the one source that apps and tests cannot connect to unchanged |
 | Later | MariaDB; third-party APIs | On demand; many third-party APIs already offer a test mode |
 
@@ -146,8 +149,9 @@ So MongoDB comes first: it fits Sosie best, and gives the guard least room to be
 kind of source as Postgres and MySQL, only bigger. Oracle, if ever, comes as an MCP-only source: `describe` and
 `query`, with node-oracledb's Thin mode upstream. Agents could use it; apps and tests could not.
 
-Each starts with a spike before it is planned in detail. For MongoDB: the handshake with `mongosh`, Compass and
-Mongoose, and how an ObjectId is faked and turned back. For SQL Server: TLS with each driver's defaults, and which
+Each starts with a spike before it is planned in detail. MongoDB's showed the drivers and `mongosh` take a server of
+Sosie's own, and that an ObjectId needs a type of its own in the core, faked in one domain wherever it is held; it is
+built (see the [low-level design](lld.md#mongodb-source)). For SQL Server: TLS with each driver's defaults, and which
 metadata names the column.
 
 ## The plugin
@@ -280,6 +284,12 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
   Where several statements in a query end, and where a prepared statement's parameters are, rest on the parse too,
   each with MySQL's check under it: each piece goes upstream alone, on a session that runs one statement per query,
   and MySQL's count of parameters must be the guard's.
+- **MongoDB says nothing of where a value came from.** Postgres's and MySQL's metadata name each column's table and
+  column; MongoDB's answers name nothing. So every value rests on Sosie's reading of the command: a find's documents
+  are its collection's, and a pipeline is read stage by stage, a stage it does not know refused. What it cannot place
+  (anything a stage computes) is faked by its type, and a key that is not a word is faked as a value. A pipeline read
+  differently from MongoDB could still let a value through in a field Sosie took for another: the login's `read`
+  role and the refused stages are the layers under it.
 - **Driver coverage.** The extended query protocol and binary formats vary
   between drivers. Sosie is tested with `psql`, `node-postgres`, `postgres.js`,
   Drizzle and Prisma 7; its binary format byte for byte against Postgres's

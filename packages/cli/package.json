@@ -9,6 +9,7 @@
     "mcp",
     "postgres",
     "mysql",
+    "mongodb",
     "rest",
     "openapi",
     "graphql",
@@ -47,6 +48,7 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@sosie/core": "^0.2.0",
     "@sosie/graphql": "^0.2.0",
+    "@sosie/mongodb": "^0.2.0",
     "@sosie/mysql": "^0.2.0",
     "@sosie/postgres": "^0.2.0",
     "@sosie/rest": "^0.2.0"

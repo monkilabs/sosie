@@ -106,7 +106,7 @@ describe('sosie', () => {
 
   it('serves describe and query over MCP', async () => {
     const mcp = await mcpClient(home)
-    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'graphql', 'request'])
+    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'find', 'aggregate', 'graphql', 'request'])
     const users = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
     expect(users.entities[0].fields).toContainEqual({ field: 'email', type: 'string', key: 'unique' })
     const result = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT * FROM users u JOIN orders o ON o.user_id = u.id' } })
@@ -169,7 +169,7 @@ describe('sosie, in front of an API', () => {
     const entry = join(home, 'running', `${sosie.child.pid}.json`)
     for (let i = 0; i < 40 && !readFileSync(entry, 'utf8').includes('user.email'); i++) await new Promise((r) => setTimeout(r, 50))
     const mcp = await mcpClient(home)
-    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'graphql', 'request'])
+    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'find', 'aggregate', 'graphql', 'request'])
     const described = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
     expect(described.entities.map((e: { entity: string }) => e.entity)).toEqual(['user'])
     expect(described.entities[0].fields.map((f: { field: string }) => f.field)).toEqual(expect.arrayContaining(['id', 'email', 'name']))
@@ -230,9 +230,9 @@ describe('sosie, when something is wrong', () => {
   })
 
   it('names an upstream it cannot read, without echoing it', () => {
-    const result = run([], { SOSIE_UPSTREAM: 'mongodb://kim:secret@db/app', SOSIE_HOME: home })
+    const result = run([], { SOSIE_UPSTREAM: 'redis://kim:secret@db/0', SOSIE_HOME: home })
     expect(result.status).toBe(2)
-    expect(result.stderr).toContain('Sosie reads postgres:// and mysql:// databases, and http:// or https:// APIs, for now; not mongodb://.')
+    expect(result.stderr).toContain('Sosie reads postgres://, mysql:// and mongodb:// databases, and http:// or https:// APIs, for now; not redis://.')
     expect(result.stderr).not.toContain('secret')
     const notUrl = run([], { SOSIE_UPSTREAM: 'host=db password=secret', SOSIE_HOME: home })
     expect(notUrl.stderr).toContain('The upstream is not a URL.')

@@ -7,6 +7,7 @@ export const DOCS = [
   { group: 'Sources', pages: [
     { path: 'docs/postgres/', file: 'postgres', title: 'Postgres' },
     { path: 'docs/mysql/', file: 'mysql', title: 'MySQL' },
+    { path: 'docs/mongodb/', file: 'mongodb', title: 'MongoDB' },
     { path: 'docs/rest/', file: 'rest', title: 'REST APIs' },
     { path: 'docs/graphql/', file: 'graphql', title: 'GraphQL APIs' },
   ] },

@@ -15,15 +15,17 @@ the hostnames stay on the developer's side. That is the point of it: keep it tha
 
 - **The MCP tools.** Start with `describe`: every running Sosie, its entities, their fields, types, keys and
   references, and which fields pass unchanged. Then `query` for Postgres and MySQL (SQL in the database's own
-  dialect, up to 200 rows per statement), `request` for REST (a `GET` path, or a link Sosie returned) and `graphql` for
-  GraphQL (a query and its variables). When several Sosies run, pass the `address` that `describe` lists. Use the
-  tool of the Sosie's kind: `query` reaches a Postgres or MySQL Sosie only.
+  dialect, up to 200 rows per statement), `find` and `aggregate` for MongoDB (a collection, and a filter or a pipeline
+  as JSON, up to 200 documents), `request` for REST (a `GET` path, or a link Sosie returned) and `graphql` for GraphQL
+  (a query and its variables). When several Sosies run, pass the `address` that `describe` lists. Use the tool of the
+  Sosie's kind: `query` reaches a Postgres or MySQL Sosie only, `find` and `aggregate` a MongoDB one. A MongoDB
+  Sosie learns its fields from the documents it serves, so `describe` lists what it has met so far.
 - **A REST Sosie without an OpenAPI document** learns its fields from the API's answers, so `describe` lists only
   what it has met so far, and may list nothing. `request` the paths the API serves, such as `/users`, and read the
   fields from what comes back.
-- **Its address**, for `psql`, `curl`, the app and its tests: the one Sosie printed when it started, on 127.0.0.1 from
-  port 7674 up, such as `postgres://localhost:7674/app` or `mysql://127.0.0.1:7674/app`. Point code at it as it would
-  point at the real thing.
+- **Its address**, for `psql`, `mongosh`, `curl`, the app and its tests: the one Sosie printed when it started, on
+  127.0.0.1 from port 7674 up, such as `postgres://localhost:7674/app`, `mysql://127.0.0.1:7674/app` or
+  `mongodb://127.0.0.1:7674/app?directConnection=true`. Point code at it as it would point at the real thing.
 
 ## When Sosie is not running
 

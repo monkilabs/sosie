@@ -33,6 +33,8 @@ Start Sosie first, in your own terminal. When none is running, every tool says s
 | --- | --- | --- | --- |
 | `describe` | Every Sosie | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres, MySQL | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice or warning |
+| `find` | MongoDB | `collection`; `filter`, `projection`, `sort`, `limit` (optional), as JSON | Up to 200 documents as Extended JSON |
+| `aggregate` | MongoDB | `collection`, `pipeline` as a JSON array | Up to 200 documents as Extended JSON |
 | `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a `GET` through Sosie, up to 200 items of each list |
 | `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list |
 

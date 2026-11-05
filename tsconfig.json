@@ -6,6 +6,7 @@
       "@sosie/core": ["./packages/core/src/index.ts"],
       "@sosie/postgres": ["./packages/postgres/src/index.ts"],
       "@sosie/mysql": ["./packages/mysql/src/index.ts"],
+      "@sosie/mongodb": ["./packages/mongodb/src/index.ts"],
       "@sosie/rest": ["./packages/rest/src/index.ts"],
       "@sosie/graphql": ["./packages/graphql/src/index.ts"]
     }

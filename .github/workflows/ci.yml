@@ -10,17 +10,18 @@ permissions:
 
 jobs:
   test:
-    name: Node ${{ matrix.node }}, PostgreSQL ${{ matrix.postgres }}, MySQL ${{ matrix.mysql }}
-    runs-on: ubuntu-latest
+    name: Node ${{ matrix.node }}, PostgreSQL ${{ matrix.postgres }}, MySQL ${{ matrix.mysql }}, MongoDB ${{ matrix.mongodb }}
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { node: 26, postgres: 18, mysql: '8.4' }
-          - { node: 26, postgres: 17, mysql: '9' }
-          - { node: 26, postgres: 16, mysql: '8.4' }
-          - { node: 26, postgres: 15, mysql: '8.4' }
-          - { node: 24, postgres: 18, mysql: '8.4' }
+          # MongoDB 8 will not start on Linux 6.19 and later (SERVER-121912): it runs where the kernel is older.
+          - { node: 26, postgres: 18, mysql: '8.4', mongodb: '8.0', os: ubuntu-22.04 }
+          - { node: 26, postgres: 17, mysql: '9', mongodb: '7.0' }
+          - { node: 26, postgres: 16, mysql: '8.4', mongodb: '7.0' }
+          - { node: 26, postgres: 15, mysql: '8.4', mongodb: '6.0' }
+          - { node: 24, postgres: 18, mysql: '8.4', mongodb: '7.0' }
     services:
       postgres:
         image: postgres:${{ matrix.postgres }}
@@ -44,9 +45,18 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 30
+      mongodb:
+        image: mongo:${{ matrix.mongodb }}
+        env:
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: root
+        # No health check: the tests wait for it, as its entrypoint makes the root user after it starts.
+        ports:
+          - 27017:27017
     env:
       SOSIE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       SOSIE_TEST_MYSQL_URL: mysql://root:root@127.0.0.1:3306/
+      SOSIE_TEST_MONGODB_URL: mongodb://root:root@127.0.0.1:27017/?authSource=admin
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

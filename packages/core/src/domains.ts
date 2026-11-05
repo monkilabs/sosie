@@ -37,6 +37,9 @@ export function planner(schema: Schema, rules: Rules): (field: Field) => FieldPl
     if (cached) return cached
     let plan: FieldPlan
     if (passes(field.id)) plan = PASS
+    // An ObjectId names one document of one collection, wherever it is held: every field that holds one shares one
+    // domain, so a reference to a document (orders.userId) is the fake of its _id.
+    else if (field.type.kind === 'objectid') plan = { domain: 'objectid', unique: true, type: field.type }
     else if (field.references && !seen.has(field.references)) {
       const target = known.get(field.references)
       plan = target
