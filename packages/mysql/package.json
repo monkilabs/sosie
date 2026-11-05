@@ -1,6 +1,6 @@
 {
   "name": "@sosie/mysql",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "The MySQL source of Sosie: a read-only MySQL endpoint that fakes every value.",
   "keywords": [
     "mysql",
@@ -42,7 +42,7 @@
   },
   "dependencies": {
     "@guanmingchiu/sqlparser-ts": "0.63.0",
-    "@sosie/core": "^0.1.1",
+    "@sosie/core": "^0.2.0",
     "mysql2": "^3.24.6"
   }
 }

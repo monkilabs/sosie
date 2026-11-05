@@ -1,6 +1,6 @@
 {
   "name": "@sosie/graphql",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "The GraphQL source of Sosie: a local GraphQL endpoint in front of your API that fakes every value.",
   "keywords": [
     "graphql",
@@ -41,7 +41,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@sosie/core": "^0.1.1",
+    "@sosie/core": "^0.2.0",
     "graphql": "^17.0.2"
   }
 }

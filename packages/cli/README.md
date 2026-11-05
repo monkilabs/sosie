@@ -7,10 +7,11 @@
 
 **Your AI agent sees a double of your data. Never the real thing.**
 
-Sosie is a read-only endpoint in front of your database, or your team's own
-REST or GraphQL API, that fakes every value. Your agent, your app and `psql`
-or `curl` query it as they would the real thing; the same real value is always
-the same fake, so joins hold and a value the agent saw finds its record again.
+Sosie is a read-only endpoint in front of your Postgres or MySQL database, or
+your team's own REST or GraphQL API, that fakes every value. Your agent, your
+app and `psql`, `mysql` or `curl` query it as they would the real thing; the
+same real value is always the same fake, so joins hold and a value the agent
+saw finds its record again.
 
 In your own terminal, not the agent's:
 
@@ -19,7 +20,8 @@ export SOSIE_UPSTREAM='postgres://readonly:…@db.internal:5432/app'
 npx @sosie/cli
 ```
 
-For an API, `SOSIE_UPSTREAM` is its address (`https://api.internal/v1`, or
+For MySQL, `SOSIE_UPSTREAM` is a `mysql://` connection string. For an API, it
+is the API's address (`https://api.internal/v1`, or
 `https://api.internal/graphql`), with Sosie's credentials in
 `SOSIE_UPSTREAM_HEADERS`.
 
@@ -30,6 +32,6 @@ For an API, `SOSIE_UPSTREAM` is its address (`https://api.internal/v1`, or
 | `sosie scan <path>…` | Search files and folders for real values; exit 1 if one is found |
 
 Options: `--port` (7674), `--host` (127.0.0.1), `--rules` (`./sosie.yml`),
-`--max-rows` (1000). PostgreSQL 15 to 18; Node 24 or later.
+`--max-rows` (1000). PostgreSQL 15 to 18, MySQL 8.4 and 9; Node 24 or later.
 
 The [docs](https://monkilabs.github.io/sosie/docs/) say more, and the [repository](https://github.com/monkilabs/sosie) has the code.

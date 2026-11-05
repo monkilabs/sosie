@@ -20,8 +20,8 @@ credentials and hostnames stay on your side.
 
 ## Status
 
-Sosie 0.1.1 is on npm as [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). It works end to end in front of
-PostgreSQL 15 to 18, REST APIs and GraphQL APIs, on Node 26 and 24. The [MVP](docs/mvp.md), the
+Sosie 0.2.0 is on npm as [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). It works end to end in front of
+PostgreSQL 15 to 18, MySQL 8.4 and 9, REST APIs and GraphQL APIs, on Node 26 and 24. The [MVP](docs/mvp.md), the
 [high-level design](docs/hld.md) and the [low-level design](docs/lld.md) say what it does and how.
 
 ## How it works
@@ -127,7 +127,7 @@ that writes, is the API's to guard.
 
 ### In front of MySQL
 
-Not in 0.1.1: MySQL comes with the next release. The same command, with a `mysql://` connection string:
+The same command, with a `mysql://` connection string:
 
 ```sh
 export SOSIE_UPSTREAM='mysql://readonly:…@db.internal:3306/app'

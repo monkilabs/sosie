@@ -5,8 +5,6 @@ description: Sosie in front of MySQL 8.4 and 9 - the protocol, which clients wor
 lead: A local endpoint that speaks MySQL's protocol. The mysql client, your app and its tests connect to it unchanged.
 ---
 
-> **Not in 0.1.1.** MySQL comes with the next release of `@sosie/cli`.
-
 ## Start it
 
 ```sh
