@@ -87,7 +87,7 @@ describe('a GraphQL API', () => {
   })
 
   it('is read by introspection, and its types become entities', () => {
-    expect(sosie.connection.summary).toBe('8 types, 17 queries')
+    expect(sosie.connection.summary).toBe('9 types, 18 queries')
     const user = sosie.connection.schema.entities.find((e) => e.id === 'User')!
     expect(user.fields.find((f) => f.name === 'email')).toMatchObject({ format: 'email' })
     expect(sosie.connection.schema.entities.find((e) => e.id === 'Order')!.fields.find((f) => f.name === 'userId')!.references).toBe('User.id')
@@ -337,11 +337,17 @@ describe('a GraphQL API', () => {
     await lenient.close()
   })
 
-  it('sends no field of the mutation type, under a query field either', async () => {
+  it('sends no field of the mutation type, under a query field either, nor through an interface it implements', async () => {
     const before = api.operations.length
-    const { status, body } = await sosie.ask('{ admin { deleteUser(id: "1") } }')
-    expect(status).toBe(400)
-    expect(body.errors[0].extensions.code).toBe('SOSIE_READ_ONLY')
+    for (const query of [
+      '{ admin { deleteUser(id: "1") } }',
+      '{ operator { deleteUser(id: "1") } }',
+      'query { operator { ...O } } fragment O on Operator { deleteUser(id: "1") }',
+    ]) {
+      const { status, body } = await sosie.ask(query)
+      expect(status).toBe(400)
+      expect(body.errors[0].extensions.code).toBe('SOSIE_READ_ONLY')
+    }
     expect(api.operations.slice(before)).toEqual([])
   })
 

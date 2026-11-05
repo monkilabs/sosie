@@ -189,7 +189,7 @@ describe('sosie, in front of a GraphQL API', () => {
     const api = await startGraphql()
     const home = mkdtempSync(join(tmpdir(), 'sosie-cli-gql-'))
     const sosie = await start({ SOSIE_UPSTREAM: api.url, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home }, ['--port', '0'])
-    expect(sosie.stdout()).toMatch(/✓ 127\.0\.0\.1:\d+\/api\/graphql, read-only: 8 types, 17 queries/)
+    expect(sosie.stdout()).toMatch(/✓ 127\.0\.0\.1:\d+\/api\/graphql, read-only: 9 types, 18 queries/)
     expect(sosie.address).toMatch(/^http:\/\/localhost:\d+\/api\/graphql$/)
     const mcp = await mcpClient(home)
     const result = JSON.parse(text(await mcp.callTool({ name: 'graphql', arguments: { query: '{ users { email } }' } })))
@@ -208,7 +208,7 @@ describe('sosie, in front of a GraphQL API', () => {
     for (const [path, more] of [['/graphql/v1', {}], ['/query', { SOSIE_GRAPHQL_SCHEMA: schema }]] as const) {
       const upstream = api.url.replace('/api/graphql', path)
       const sosie = await start({ SOSIE_UPSTREAM: upstream, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home, ...more })
-      expect(sosie.stdout()).toMatch(/read-only: 8 types, 17 queries/)
+      expect(sosie.stdout()).toMatch(/read-only: 9 types, 18 queries/)
       expect(sosie.address).toMatch(new RegExp(`^http://localhost:\\d+${path}$`))
       const answer = await fetch(sosie.address, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: '{ users { email } }' }) })
       const body = (await answer.json()) as { data: { users: unknown[] } }
