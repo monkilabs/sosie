@@ -171,4 +171,5 @@ the name from your own text, at the same place. In a prepared statement a parame
 - Bytes (`BINARY`, `VARBINARY`, a `BLOB`) are never turned back: a binary key cannot be queried by its fake.
 - A `UNION`'s columns are faked by their type, not their field: a total row's label (`SELECT 'All', COUNT(*) … UNION
   ALL …`) is faked with the rest of its column, and the same email has another fake there than in its table.
-- `BIT`, spatial and `VECTOR` values come back as `NULL`.
+- Spatial and `VECTOR` values come back as `NULL`. A `BIT` comes back as as many bits, and a `BIT(1)` flag flipped
+  or not, as a boolean is; a literal compared with one is used as written.

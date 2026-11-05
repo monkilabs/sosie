@@ -193,6 +193,7 @@ export function typeOf(dataType: string, columnType = '', maxLength: number | nu
   if (type === 'datetime' || type === 'timestamp') return { kind: 'datetime' }
   if (type === 'time') return { kind: 'time' }
   if (type === 'json') return { kind: 'json' }
+  if (type === 'bit') return { kind: 'bits', length: Number(/^bit\((\d+)\)/i.exec(columnType)?.[1] ?? 1) }
   if (type === 'enum') return { kind: 'enum', labels: enumLabels(columnType) }
   return { kind: 'unknown' }
 }
@@ -240,6 +241,8 @@ export function typeOfColumn(code: number, charset: number, flags: number, lengt
       return { kind: 'time' }
     case 245: // JSON
       return { kind: 'json' }
+    case 16: // BIT, its length in bits
+      return { kind: 'bits', ...(length > 0 && { length }) }
     case 15: // VARCHAR
     case 249: // TINY_BLOB
     case 250: // MEDIUM_BLOB
@@ -249,7 +252,7 @@ export function typeOfColumn(code: number, charset: number, flags: number, lengt
     case 254: // STRING
       return charset === CHARSET_BINARY ? { kind: 'bytes' } : { kind: 'string' }
     default:
-      // NULL, BIT, GEOMETRY, VECTOR and anything newer: nothing Sosie can fake by type.
+      // NULL, GEOMETRY, VECTOR and anything newer: nothing Sosie can fake by type.
       return { kind: 'unknown' }
   }
 }

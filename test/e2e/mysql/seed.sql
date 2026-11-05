@@ -27,6 +27,9 @@ CREATE TABLE orders (
   total     DECIMAL(10, 2) NOT NULL,
   note      TEXT,
   placed_at DATETIME NOT NULL,
+  -- A flag as Hibernate maps a boolean, and bits.
+  gift      BIT(1) NOT NULL DEFAULT b'0',
+  marks     BIT(12),
   FOREIGN KEY (user_id) REFERENCES users (id)
 );
 
@@ -55,3 +58,4 @@ INSERT INTO orders (user_id, status, total, note, placed_at) VALUES
   (2, 'shipped', 1500.00, NULL, '2025-04-03 12:00:00'),
   (3, 'paid', 42.00, 'gift', '2025-04-04 13:15:00'),
   (3, 'cancelled', 7.00, NULL, '2025-04-05 14:45:00');
+UPDATE orders SET gift = b'1', marks = b'101100111010' WHERE id IN (1, 4);

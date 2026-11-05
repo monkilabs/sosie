@@ -397,7 +397,7 @@ Values a query computes fake in `computed:<type>`.
 | `enum` | A label of the same enum, by a fixed shuffle per domain; the shuffle may leave a label in place |
 | `date`, `datetime` | Shifted by 1 to 365 days, earlier or later, a datetime by a time of day too; the same shift for the same value, in the same format. `infinity` stays |
 | `time` | Shifted by up to a day, wrapping at midnight |
-| `bits` | As many bits, each drawn |
+| `bits` | As many bits, each drawn; a single bit is a flag, flipped or not once per domain, as a boolean is |
 | `interval` | Another duration in the same form: each number another of as many digits, zero only for zero, minutes and seconds under 60 and the months of a year-month under 12; its words and signs kept, so every `IntervalStyle` reads it. `infinity` stays |
 | A value its type's faker cannot change (`''` or `-` in a field without a format, `NaN` and `Infinity` in a number, `infinity` in a date) | Itself: there is nothing in it to fake. A field with a format draws its fake whatever the value, so even `-` in a `city` becomes a city |
 | `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked. Anywhere, a key that holds a value the request turned back from a fake (`quillon`, `quillon_profile`, `QuillonSettings`) is faked, however it looks: an answer that holds it is echoing what the client sent |
@@ -968,8 +968,8 @@ From `information_schema`, every database the login can see but MySQL's own (`in
 primary key, foreign keys, and stored functions. A field's id is `table.column` in the database the connection string
 names, `database.table.column` elsewhere. Types map as `tinyint(1)` to boolean; the integers by size, `year` as a `smallint`; `decimal`,
 `float` and `double` to decimal; `char`, `varchar`, the texts and `set` to string, `char` and `varchar` with their length;
-the binaries and blobs to bytes; `enum` to an enum with its labels; `json`; the dates and times. `bit`, spatial types
-and `vector` have none: their values come back `NULL`.
+the binaries and blobs to bytes; `enum` to an enum with its labels; `json`; the dates and times. `bit` to bits, of its
+length; spatial types and `vector` have none: their values come back `NULL`.
 
 A view's column shares its table's values when it is named as a column of exactly one table the view reads, from
 `VIEW_TABLE_USAGE`. MySQL shows that only to a login with `SHOW VIEW`: without it, a view's column shares the values
@@ -1032,7 +1032,8 @@ its type. A column with no table was computed, and is faked by its protocol type
 catalog, or it is `COUNT(…)` or a literal the client wrote. MySQL names no table for a `UNION`'s columns: each is a
 count or a literal only where every branch has one in its place, and is otherwise faked by type. A column of MySQL's
 data dictionary, a table with no database (`DESCRIBE`, `SHOW INDEX`), passes in a statement that reads only the
-catalog. `SHOW` and `DESCRIBE` pass whole. Bytes are faked in hex and written back as bytes.
+catalog. `SHOW` and `DESCRIBE` pass whole. Bytes are faked in hex and written back as bytes; a `BIT`'s bytes are read as
+its bits, faked, and written back in as many bytes.
 
 MySQL names a computed column by its text as it received it, at most 255 characters, and a derived table's or a CTE's
 column in its `org_name` too: with a real value in it where Sosie turned one back, or wrote a parameter's in. So each
@@ -1067,7 +1068,7 @@ result cut at the cap.
 - `LOCK IN SHARE MODE`, `INTO OUTFILE`, the `MOD` operator and `TABLE t` are refused: the parser does not read them.
 - A literal compared through a function (`LOWER(email) = '…'`), or in a row (`(id, email) = (1, '…')`), is used as
   written.
-- `BIT`, spatial and `VECTOR` values come back `NULL`.
+- Spatial and `VECTOR` values come back `NULL`. A literal compared with a `BIT` column is used as written.
 - A prepared statement's parameter changes a computed value's type where MySQL's would not: `? + 1` with a `DOUBLE`
   of 5 runs as `5 + 1`. What a statement computes is faked by its type all the same.
 - `SHOW CREATE VIEW` and `information_schema.VIEWS` show a view's definition, a literal in it included; so do

@@ -317,6 +317,9 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
       }
       case 'json':
         return yield* json(value, domain, structure)
+      case 'bits':
+        // One bit is a flag: flipped or not, once per domain, as a boolean is, so two values never share a fake.
+        return value === '0' || value === '1' ? flip(value, domain) : scalar(value, type, domain, plan)
       case 'unknown':
         return null
       case 'array':
