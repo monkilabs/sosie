@@ -35,7 +35,7 @@ const NO_ENTITY: Route = { entity: '*', values: new Map() }
 /** A word that looks like a name of the API's: lowercase first, then letters and digits, in kebab, snake or camel case. */
 const NAME = /^[a-z][a-zA-Z0-9]*(?:[-_][a-zA-Z0-9]+)*$/
 /** A word that looks like a collection's name: lowercase, plural. */
-const COLLECTION = /^[a-z]+(?:_[a-z]+)*s$/
+const COLLECTION = /^[a-z]+(?:[_-][a-z]+)*s$/
 /** Query names common enough to be the API's own, whatever its data. */
 const QUERY_WORDS = [
   'page', 'limit', 'offset', 'per_page', 'perPage', 'page_size', 'pageSize', 'size', 'skip', 'take', 'cursor', 'after', 'before',

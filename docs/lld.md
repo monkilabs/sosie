@@ -1325,7 +1325,7 @@ instead, with nothing real in it, so following it reads the record it names:
 
 - A path segment stays as written when it is a word Sosie knows as a name of
   the API's: a fixed segment of an OpenAPI path, a collection's name
-  (lowercase, plural, in snake case: `line_items`, not `line-items`) a client asked for as the last word of a path and the
+  (lowercase, plural, in snake or kebab case: `line_items`, `line-items`) a client asked for as the last word of a path and the
   API answered with a list (`/users`, `/users/87/orders`), or a word of the
   request the answer is for. Another word a client sent (a tenant's slug from
   an app's settings, `/jones/profile`) is never shown to another request. A
@@ -1697,7 +1697,6 @@ source learns. Format domains make a person's email the same fake from the datab
   migrations write, and `db pull` reads the catalogs, which pass.
 - Postgres types without a neutral type come back `NULL`: `xml`, `bit` and `tsvector`. An array of ranges is shaped,
   not faked bound by bound; a range compared in a query is used as written.
-- REST: a collection named in kebab case (`/line-items`) is never learned as the API's word, so links fake it.
 - GraphQL: every refusal from the check threads is tagged `SOSIE_TOO_COSTLY`, `Sosie is stopping.` and a failure of
   graphql-js's own included; and an `operationName` that names no operation is answered as if the document had
   several.

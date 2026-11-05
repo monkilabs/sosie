@@ -187,6 +187,9 @@ export async function startApi({ withOpenapi = false, elsewhere = 'http://203.0.
     if (path === '/acme-industries/profile') return json(200, { self: `${origin}/v1/acme-industries/profile` })
     // One that looks like a collection's name: a surname, plural in shape.
     if (path === '/jones/profile') return json(200, { plan: 'team' })
+    // A collection named in kebab case, and a link to it.
+    if (path === '/line-items') return json(200, [{ id: 1, sku: 'AB-1' }])
+    if (path === '/item-links') return json(200, { items: `${origin}/v1/users/1/line-items` })
     // A path that redirects within the API, to a record of another kind.
     if (path === '/products/featured') {
       res.writeHead(302, { location: '/v1/users/1' })
