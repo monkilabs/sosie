@@ -1,6 +1,6 @@
 {
   "name": "@sosie/rest",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "The REST source of Sosie: a local HTTP endpoint in front of your API that fakes every value.",
   "keywords": [
     "rest",
@@ -42,7 +42,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@sosie/core": "^0.1.1",
+    "@sosie/core": "^0.2.0",
     "yaml": "^2.9.1"
   }
 }

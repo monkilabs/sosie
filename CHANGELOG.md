@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.0, 5 November 2026
+
+MySQL, a source of its own; Postgres in binary, as asyncpg and pgx read it;
+and the plugin's hooks in Copilot CLI and VS Code. All six packages move to
+0.2.0 together; `@sosie/mysql` is new, and `@sosie/cli` depends on it.
 
 - The plugin's hooks run in Copilot CLI and VS Code as well as Claude Code:
   each session starts knowing which Sosies run, and its transcript is scanned
