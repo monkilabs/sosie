@@ -178,6 +178,18 @@ describe('reading through Sosie', () => {
     for (const row of rows) await truth.query('SELECT $1::tstzrange, $2::int4range, $3::datemultirange', [row.during, row.seats, row.spans])
   })
 
+  it('fakes bits as as many bits', async () => {
+    const asText = { getTypeParser: () => (value: string) => value }
+    const text = 'SELECT flags, mask FROM memberships ORDER BY id'
+    const { rows } = await client.query({ text, types: asText })
+    const { rows: real } = await truth.query({ text, types: asText })
+    for (const [i, row] of rows.entries()) {
+      expect(row.flags).toMatch(/^[01]{4}$/)
+      expect(row.mask).toMatch(new RegExp(`^[01]{${real[i]!.mask.length}}$`))
+    }
+    expect(rows[0]!.mask).not.toBe(real[0]!.mask)
+  })
+
   it('fakes a setting a function set from a row, as Postgres reports it', async () => {
     const c = await sosie.client()
     const reported: Record<string, string> = {}

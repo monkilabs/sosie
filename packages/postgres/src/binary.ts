@@ -393,6 +393,25 @@ const uuid: Codec = {
   },
 }
 
+/** bit and varbit: the number of bits, then the bits, eight to a byte, the first the highest. */
+const bits: Codec = {
+  encode(t) {
+    if (!/^[01]*$/.test(t)) fail('bits', t)
+    const out = Buffer.alloc(4 + Math.ceil(t.length / 8))
+    out.writeInt32BE(t.length, 0)
+    for (let i = 0; i < t.length; i++) if (t[i] === '1') out[4 + (i >> 3)]! |= 0x80 >> (i & 7)
+    return out
+  },
+  decode(b) {
+    if (b.length < 4) fail('bits', b.toString('hex'))
+    const n = b.readInt32BE(0)
+    if (n < 0 || Math.ceil(n / 8) !== b.length - 4) fail('bits', b.toString('hex'))
+    let text = ''
+    for (let i = 0; i < n; i++) text += b[4 + (i >> 3)]! & (0x80 >> (i & 7)) ? '1' : '0'
+    return text
+  },
+}
+
 /** jsonb: a version byte, then its text. */
 const jsonb: Codec = {
   encode: (t) => Buffer.concat([Buffer.from([1]), Buffer.from(t, 'utf8')]),
@@ -523,6 +542,8 @@ const SCALARS: Record<string, Codec> = {
   timestamptz_send: timestamp(true),
   interval_send: interval,
   uuid_send: uuid,
+  bit_send: bits,
+  varbit_send: bits,
   inet_send: network(false),
   cidr_send: network(true),
   pg_lsn_send: pgLsn,

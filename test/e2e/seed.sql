@@ -50,7 +50,9 @@ CREATE TABLE memberships (
   lasts   interval,
   during  tstzrange,
   seats   int4range,
-  spans   datemultirange
+  spans   datemultirange,
+  flags   bit(4),
+  mask    varbit
 );
 
 CREATE VIEW active_users AS SELECT id, email, full_name FROM users WHERE active;
@@ -105,8 +107,8 @@ FROM generate_series(3, 40) g;
 
 INSERT INTO memberships VALUES
   (1, 1, '7739182046', 'admin', '{Quillon,vip}', '{admin,viewer}', '1 year 2 mons 3 days 04:05:06.5',
-   '[2025-03-14 09:00:00+01,2025-03-15 09:00:00+01)', '[7739,7745)', '{[2025-01-01,2025-02-01),[2025-03-01,2025-04-01)}'),
-  (2, 2, 'ZO-5512', 'editor', '{Zephyrine}', '{editor}', '-00:45:00', '(,2025-01-01 00:00:00+00]', 'empty', '{}');
+   '[2025-03-14 09:00:00+01,2025-03-15 09:00:00+01)', '[7739,7745)', '{[2025-01-01,2025-02-01),[2025-03-01,2025-04-01)}', B'1011', B'10110011101'),
+  (2, 2, 'ZO-5512', 'editor', '{Zephyrine}', '{editor}', '-00:45:00', '(,2025-01-01 00:00:00+00]', 'empty', '{}', B'0000', B'');
 
 -- A json column keyed by data, as profiles keyed by name or key are.
 UPDATE users SET profile = '{"Zephyrine": "owner", "friends": {"Orrowmoor": 1, "sk_live_Zz8yYx7wWv6u": 2}}' WHERE id = 3;

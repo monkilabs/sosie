@@ -4,7 +4,7 @@ import { generate, text, type Format } from './formats.js'
 import { matchCase, shape, type Random } from './random.js'
 
 /** Types whose fakes are drawn and stored; booleans, enums, json and arrays are handled around them. */
-export type ScalarKind = 'string' | 'integer' | 'decimal' | 'uuid' | 'date' | 'datetime' | 'time' | 'interval' | 'ip' | 'bytes' | 'objectid'
+export type ScalarKind = 'string' | 'integer' | 'decimal' | 'uuid' | 'date' | 'datetime' | 'time' | 'interval' | 'bits' | 'ip' | 'bytes' | 'objectid'
 
 export interface Draw {
   random: Random
@@ -44,6 +44,9 @@ export function fakeScalar(
       return shiftTime(real, draw.random)
     case 'interval':
       return interval(real, draw.random)
+    case 'bits':
+      // As many bits, each drawn: text of other characters is shaped.
+      return /^[01]*$/.test(real) ? real.replace(/[01]/g, () => (draw.random.int(0, 1) ? '1' : '0')) : shape(real, draw.random)
     case 'ip':
       return ip(real, draw.random)
     case 'bytes':
