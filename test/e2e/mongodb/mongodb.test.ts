@@ -63,6 +63,15 @@ describe('reading through Sosie', () => {
     expect(first.address).toEqual({ city: expect.any(String), street: expect.any(String) })
   })
 
+  it('fakes a field a nested projection names, as a dotted one', async () => {
+    const dotted = await all('users', {}, { projection: { 'address.city': 1 }, sort: { _id: 1 } })
+    const nested = await all('users', {}, { projection: { address: { city: 1 } }, sort: { _id: 1 } })
+    const projected = await aggregate('users', [{ $sort: { _id: 1 } }, { $project: { address: { city: true } } }])
+    expect(nested).toEqual(dotted)
+    expect(projected).toEqual(dotted)
+    expect(canariesIn(JSON.stringify([nested, projected]))).toEqual([])
+  })
+
   it('keeps BSON’s numbers as they are: an Int32 an Int32, a Double a Double', async () => {
     const raw = await db.collection('users').find({}, { promoteValues: false, sort: { _id: 1 }, limit: 2 }).toArray()
     keep(raw)

@@ -156,14 +156,28 @@ function accumulator(spec: unknown, current: Shape): Shape {
   }
 }
 
+/**
+ * A projection's entries, a nested one as dotted paths, as MongoDB reads it: { address: { city: 1 } } is
+ * 'address.city': 1, an inclusion, not a document holding the literal 1.
+ */
+function flatten(spec: Document, prefix = ''): [string, unknown][] {
+  const out: [string, unknown][] = []
+  for (const [key, value] of Object.entries(spec)) {
+    const nested = isOperator(value) && Object.keys(value).length > 0 && !Object.keys(value).some((k) => k.startsWith('$'))
+    if (nested) out.push(...flatten(value, `${prefix}${key}.`))
+    else out.push([`${prefix}${key}`, value])
+  }
+  return out
+}
+
 /** A projection's shape: inclusion builds a document of what it names, exclusion leaves the rest as it was. */
 export function projection(spec: Document | undefined, current: Shape): Shape {
   if (!spec || !Object.keys(spec).length) return current
-  const entries = Object.entries(spec)
+  const entries = flatten(spec)
   const inclusion = entries.some(([k, v]) => k !== '_id' && (isOperator(v) || typeof v === 'string' || truthy(v) || Array.isArray(v)))
   if (!inclusion) return current
   const out: [string, Shape][] = []
-  if (!('_id' in spec)) out.push(['_id', child(current, '_id')])
+  if (!entries.some(([key]) => key === '_id')) out.push(['_id', child(current, '_id')])
   for (const [key, value] of entries) {
     if (isOperator(value) && Object.keys(value).some((k) => ['$slice', '$elemMatch'].includes(k))) out.push([key, at(current, key)])
     else if (isOperator(value) || typeof value === 'string' || Array.isArray(value)) out.push([key, expression(value, current)])

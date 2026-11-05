@@ -25,6 +25,11 @@ describe('where each value of a result comes from', () => {
     expect(where(projection({ e: '$email', up: { $toUpper: '$email' }, w: { $literal: 'x' } }, users), 'e')).toBe('users.email')
     expect(where(projection({ up: { $toUpper: '$email' } }, users), 'up')).toBe('computed')
     expect(where(projection({ email: 0 }, users), 'phone')).toBe('users.phone')
+    // Nested, as MongoDB reads it: an inclusion of address.city, not a document holding the literal 1.
+    expect(where(projection({ address: { city: 1 } }, users), 'address.city')).toBe('users.address.city')
+    expect(where(projection({ address: { city: true, zip: 0 } }, users), 'address.city')).toBe('users.address.city')
+    expect(where(projection({ address: { city: 0 } }, users), 'address.street')).toBe('users.address.street')
+    expect(where(pipeline([{ $project: { address: { c: '$address.city' } } }], users, same), 'address.c')).toBe('users.address.city')
   })
 
   it('a key a stage did not name is what it was before: a $lookup keeps the document’s own fields', () => {
