@@ -7,14 +7,21 @@
 import { spawn } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { hasStore, input, root, scanning, scanPaths, sessionFiles } from './sosie.mjs'
+import { addScan, copilotCli, hasStore, input, root, scanning, scanPaths, sessionFiles } from './sosie.mjs'
 
 const event = await input()
 // A subagent's turn ends inside its session: the session's own stop scans what it wrote.
 const subagent = event.hook_event_name === 'SubagentStop'
-const paths = sessionFiles(event)
-if (!subagent && paths.length && hasStore()) {
+if (!subagent && hasStore()) {
+  const paths = sessionFiles(event)
   const scan = scanPaths(event.session_id ?? Date.now())
-  if (scanning(scan)) writeFileSync(scan.again, '')
-  else spawn(process.execPath, [join(root, 'hooks', 'scan.mjs'), scan.out, ...paths], { detached: true, stdio: 'ignore' }).unref()
+  if (paths.length) {
+    if (scanning(scan)) writeFileSync(scan.again, '')
+    else {
+      spawn(process.execPath, [join(root, 'hooks', 'scan.mjs'), scan.out, ...paths], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+    }
+  } else if (copilotCli && event.session_id) {
+    // Copilot CLI names only the session: one Sosie cannot find is said, not skipped.
+    addScan(scan.out, { transcript: `Copilot CLI's session ${event.session_id}`, failed: 'Sosie could not find where Copilot CLI keeps it' })
+  }
 }

@@ -28,6 +28,7 @@ format:
 | Source | A field's id |
 | --- | --- |
 | Postgres | `table.column`, or `schema.table.column` outside `public` |
+| MySQL | `table.column`, or `database.table.column` outside the database the connection string names |
 | REST, with a document | `Schema.property`, nested properties dotted: `User.address.city` |
 | REST, without one | The entity its path names, singular, and the key: `user.email` |
 | GraphQL | `Type.field`: `User.email` |

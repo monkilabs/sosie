@@ -17,12 +17,14 @@ the hostnames stay on the developer's side. That is the point of it: keep it tha
   references, and which fields pass unchanged. Then `query` for Postgres (SQL, up to 200 rows per statement), `request`
   for REST (a `GET` path, or a link Sosie returned) and `graphql` for GraphQL (a query and its variables). When several
   Sosies of a kind run, pass the `address` that `describe` lists. Use the tool of the Sosie's kind: `query` reaches
-  only a Postgres Sosie.
+  only a Postgres Sosie. A MySQL Sosie has no tool of its own yet: read it through its address, with the `mysql`
+  client (`mysql --protocol=tcp -h 127.0.0.1 -P 7674 app`) or the app, one statement per query, as text.
 - **A REST Sosie without an OpenAPI document** learns its fields from the API's answers, so `describe` lists only
   what it has met so far, and may list nothing. `request` the paths the API serves, such as `/users`, and read the
   fields from what comes back.
 - **Its address**, for `psql`, `curl`, the app and its tests: the one Sosie printed when it started, on 127.0.0.1 from
-  port 7674 up, such as `postgres://localhost:7674/app`. Point code at it as it would point at the real thing.
+  port 7674 up, such as `postgres://localhost:7674/app` or `mysql://127.0.0.1:7674/app`. Point code at it as it would
+  point at the real thing.
 
 ## When Sosie is not running
 

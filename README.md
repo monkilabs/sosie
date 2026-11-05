@@ -125,7 +125,27 @@ from `SOSIE_GRAPHQL_SCHEMA`, answers the client's introspection from it, and
 sends only queries on, never mutations. A query field that writes, like a `GET`
 that writes, is the API's to guard.
 
-Postgres, REST and GraphQL are the first sources. More databases come next, each
+### In front of MySQL
+
+Not in 0.1.1: MySQL comes with the next release. The same command, with a `mysql://` connection string:
+
+```sh
+export SOSIE_UPSTREAM='mysql://readonly:…@db.internal:3306/app'
+npx @sosie/cli
+```
+
+```
+  ✓ db.internal:3306/app, read-only: 42 tables, 3 views
+  ✓ Every value is faked
+
+  Your agent, app and mysql:  mysql://127.0.0.1:7674/app
+```
+
+The `mysql` client and your app read through it, statements as text; prepared
+statements come later. MySQL 8.4 and 9 are tested. Give the login `SELECT` and
+`SHOW VIEW`, so a view's columns share their tables' fakes.
+
+Postgres, MySQL, REST and GraphQL are the first sources. More databases come next, each
 a package behind the same interface.
 
 ### In your assistant

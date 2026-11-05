@@ -3,7 +3,7 @@
 // when there is nothing to say. Claude Code, Copilot CLI and VS Code run it.
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { copilotCli, input, running, takeScans } from './sosie.mjs'
+import { copilotCli, input, pendingScans, reported, running } from './sosie.mjs'
 
 const event = await input()
 // VS Code runs a session's start hooks when a subagent starts too: the report is the developer's, not a subagent's.
@@ -27,7 +27,7 @@ if (sosies.length) {
 }
 
 let found = false
-for (const scan of subagent ? [] : takeScans()) {
+for (const scan of subagent ? [] : pendingScans()) {
   if (scan.findings?.length) {
     found = true
     const n = scan.findings.length
@@ -36,8 +36,14 @@ for (const scan of subagent ? [] : takeScans()) {
       .map((f) => `  ${f.file === scan.transcript ? '' : `${f.file}, `}line ${f.line}, from ${f.field}`)
     if (n > 5) lines.push(`  and ${n - 5} more`)
     user.push(`Sosie found ${n === 1 ? 'a real value' : `${n} real values`} in a session's transcript, ${scan.transcript}:\n${lines.join('\n')}`)
-  } else if (scan.failed) {
-    user.push(`Sosie could not scan a session's transcript, ${scan.transcript}: ${scan.failed}`)
+  }
+  if (scan.failed) {
+    // A scan that fails keeps what earlier scans of the session found: its turns since are the ones not scanned.
+    user.push(
+      scan.findings?.length
+        ? `Sosie could not scan it again after a later turn: ${scan.failed}`
+        : `Sosie could not scan a session's transcript, ${scan.transcript}: ${scan.failed}`,
+    )
   }
 }
 if (user.length) {
@@ -47,11 +53,13 @@ if (user.length) {
   )
 }
 
+// What scans found is told once it is written out, not before: a start that fails on the way leaves it for the next.
+const told = () => subagent || reported()
 if (context.length) {
   const additionalContext = context.join('\n\n')
   // Copilot CLI reads the context at the top level; Claude Code and VS Code inside hookSpecificOutput.
   const output = copilotCli
     ? { additionalContext }
     : { ...(user.length && { systemMessage: user.join('\n') }), hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext } }
-  process.stdout.write(JSON.stringify(output) + '\n')
-}
+  process.stdout.write(JSON.stringify(output) + '\n', (error) => error || told())
+} else told()

@@ -68,7 +68,8 @@ In Claude Code, Copilot CLI and VS Code it also hooks into each session:
 - **When a session ends**, it runs `sosie scan` in the background on everything the assistant keeps of the session: in
   Claude Code the transcript, its subagents' transcripts and long tool results; in Copilot CLI the session's folder.
   VS Code has no session end: it scans after each turn, one scan at a time. If a real value reached the session, the
-  next session to start tells you the file, the line and the field, once, and the agent is told not to open them.
+  next session to start tells you the file, the line and the field, once, and the agent is told not to open them. A
+  scan that fails is reported too, and keeps what earlier scans of the session found.
 
 Cursor and Codex load the MCP server and the skill, but run no hooks from a plugin in this format: their transcripts
 are for `sosie scan` by hand.

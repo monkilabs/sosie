@@ -1,8 +1,8 @@
 // What the plugin's hooks read of Sosie, the files it writes for `sosie mcp` and its stores, never a value; and where
 // they keep what a scan found until a session reports it. Claude Code, Copilot CLI and VS Code run them alike.
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** Where Sosie keeps its stores, as `sosie` reads it: $SOSIE_HOME, or ~/.sosie. */
@@ -71,8 +71,8 @@ export function hasStore() {
 
 /**
  * What to scan of a session: its transcript, and the folder beside it, named the same, where Claude Code keeps its
- * subagents' transcripts and long tool results. Copilot CLI says where neither is: its session lives in
- * $COPILOT_HOME (or ~/.copilot) under session-state/, as a folder of its id, or a file in older versions.
+ * subagents' transcripts and long tool results. Copilot CLI says where neither is: its session lives in its own
+ * folder under session-state/, as a folder of its id, or a file in older versions.
  */
 export function sessionFiles({ session_id: session, transcript_path: transcript }, env = process.env) {
   if (transcript) {
@@ -80,8 +80,28 @@ export function sessionFiles({ session_id: session, transcript_path: transcript 
     return [transcript, ...(beside !== transcript ? [beside] : [])].filter((p) => existsSync(p))
   }
   if (!env.COPILOT_PLUGIN_DATA || !/^[\w-]+$/.test(String(session ?? ''))) return []
-  const state = join(env.COPILOT_HOME || join(homedir(), '.copilot'), 'session-state')
-  return [join(state, session), join(state, `${session}.jsonl`)].filter((p) => existsSync(p))
+  for (const folder of copilotFolders(env)) {
+    const state = join(folder, 'session-state')
+    const found = [join(state, session), join(state, `${session}.jsonl`)].filter((p) => existsSync(p))
+    if (found.length) return found
+  }
+  return []
+}
+
+/**
+ * Where Copilot CLI may keep its sessions. It keeps a plugin's data in <its folder>/plugin-data/<marketplace>/<plugin>,
+ * its folder being the one --config-dir names, or $COPILOT_HOME, or ~/.copilot; failing that, the last two.
+ */
+function copilotFolders(env) {
+  const folders = []
+  for (let dir = env.COPILOT_PLUGIN_DATA; dir && dirname(dir) !== dir; dir = dirname(dir)) {
+    if (basename(dir) === 'plugin-data') {
+      folders.push(dirname(dir))
+      break
+    }
+  }
+  folders.push(env.COPILOT_HOME || join(homedir(), '.copilot'))
+  return [...new Set(folders)]
 }
 
 /** A session's id, safe as a file name. */
@@ -93,57 +113,129 @@ function folder(name) {
   return dir
 }
 
+/** A scan runs for 10 minutes at most: a lock older than that was left by one that was killed. */
+export const SCAN_TIMEOUT = 10 * 60_000
+
 /** Where a session's scan keeps what it found, and its lock: one scan of a session at a time. */
 export function scanPaths(session) {
-  const dir = folder('scans')
-  const base = join(dir, named(session))
+  return pathsOf(join(folder('scans'), named(session)))
+}
+
+/** A scan's files, from the one it keeps its findings in: `scan.mjs` is given that, and finds its lock beside it. */
+export function pathsOf(file) {
+  const base = file.replace(/\.json$/, '')
   return { out: `${base}.json`, lock: `${base}.lock`, again: `${base}.again` }
 }
 
 /** Whether a scan of this session is running now: one that ends a turn while it does asks it to run once more. */
 export function scanning(paths) {
   try {
-    return alive(Number(readFileSync(paths.lock, 'utf8')))
+    const pid = Number(readFileSync(paths.lock, 'utf8'))
+    // A scan touches its lock each time it runs: an older one was killed, and its pid may be another process's now.
+    if (!Number.isInteger(pid) || pid <= 0 || Date.now() - statSync(paths.lock).mtimeMs > SCAN_TIMEOUT + 60_000) return false
+    // The scan runs as this user: a pid this user cannot signal is not the scan's.
+    process.kill(pid, 0)
+    return true
   } catch {
     return false
   }
 }
 
+/** A file written whole: to a draft beside it, then renamed, so it is never read half written. */
 export function keep(file, result) {
-  writeFileSync(file, JSON.stringify(result, null, 2) + '\n', { mode: 0o600 })
+  const draft = `${file}.${process.pid}.draft`
+  writeFileSync(draft, JSON.stringify(result, null, 2) + '\n', { mode: 0o600 })
+  renameSync(draft, file)
+}
+
+function textOf(file) {
+  try {
+    return readFileSync(file, 'utf8')
+  } catch {
+    return undefined
+  }
+}
+
+function read(file) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    return undefined
+  }
+}
+
+const key = (f) => `${f.file}:${f.line}:${f.field}`
+
+/**
+ * What one scan of a session found, added to what earlier scans of it found that no session has reported yet: a scan
+ * that fails, or finds less, never drops a finding. A scan that fails says so beside them; a clean one ends that.
+ */
+export function addScan(out, { transcript, findings = [], failed }) {
+  const all = [...(read(out)?.findings ?? [])]
+  for (const f of findings) if (!all.some((k) => key(k) === key(f))) all.push(f)
+  if (all.length || failed) keep(out, { transcript, ...(all.length && { findings: all }), ...(failed && { failed }) })
+  else rmSync(out, { force: true })
 }
 
 const MONTH = 30 * 24 * 3600 * 1000
 
+/** What `pendingScans` read, for `reported` to mark told. */
+let taken = []
+
 /**
  * What scans found since sessions last reported, each finding once: a session scanned after each turn (VS Code)
- * finds the same lines again, and only lines not told yet are reported.
+ * finds the same lines again, and only lines not told yet are reported. Nothing is marked told until `reported()`,
+ * so a session start that fails on the way leaves them for the next.
  */
-export function takeScans() {
+export function pendingScans() {
+  taken = []
   const scans = join(data, 'scans')
   if (!existsSync(scans)) return []
   const seenDir = folder('seen')
   for (const name of readdirSync(seenDir)) {
-    const file = join(seenDir, name)
-    if (Date.now() - statSync(file).mtimeMs > MONTH) rmSync(file, { force: true })
+    try {
+      const file = join(seenDir, name)
+      if (Date.now() - statSync(file).mtimeMs > MONTH) rmSync(file, { force: true })
+    } catch {
+      // Another session start forgot it first.
+    }
   }
   const results = []
   for (const name of readdirSync(scans).filter((f) => f.endsWith('.json'))) {
     const file = join(scans, name)
+    const text = textOf(file)
     let result
     try {
-      result = JSON.parse(readFileSync(file, 'utf8'))
+      result = JSON.parse(text)
     } catch {
-      continue // still being written
+      continue // taken by another session start
     }
-    rmSync(file, { force: true })
     const seenFile = join(seenDir, name)
-    const seen = new Set(existsSync(seenFile) ? JSON.parse(readFileSync(seenFile, 'utf8')) : [])
-    const key = (f) => `${f.file}:${f.line}:${f.field}`
-    const fresh = (result.findings ?? []).filter((f) => !seen.has(key(f)))
-    if (result.findings?.length) keep(seenFile, [...seen, ...fresh.map(key)])
-    if (fresh.length) results.push({ ...result, findings: fresh })
-    else if (result.failed) results.push(result)
+    // A seen file that cannot be read tells again what it held, rather than nothing.
+    const seen = read(seenFile)
+    const told = new Set(Array.isArray(seen) ? seen : [])
+    const findings = result.findings ?? []
+    taken.push({ file, text, seenFile, told, findings })
+    const fresh = findings.filter((f) => !told.has(key(f)))
+    if (fresh.length || result.failed) {
+      results.push({ transcript: result.transcript, ...(fresh.length && { findings: fresh }), ...(result.failed && { failed: result.failed }) })
+    }
   }
+  return results
+}
+
+/** Marks what `pendingScans` read as told. A result a scan added to since stays, for what it added. */
+export function reported() {
+  for (const { file, text, seenFile, told, findings } of taken) {
+    if (findings.length) keep(seenFile, [...new Set([...told, ...findings.map(key)])])
+    if (textOf(file) === text) rmSync(file, { force: true })
+  }
+  taken = []
+}
+
+/** What scans found, marked told at once. */
+export function takeScans() {
+  const results = pendingScans()
+  reported()
   return results
 }

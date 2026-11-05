@@ -89,6 +89,7 @@ Booleans, enums and bytes are not stored: their fakes come from the key.
 | Source | Clients speak | Reads only | Names each value from |
 | --- | --- | --- | --- |
 | [Postgres](../postgres/) | The Postgres wire protocol | Statements are parsed; only reads run, on a read-only session | The table and column Postgres reports for each result column |
+| [MySQL](../mysql/) | MySQL's protocol, statements as text | Statements are parsed as MySQL reads them; only reads run, on a read-only session | The database, table and column MySQL reports for each result column |
 | [REST](../rest/) | HTTP, at the API's own paths | `GET` and `HEAD` only | The OpenAPI document, or where each value sits |
 | [GraphQL](../graphql/) | GraphQL over HTTP | Queries only, checked against the schema | The schema, by introspection or a file |
 

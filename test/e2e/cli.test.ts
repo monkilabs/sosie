@@ -230,9 +230,9 @@ describe('sosie, when something is wrong', () => {
   })
 
   it('names an upstream it cannot read, without echoing it', () => {
-    const result = run([], { SOSIE_UPSTREAM: 'mysql://kim:secret@db/app', SOSIE_HOME: home })
+    const result = run([], { SOSIE_UPSTREAM: 'mongodb://kim:secret@db/app', SOSIE_HOME: home })
     expect(result.status).toBe(2)
-    expect(result.stderr).toContain('Sosie reads postgres:// databases and http:// or https:// APIs for now, not mysql://.')
+    expect(result.stderr).toContain('Sosie reads postgres:// and mysql:// databases, and http:// or https:// APIs, for now; not mongodb://.')
     expect(result.stderr).not.toContain('secret')
     const notUrl = run([], { SOSIE_UPSTREAM: 'host=db password=secret', SOSIE_HOME: home })
     expect(notUrl.stderr).toContain('The upstream is not a URL.')
