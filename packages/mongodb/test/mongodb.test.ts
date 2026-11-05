@@ -181,6 +181,16 @@ describe('BSON values as the core fakes them', () => {
     expect(out.ref.fields).toEqual({ note: 'f(real)' })
     expect(met).toContain('users.email')
   })
+
+  it('fakes a key a stage made from values, keeping the keys the client wrote and MongoDB’s own', () => {
+    const faker = { value: (v: string) => `key-${v}`, computed: (v: string) => v }
+    const ctx = { faker: faker as never, scope: undefined, sent: '{"aggregate":"users","pipeline":[{"$project":{"total":1}}]}', met: () => {} }
+    const computed: Shape = { kind: 'computed' }
+    const out = fakeDocument({ admin: 1, total: 2, k: 'x', v: 3 }, computed, ctx)
+    expect(Object.keys(out)).toEqual(['key-admin', 'total', 'k', 'v'])
+    // In a collection's own documents, a key that looks like a word is a field's name.
+    expect(Object.keys(fakeDocument({ admin: 1 }, collection('users'), ctx))).toEqual(['admin'])
+  })
 })
 
 describe('the wire protocol', () => {

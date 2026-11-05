@@ -111,15 +111,38 @@ function fakeValue(value: unknown, shape: Shape, ctx: FakeContext): unknown {
   if (typeof value === 'object' && !('_bsontype' in value) && !(value instanceof Date)) {
     const out: Document = {}
     for (const [key, v] of Object.entries(value as Document)) {
-      // A key the command built, or that looks like a word, is structure; any other is a value, faked.
-      const built = shape.kind === 'doc' && shape.fields.has(key)
-      const structural = built || (structuralKey(key) && !ctx.scope?.turnedBack(key)) || key === '_id'
+      const structural = key === '_id' || (!ctx.scope?.turnedBack(key) && keyIsStructure(shape, key, ctx.sent))
       const name = structural ? key : String(ctx.faker.value(key, MAP_KEY, ctx.scope))
       Object.defineProperty(out, name, { value: fakeValue(v, child(shape, structural ? key : '*'), ctx), enumerable: true, writable: true, configurable: true })
     }
     return out
   }
   return fakeLeaf(value, leaf(shape), ctx)
+}
+
+/** Keys MongoDB's own operators give their results: $objectToArray's, $regexFind's, $dateToParts'. */
+const OPERATOR_KEYS = new Set([
+  'k', 'v', 'match', 'idx', 'captures', 'year', 'month', 'day', 'hour', 'minute', 'second', 'millisecond', 'isoWeekYear',
+  'isoWeek', 'isoDayOfWeek',
+])
+
+/**
+ * Whether a key is structure, not a value. A key the command built is. In a collection's documents, a key that looks
+ * like a word is a field's name. In what a stage computed, a key may be made from values ($arrayToObject of a
+ * group's roles): it stays only when the client wrote it, or MongoDB's own operators give it, as in JSON a SQL query
+ * builds. Of several possible shapes ($unionWith), every one must agree.
+ */
+function keyIsStructure(shape: Shape, key: string, sent: string): boolean {
+  switch (shape.kind) {
+    case 'doc':
+      return shape.fields.has(key) || keyIsStructure(shape.rest, key, sent)
+    case 'field':
+      return structuralKey(key)
+    case 'either':
+      return shape.of.every((s) => keyIsStructure(s, key, sent))
+    default:
+      return OPERATOR_KEYS.has(key) || sent.includes(JSON.stringify(key))
+  }
 }
 
 function fakeLeaf(value: unknown, shape: Shape, ctx: FakeContext): unknown {

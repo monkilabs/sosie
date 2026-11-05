@@ -72,6 +72,19 @@ describe('reading through Sosie', () => {
     expect(canariesIn(JSON.stringify([nested, projected]))).toEqual([])
   })
 
+  it('fakes the keys a pipeline makes from values', async () => {
+    const [byRole] = await aggregate('users', [
+      { $group: { _id: '$role', n: { $sum: 1 } } },
+      { $group: { _id: null, roles: { $push: { k: '$_id', v: '$n' } } } },
+      { $replaceWith: { $arrayToObject: '$roles' } },
+    ])
+    expect(Object.keys(byRole!).sort()).not.toEqual(['admin', 'editor', 'viewer'])
+    expect(Object.keys(byRole!).filter((k) => ['admin', 'editor', 'viewer'].includes(k))).toEqual([])
+    // MongoDB's own keys stay.
+    const [pairs] = await aggregate('users', [{ $limit: 1 }, { $project: { _id: 0, p: { $objectToArray: '$address' } } }])
+    expect(Object.keys(pairs!.p[0])).toEqual(['k', 'v'])
+  })
+
   it('keeps BSON’s numbers as they are: an Int32 an Int32, a Double a Double', async () => {
     const raw = await db.collection('users').find({}, { promoteValues: false, sort: { _id: 1 }, limit: 2 }).toArray()
     keep(raw)
