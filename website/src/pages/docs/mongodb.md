@@ -5,6 +5,9 @@ description: Sosie in front of MongoDB 6.0 to 8.0 - the protocol, which clients 
 lead: A local endpoint that speaks MongoDB's wire protocol. mongosh, the drivers, Mongoose and your app connect to it unchanged.
 ---
 
+> **Not in 0.2.0.** MongoDB comes with the next release of `@sosie/cli`; until then, `npx @sosie/cli` is 0.2.0, which
+> does not read `mongodb://`.
+
 ## Start it
 
 ```sh
@@ -37,9 +40,12 @@ or is an administrator.
 db.getSiblingDB('app').createUser({ user: 'sosie_reader', pwd: '…', roles: [{ role: 'read', db: 'app' }] })
 ```
 
+Sosie reads the database's collections and their validators when it starts, which takes `listCollections` on the
+database, as the `read` role has: a login with privileges on single collections only cannot start it.
+
 ## Clients
 
-Tested with mongosh and the Node.js driver, which Mongoose uses. Sosie answers the handshake itself, as a standalone
+Tested with the Node.js driver, which Mongoose uses, and checked by hand with mongosh 2. Sosie answers the handshake itself, as a standalone
 server, with the upstream's version, and runs each read upstream in a session of its own. It offers no TLS and no
 compression on its own address: it is on your machine. A client's sessions are taken; transactions are refused.
 
@@ -54,7 +60,7 @@ and a limit) and `aggregate` (a collection and a pipeline). Each takes JSON or E
 Commands are documents, so Sosie needs no parser: it allows each by name, and reads each pipeline stage by stage.
 
 - **Allowed:** `find`, `aggregate`, `count`, `distinct`, `getMore` and `killCursors`; `listCollections`,
-  `listIndexes`, `listDatabases` and `dbStats`, which show the schema and sizes.
+  `listIndexes`, `listDatabases`, `listSearchIndexes` and `dbStats`, which show the schema and sizes.
 - **Refused:** every command that writes or changes the server, with `This command changes data. Sosie is
   read-only.`; `explain`, whose plan would print the real values Sosie puts in your filter; `mapReduce`; transactions.
 - **Refused databases and collections:** `admin` (users and their password hashes), `local` (the oplog, every write
@@ -62,20 +68,22 @@ Commands are documents, so Sosie needs no parser: it allows each by name, and re
 - **Refused stages:** `$out` and `$merge`, which write; `$currentOp`, `$listSessions`, `$planCacheStats` and
   `$changeStream`, which show other sessions' queries or every change; `$collStats` and `$indexStats`, which say where
   the server is; and any stage Sosie does not know the shape of.
-- **No JavaScript on the server:** `$where`, `$function`, `$accumulator`, and code in a document: what it computes
-  cannot be read.
+- **No JavaScript on the server:** `$where`, `$function`, `$accumulator`, and code in a document, in a filter, a
+  projection, a pipeline or a command's `let`: what it computes cannot be read.
 - **Answered by Sosie, not the upstream:** `hello`, `ping`, `buildInfo`, `connectionStatus` (no users), `getLog`
   (empty). `hostInfo`, `getCmdLineOpts` and `serverStatus` are refused: they say where the server is.
 
 ## The session upstream
 
-One client upstream, with a session per connection to Sosie, so a cursor's `getMore` reaches the session that opened
-it, from whichever connection of the driver's pool sends it.
+One client upstream, with a session for each of your client's sessions (the `lsid` a driver sends), so a cursor's
+`getMore` reaches the session that opened it, from whichever connection of the driver's pool sends it. A cursor is
+its session's: another client neither reads its batches nor closes it.
 
 | Setting | Value |
 | --- | --- |
 | `maxTimeMS` | 30 s on each `find`, `aggregate`, `count` and `distinct`; a client may lower it, never lift it |
 | Documents per cursor | `--max-rows`: past it, the cursor is closed, and the terminal running Sosie says so |
+| A message half sent | A minute: past it, the connection is closed |
 | Read preference | The connection string's |
 | Heartbeats | Polled, so no `hello` waits on each server |
 
@@ -104,10 +112,10 @@ stage.
 | An ObjectId, in any field | A fake in the one domain all ObjectIds share: 24 hex digits, its time shifted by up to a year |
 | A `$group`'s `_id` by a field, and `$first`, `$last`, `$min`, `$max`, `$push` or `$addToSet` of one | A fake by that field |
 | A count: `$count`, `$sum: 1`, the `count` command | Unchanged |
-| A literal you wrote: `$literal`, `$documents` | Unchanged |
+| A literal you wrote: `$literal`, a value in `$documents` | Unchanged; a server's variable there (`$$NOW`, `$$USER_ROLES`) is faked by its type |
 | Anything else a pipeline computes (`$toUpper`, `$avg`, `$concat`) | A fake by its BSON type |
 | A field a `$unionWith` takes from two collections | A fake by its type, unless both name the same field |
-| A key that is not a word, as in a map keyed by email | Faked, each to one fake |
+| A key that is not a word, as in a map keyed by email; a key a pipeline makes from values that you did not write | Faked, each to one fake |
 
 Each value keeps its BSON type: an `Int32` stays an `Int32`, and a `Long`, a `Double`, a `Decimal128`, a date, an
 ObjectId, a UUID and binary data their own. Sosie learns each field as documents come, and from a collection's
@@ -133,3 +141,8 @@ ObjectId, a UUID and binary data their own. Sosie learns each field as documents
 - `listIndexes` and `listCollections` show an index's filter and a view's pipeline as they were written, a value in
   them included.
 - A fake in `$expr`, in a `$lookup`'s `let`, or in an index bound is used as written.
+- A key that looks like a word, in a collection's own documents, is taken for a field's name and shown: a map stored
+  keyed by lowercase words (`{ prefs: { quillon: … } }`) shows them. A key a pipeline makes from values is faked,
+  unless you wrote it.
+- A `$unionWith` mixes two collections' documents, and MongoDB does not say which each came from: a value there is
+  faked by its type, unless both collections name the same field.

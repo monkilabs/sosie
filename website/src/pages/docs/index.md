@@ -1,16 +1,17 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Getting started
-description: Start Sosie in front of your Postgres database or your API, connect your agent, and check that nothing real reached a transcript.
+description: Start Sosie in front of your Postgres or MySQL database or your API, connect your agent, and check that nothing real reached a transcript.
 lead: From nothing installed to your agent's first faked query in under a minute, with no config file.
 ---
 
 ## What you need
 
 - **Node 24 or 26.** `npx` comes with it.
-- **An upstream:** a PostgreSQL 15 to 18 database, or your team's own REST or GraphQL API.
+- **An upstream:** a PostgreSQL 15 to 18 or MySQL 8.4 or 9 database, or your team's own REST or GraphQL API. MongoDB
+  6.0 to 8.0 comes with the next release.
 - **A read-only login** for it. Sosie's own session is read-only either way, but a login that cannot write is
-  safer. [Postgres](./postgres/#a-read-only-login) shows one.
+  safer. [Postgres](./postgres/#a-read-only-login) and [MySQL](./mysql/#a-read-only-login) show one.
 
 ## 1. Start Sosie, in your own terminal
 
@@ -55,9 +56,9 @@ tests, `psql`, `curl`, any Postgres MCP server.
 $ psql postgres://localhost:7674/app -c 'SELECT u.full_name, o.status, o.total FROM orders o JOIN users u ON u.id = o.user_id'
     full_name     |  status   |  total
 ------------------+-----------+---------
- Janick Dach      | cancelled |  749.20
- Janick Dach      | paid      |    3.38
- Cristian Kuhlman | shipped   | 8274.94
+ Janick Dach      | cancelled |  512.87
+ Janick Dach      | paid      |    7.06
+ Cristian Kuhlman | shipped   | 3916.25
 ```
 
 Agents that prefer MCP get Sosie's own server, which talks to the running Sosie and never to your database. In Claude

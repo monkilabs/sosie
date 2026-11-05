@@ -33,11 +33,13 @@ lead: A core that knows no database decides every fake. Sources speak each upstr
 A domain is the set of real values that share fakes. For a field:
 
 1. **Listed under `pass`:** no domain; the value passes.
-2. **It shares another field's values** (a foreign key, or a view's column): that field's domain. `orders.user_id`
+2. **It holds a MongoDB ObjectId:** the one domain every ObjectId shares, so a reference to a document (`orders.userId`)
+   is the fake of its `_id`.
+3. **It shares another field's values** (a foreign key, or a view's column): that field's domain. `orders.user_id`
    fakes like `users.id`, and a key of two characters stays two characters wherever it appears.
-3. **Its format is personal** (email, phone, first name, last name, full name, street, city, postal code): the format's
+4. **Its format is personal** (email, phone, first name, last name, full name, street, city, postal code): the format's
    domain. One person's email is the same fake in every field, and in every source: the database and the API.
-4. **Otherwise:** the field's own.
+5. **Otherwise:** the field's own.
 
 Values a query computes are faked by their type, in a domain of their own.
 
@@ -49,6 +51,7 @@ Values a query computes are faked by their type, in a domain of their own.
 | Integer | The same sign and number of digits; never zero for a value that is not zero |
 | Decimal | Digits replaced: the same sign, digits and scale |
 | UUID | A random UUID |
+| ObjectId | 24 hex digits: its time shifted by up to a year, the rest random |
 | Boolean | Flipped or not, decided once per field |
 | Enum | A label of the same enum, by a fixed shuffle per field |
 | Date, time | Shifted by up to a year, the same shift for the same value |

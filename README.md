@@ -53,9 +53,9 @@ Then point the agent, the app and its tests at the address Sosie printed:
 $ psql postgres://localhost:7674/app -c 'SELECT u.full_name, o.status, o.total FROM orders o JOIN users u ON u.id = o.user_id'
     full_name     |  status   |  total
 ------------------+-----------+---------
- Janick Dach      | cancelled |  749.20
- Janick Dach      | paid      |    3.38
- Cristian Kuhlman | shipped   | 8274.94
+ Janick Dach      | cancelled |  512.87
+ Janick Dach      | paid      |    7.06
+ Cristian Kuhlman | shipped   | 3916.25
 ```
 
 Every value is a fake of the real one, of the same type and format. The same
@@ -90,8 +90,8 @@ Options: `--port` (7674, or the next free one), `--host` (127.0.0.1), `--rules`
 one store, so a person is the same fake in each, and `sosie mcp` serves them
 all.
 
-Tested with `psql`, `node-postgres`, `postgres.js`, Drizzle and Prisma, and,
-in binary, asyncpg and JDBC.
+Tested with `psql`, `node-postgres`, `postgres.js`, Drizzle and Prisma; in
+binary, checked by hand with asyncpg and pgJDBC.
 
 ### In front of your API
 
@@ -138,17 +138,19 @@ npx @sosie/cli
   ✓ db.internal:3306/app, read-only: 42 tables, 3 views
   ✓ Every value is faked
 
-  Your agent, app and mysql:  mysql://127.0.0.1:7674/app
+  Your agent, app and mysql: mysql://127.0.0.1:7674/app
 ```
 
 The `mysql` client and your app read through it: statements as text, several to a
-query, and prepared, as mysql2's `execute()` and Prisma send them. MySQL 8.4 and 9
-are tested. Give the login `SELECT` and `SHOW VIEW`, so a view's columns share
-their tables' fakes.
+query, and prepared, as mysql2's `execute()` and the `mariadb` driver send them;
+the last two come with the next release, as 0.2.0 reads one statement at a time,
+as text. MySQL 8.4 and 9 are tested. Give the login `SELECT` and `SHOW VIEW`, so
+a view's columns share their tables' fakes.
 
 ### In front of MongoDB
 
-The same command, with a `mongodb://` or `mongodb+srv://` connection string:
+Not in 0.2.0: MongoDB comes with the next release. The same command, with a
+`mongodb://` or `mongodb+srv://` connection string:
 
 ```sh
 export SOSIE_UPSTREAM='mongodb://readonly:…@db.internal:27017/app'
@@ -162,7 +164,7 @@ npx @sosie/cli
   Your agent, app and mongosh: mongodb://127.0.0.1:7674/app?directConnection=true
 ```
 
-mongosh, the drivers and your app read through it. MongoDB says nothing of where a
+The Node.js driver (Mongoose's), mongosh and your app read through it. MongoDB says nothing of where a
 value came from, so Sosie reads it from the command: each value of a `find` or a
 pipeline is faked by the collection field it comes from, or by its BSON type when
 a stage computed it. Every ObjectId shares one domain, so references between
@@ -229,9 +231,11 @@ npm install
 npm run check   # typecheck, build, and every test
 ```
 
-The end-to-end tests start an embedded PostgreSQL 18. To run them against
-another server, set `SOSIE_TEST_DATABASE_URL` to a superuser connection
-string; the tests create their own database and role, and drop them after.
+The end-to-end tests start an embedded PostgreSQL 18, and MySQL 8.4 and MongoDB
+8 from their own binaries, downloaded on the first run. To run them against
+other servers, set `SOSIE_TEST_DATABASE_URL`, `SOSIE_TEST_MYSQL_URL` and
+`SOSIE_TEST_MONGODB_URL` to a superuser's or root's connection string; the tests
+create their own database and login, and drop them after.
 The `psql` tests run when `psql` is on the PATH, or at `PSQL`.
 
 ## License

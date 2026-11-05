@@ -30,7 +30,8 @@ only `GET`, `HEAD` and GraphQL queries reach an API.
 - **Shape.** Row counts, which values are null, and the rough size of values are visible. Order follows the real values.
 - **Who can reach the endpoint.** It has no password. On `127.0.0.1`, only this machine can, and web pages cannot: an
   HTTP endpoint answers only requests addressed to `localhost`, and none from a page of another site. On another
-  `--host`, anyone who reaches that address can query the fakes and filter on the real values.
+  `--host`, anyone who reaches that address can query the fakes and filter on the real values, and those two checks
+  are off: a web page open in any browser on that network can send requests through Sosie, with its credentials.
 - **The API's and the database's structure.** Paths, the OpenAPI document or GraphQL schema with their descriptions,
   status codes, table and column names, the definitions of views and functions, and the server's version are visible:
   they are the system, not values from it. A literal written into a view or a function is visible with it.
@@ -53,8 +54,9 @@ export SOSIE_UPSTREAM="$(cat /etc/sosie/upstream)"
 sosie --host 10.0.0.12
 ```
 
-Sosie warns that the endpoint has no password: anyone who reaches that address can query it, so keep it on a network
-only your team reaches.
+Sosie warns that the endpoint has no password: anyone who reaches that address can query it, and so can any web page a
+browser on that network opens, as the checks for `localhost` and another site's pages hold on `127.0.0.1` only. Keep it
+on a network only your team reaches, and no browser there.
 
 ## What stays on your machine
 

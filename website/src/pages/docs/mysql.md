@@ -16,7 +16,7 @@ npx @sosie/cli
   ✓ db.internal:3306/app, read-only: 42 tables, 3 views
   ✓ Every value is faked
 
-  Your agent, app and mysql:  mysql://127.0.0.1:7674/app
+  Your agent, app and mysql: mysql://127.0.0.1:7674/app
 ```
 
 The address takes any user and no password, and listens on `127.0.0.1` and `::1` only, unless you pass `--host`. It is
@@ -27,6 +27,8 @@ mysql --protocol=tcp -h 127.0.0.1 -P 7674 app
 ```
 
 `?ssl-mode=REQUIRED` (or `VERIFY_CA`, `VERIFY_IDENTITY`) on `SOSIE_UPSTREAM` makes the connection upstream use TLS.
+`REQUIRED` encrypts without checking the server's certificate, and without `ssl-mode` there is no TLS at all, unlike
+the `mysql` client's own default: for a server across a network, use `VERIFY_IDENTITY`.
 Sosie's own address speaks no TLS: it is on your machine.
 
 MySQL 8.4 and 9 are tested; 8.0 is read. MariaDB is not, yet.
@@ -49,6 +51,9 @@ when it starts.
 
 Tested with the `mysql` client, mysql2's `query()` and `execute()`, and the `mariadb` driver, which Prisma's MySQL
 adapter uses.
+
+> **Not in 0.2.0:** prepared statements, several statements in one query, and the MCP `query` tool come with the next
+> release. In 0.2.0, send each statement as text, one at a time (`query()` in mysql2).
 
 - **Statements as text** (`COM_QUERY`), as the `mysql` client and mysql2's `query()` send them. Several statements in
   one query run when the client turns them on (mysql2's `multipleStatements`). Each is checked before the first runs,
@@ -78,10 +83,12 @@ A statement it cannot parse is refused.
   with their values), and from `information_schema` the process list, column statistics (histograms of real values),
   open transactions and where the files are.
 - **Refused functions and settings:** `LOAD_FILE()`, locks other sessions wait on (`GET_LOCK()`), and settings that say
-  where the database is (`@@datadir`, `@@hostname`, `@@port` and the like). `SHOW VARIABLES` and `SHOW PROCESSLIST` too.
-- **Settings that keep the session safe** cannot be changed: read-only, `sql_mode`'s `ANSI_QUOTES`,
-  `NO_BACKSLASH_ESCAPES` and `PIPES_AS_CONCAT`, which change how a statement is read, and a `max_execution_time`
-  above the one Sosie started with. Nor by an optimizer hint, which sets them for one statement:
+  where the database is (`@@datadir`, `@@hostname`, `@@port`, key and certificate paths and the like). `SHOW
+  VARIABLES`, `SHOW STATUS` and `SHOW PROCESSLIST` too.
+- **Settings that keep the session safe** cannot be changed: read-only; `sql_mode`, which takes only modes by name,
+  never a number, and none of `ANSI_QUOTES`, `NO_BACKSLASH_ESCAPES`, `PIPES_AS_CONCAT`, `IGNORE_SPACE` and
+  `HIGH_NOT_PRECEDENCE`, which change how a statement is read; and a `max_execution_time` above the one Sosie started
+  with. Nor by an optimizer hint, which sets them for one statement:
   `MAX_EXECUTION_TIME(…)` and `SET_VAR(…)` are held to the same rules.
 - **The server's settings** are not changed: `SET GLOBAL`, `SET PERSIST` and `SET GLOBAL TRANSACTION` are refused.
 - **A function that is not MySQL's own** may be a stored one, made since Sosie started, whose code reads rows: what
@@ -108,7 +115,8 @@ client was using, as MySQL keeps it.
 ## Query by what you saw
 
 Literals compared by equality (`=`, `<>`, `<=>`, `IN`) are looked up in the domain of the column on the other side,
-through aliases, databases, subqueries and an introducer such as `_utf8mb4'…'`. Only the literals turned back change:
+through aliases, databases, subqueries, derived tables, CTEs and an introducer such as `_utf8mb4'…'`. Only the
+literals turned back change:
 the rest of the statement goes upstream exactly as the client wrote it.
 
 ```sql
@@ -141,6 +149,9 @@ A computed column's name is its text as you wrote it. MySQL names one by the tex
 in it where Sosie turned a fake back (`email = 'real@…'`), a derived table's column in its `org_name` too; Sosie takes
 the name from your own text, at the same place. In a prepared statement a parameter shows as `?`, as MySQL names it.
 
+> **0.2.0 shows the real value in such a name.** Until the next release, give a computed column that compares with a
+> fake a name of your own: `SELECT email = '…' AS matches`.
+
 ## Errors and warnings
 
 - An error about the statement itself (a syntax error, an unknown column or table, access denied) comes back, with
@@ -160,6 +171,7 @@ the name from your own text, at the same place. In a prepared statement a parame
 - A value Sosie never showed is used as written, so it filters on the real value it happens to be.
 - A literal compared with a column through a function (`LOWER(email) = '…'`) is used as written.
 - `'a' 'b'`, which MySQL joins into one literal, is used as written.
+- Bytes (`BINARY`, `VARBINARY`, a `BLOB`) are never turned back: a binary key cannot be queried by its fake.
 - A `UNION`'s columns are faked by their type, not their field: a total row's label (`SELECT 'All', COUNT(*) … UNION
   ALL …`) is faked with the rest of its column, and the same email has another fake there than in its table.
 - `BIT`, spatial and `VECTOR` values come back as `NULL`.

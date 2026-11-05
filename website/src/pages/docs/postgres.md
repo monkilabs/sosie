@@ -42,12 +42,12 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO sosie_reader
 ## Clients
 
 Tested with `psql` (including `\d`), `node-postgres`, `postgres.js`, Drizzle over both, and Prisma 7 through its
-node-postgres adapter, and, in binary, with asyncpg and JDBC. The simple and extended query protocols work, as do
+node-postgres adapter; in binary, checked by hand with asyncpg 0.32 and pgJDBC 42.7. The simple and extended query protocols work, as do
 cursors, prepared statements and cancel requests.
 
 **Binary results and parameters**, which asyncpg and pgx always use and JDBC once it prepares a statement, work: Sosie
 writes each fake as Postgres would send it, and reads a fake sent in binary back like one sent as text. A column of a
-type it cannot write from text, such as `regclass`, a composite value or a range, is refused in binary with an error
+type it cannot write from text, such as `regclass`, `money`, a composite value or a range, is refused in binary with an error
 that names the column; ask for it in text, or cast it. `COPY` and function calls are refused.
 
 ## What the guard allows
@@ -59,7 +59,8 @@ Each statement is parsed before it goes anywhere.
 - **Refused:** everything else, including `EXPLAIN`, whose plan would print the real values Sosie substituted. A
   statement that changes data gets `This statement changes data. Sosie is read-only.`
 - **Refused catalogs:** the ones that hold real values, queries with their values, credentials or where the database
-  is: `pg_stats`, `pg_statistic`, `pg_stat_activity`, `pg_stat_statements`, `pg_settings`, `pg_authid` and the like.
+  is: `pg_stats`, `pg_statistic`, `pg_stat_activity`, `pg_stat_statements`, `pg_settings`, `pg_authid` and the like;
+  and `pg_roles` and `pg_user`, whose role settings may hold secrets, so `\du` in psql is refused too.
 - **Refused settings and functions:** those that say where the database is (`inet_server_addr`, `SHOW port`), read
   files, run SQL given as text, or copy a value from your rows into a setting (`set_config` with anything but a value
   written in the query or a parameter).
@@ -67,6 +68,10 @@ Each statement is parsed before it goes anywhere.
   Sosie started with.
 
 Catalog reads that touch no user table, such as `\d` in psql or an ORM reading the schema, pass unchanged.
+
+A setting Postgres reports to the client when it changes (`application_name`, `search_path`) is shown as it is when
+you wrote that value, and faked otherwise: a function of yours may have set it from a row. Encodings, date styles,
+the time zone and the server's version pass.
 
 ## The session upstream
 
