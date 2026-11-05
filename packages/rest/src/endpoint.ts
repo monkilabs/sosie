@@ -26,6 +26,10 @@ const MAX_KNOWN = 10_000
 const OVERRIDE = /^(_+method|_?httpmethod|method|x-http-method(-override)?|x-method-override)$/i
 /** Methods that write, as an override names them. */
 const WRITE = /^(post|put|patch|delete|merge)$/i
+/** A query name as frameworks read it: PHP turns . and a space into _, and reads name[] as name. */
+const overrideName = (name: string) => name.replace(/\[\]$/, '').replace(/[.\s[]/g, '_')
+/** Whether a query parameter asks a framework to write, its name and its value read as frameworks read them. */
+const overrides = (name: string, ...values: string[]) => OVERRIDE.test(overrideName(name)) && values.some((v) => WRITE.test(v.trim()))
 /** How an error's body is read: as no entity's, each value faked by where it sits. */
 const NO_ENTITY: Route = { entity: '*', values: new Map() }
 /** A word that looks like a name of the API's: lowercase first, then letters and digits, in kebab, snake or camel case. */
@@ -209,7 +213,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       const turnedValue = asWritten ? value : (lookup(value, queryField(name, value, rt, { fields, entityFor }, name !== sentName)) ?? value)
       // A method override (?_method=DELETE), its name and its method as sent or as Sosie turns them back, asks a
       // framework to write: it never leaves Sosie.
-      if (OVERRIDE.test(name) && (WRITE.test(value) || WRITE.test(turnedValue))) {
+      if (overrides(name, value, turnedValue)) {
         return send(res, 400, { error: 'Sosie is read-only: a method override in the query (_method=DELETE) is not sent.' })
       }
       if (name === sentName) names.push(name)

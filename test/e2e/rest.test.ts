@@ -583,6 +583,10 @@ describe('the guard and the credentials', () => {
     for (const name of ['_method', '__method', 'method', '_HttpMethod', 'X-HTTP-Method-Override']) {
       expect((await sosie.get(`/users/1?${name}=DELETE`)).status, name).toBe(400)
     }
+    // Names and values as frameworks rewrite them: PHP reads .method and " method" as _method, _method[] as _method.
+    for (const query of ['.method=DELETE', '%20method=PUT', '_method%5B%5D=DELETE', 'x-http-method-override=%20DELETE']) {
+      expect((await sosie.get(`/users/1?${query}`)).status, query).toBe(400)
+    }
     expect(api.requests.length).toBe(before)
     // A method that is a value of the API's own (?method=card) goes on.
     expect((await sosie.get('/users/1?method=card')).status).toBe(200)
