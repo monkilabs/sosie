@@ -35,6 +35,20 @@ CREATE TABLE orders (
 
 CREATE TABLE events (id int PRIMARY KEY, user_id int REFERENCES users (id), kind text NOT NULL);
 
+-- Types a column may have beyond the plain ones: domains over a domain, an enum and an array.
+CREATE DOMAIN short_code AS varchar(12);
+CREATE DOMAIN member_code AS short_code;
+CREATE DOMAIN member_role AS role;
+CREATE DOMAIN labels AS text[];
+CREATE TABLE memberships (
+  id      int PRIMARY KEY,
+  user_id int NOT NULL REFERENCES users (id),
+  code    member_code NOT NULL,
+  role    member_role NOT NULL,
+  labels  labels,
+  roles   role[]
+);
+
 CREATE VIEW active_users AS SELECT id, email, full_name FROM users WHERE active;
 
 -- A view that computes a column named like one that may pass: it must not pass with it.
@@ -84,6 +98,10 @@ INSERT INTO users (email, full_name, phone, city, api_key, active, role, created
 SELECT 'person' || g || '@example.org', 'Person ' || g, '+1 555 0100 ' || g, 'Springfield', 'key_' || g, g % 2 = 0,
        (ARRAY['admin', 'editor', 'viewer'])[1 + g % 3]::role, '2025-01-01'::timestamptz + g * interval '1 day', '1990-01-01'::date + g, 'AT'
 FROM generate_series(3, 40) g;
+
+INSERT INTO memberships VALUES
+  (1, 1, '7739182046', 'admin', '{Quillon,vip}', '{admin,viewer}'),
+  (2, 2, 'ZO-5512', 'editor', '{Zephyrine}', '{editor}');
 
 -- A json column keyed by data, as profiles keyed by name or key are.
 UPDATE users SET profile = '{"Zephyrine": "owner", "friends": {"Orrowmoor": 1, "sk_live_Zz8yYx7wWv6u": 2}}' WHERE id = 3;

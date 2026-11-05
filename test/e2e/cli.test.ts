@@ -81,7 +81,7 @@ describe('sosie', () => {
 
   it('prints where it reads from and where clients connect, and no credentials', () => {
     const out = sosie.stdout()
-    expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 5 tables, 2 views/)
+    expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 6 tables, 2 views/)
     expect(out).toContain('✓ Every value is faked')
     expect(out).toMatch(/Your agent, app and psql:\s+postgres:\/\/localhost:\d+\/sosie_test_\w+/)
     // The plugin for Claude Code, from this repository's marketplace; the bare server for any other client.

@@ -122,6 +122,26 @@ describe('reading through Sosie', () => {
     expect(direct.e).not.toBe('quill.vantablack@canary-mail.test')
   })
 
+  it('fakes a column of a domain over a domain, an enum or an array, and an enum array a query computes', async () => {
+    const rows = await query('SELECT id, code, role, labels, roles FROM memberships ORDER BY id')
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      expect(row.code).toMatch(/^.{1,12}$/)
+      expect(['admin', 'editor', 'viewer']).toContain(row.role)
+      expect(Array.isArray(row.labels) || typeof row.labels === 'string').toBe(true)
+      expect(row.roles).not.toBeNull()
+    }
+    expect(rows[0].code).toMatch(/^\d{10}$/)
+    // role[] and array_agg(role) are arrays of an enum: each label one of the enum's.
+    const [computed] = await query("SELECT array_agg(role ORDER BY id) AS roles, ARRAY['admin'::role] AS one FROM users WHERE id <= 3")
+    expect(computed.roles).not.toBeNull()
+    expect(computed.one).not.toBeNull()
+    for (const label of String(computed.roles).replace(/[{}]/g, '').split(',')) expect(['admin', 'editor', 'viewer']).toContain(label)
+    // A domain's base type is the field's: a fake of the code finds its row.
+    const [found] = await query('SELECT id FROM memberships WHERE code = $1', [rows[0].code])
+    expect(found.id).toBe(rows[0].id)
+  })
+
   it('fakes a setting a function set from a row, as Postgres reports it', async () => {
     const c = await sosie.client()
     const reported: Record<string, string> = {}
@@ -294,7 +314,7 @@ describe('the guard', () => {
     const writer = await startSosie({ upstream: new URL(inject('admin')) })
     expect(writer.warnings).toEqual([
       'The login is a superuser or can replicate. Sosie refuses the admin functions it knows, but a read-only login is safer.',
-      "The login can write to 5 tables. Sosie's session is read-only, but a read-only login is safer.",
+      "The login can write to 6 tables. Sosie's session is read-only, but a read-only login is safer.",
     ])
     const c = await writer.client()
     const fail = (sql: string) => c.query(sql).catch((e: { code: string; message: string }) => e)

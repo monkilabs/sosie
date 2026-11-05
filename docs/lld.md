@@ -682,7 +682,7 @@ own domain and passes only if `sosie.yml` lists it.
 | An enum type | `enum` |
 | `date`, `timestamp`, `timestamptz`, `time`, `timetz` | `date`, `datetime`, `time` |
 | `uuid`, `json`, `jsonb`, `bytea`, `inet`, `cidr` | `uuid`, `json`, `json`, `bytes`, `ip`, `ip` |
-| A domain | its base type |
+| A domain | its base type, through a domain over another, an enum or an array |
 | Arrays of any of these | `array` |
 | Anything else | `unknown` |
 
@@ -783,7 +783,7 @@ views.
 | A column of a table Sosie does not know | `Faker.computed` with its type |
 | Postgres's own `count(…)`, a bigint, over rows that come from tables | Unchanged: it holds no value from a row. A count over rows a value made (any set-returning function in the catalog, such as `generate_series`, `unnest` or `ts_parse`; a recursive CTE; user code) is faked |
 | A column of `UNION`, `INTERSECT` or `EXCEPT` | `Faker.computed` with its type: Postgres reports no source for it, and the arms differ |
-| Anything else a query computes | `Faker.computed` with the type of its OID |
+| Anything else a query computes | `Faker.computed` with the type of its OID, read from `pg_type` at start-up: a domain as its base type, an array of an enum (`array_agg(role)`) as one |
 | From a catalog-only read | Unchanged |
 
 Postgres reports some settings when they change (ParameterStatus). Those it checks the values of (encodings, date
@@ -1687,12 +1687,9 @@ source learns. Format domains make a person's email the same fake from the datab
 
 ## Open items
 
-- Enum arrays a query computes come back as `NULL`; enum array columns are
-  faked.
 - Prisma's own schema engine (`prisma db pull`, migrations) is not checked:
   migrations write, and `db pull` reads the catalogs, which pass.
-- Postgres types without a neutral type come back `NULL`: `interval`, `xml`, `bit`, `tsvector`, ranges, and a domain
-  over an enum, an array or another domain.
+- Postgres types without a neutral type come back `NULL`: `interval`, `xml`, `bit`, `tsvector` and ranges.
 - REST: a collection named in kebab case (`/line-items`) is never learned as the API's word, so links fake it.
 - GraphQL: every refusal from the check threads is tagged `SOSIE_TOO_COSTLY`, `Sosie is stopping.` and a failure of
   graphql-js's own included; and an `operationName` that names no operation is answered as if the document had
