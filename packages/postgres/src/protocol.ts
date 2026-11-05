@@ -25,10 +25,16 @@ const SSL_REQUEST = 80877103
 const GSS_REQUEST = 80877104
 const CANCEL_REQUEST = 80877102
 const MAX_MESSAGE = 1 << 30
+/** Postgres's own cap on a startup message. */
+const MAX_STARTUP = 10_000
 
 /** Reads frontend messages from a socket, one at a time. */
 export class Reader {
-  #buffer: Buffer = Buffer.alloc(0)
+  /** What has come and not been read, in the chunks it came in: joined once a message is whole. */
+  #chunks: Buffer[] = []
+  #size = 0
+  /** Bytes the message being read needs, once its length is known: until they have come, nothing is joined. */
+  #needed = 0
   #startup = true
   #queue: FrontendMessage[] = []
   #waiting: ((message: FrontendMessage | null) => void) | undefined
@@ -67,25 +73,36 @@ export class Reader {
     try {
       this.#read(chunk)
     } catch {
-      this.#buffer = Buffer.alloc(0)
+      this.#chunks = []
+      this.#size = 0
       this.#end()
     }
   }
 
   #read(chunk: Buffer): void {
-    this.#buffer = this.#buffer.length ? Buffer.concat([this.#buffer, chunk]) : chunk
+    this.#chunks.push(chunk)
+    this.#size += chunk.length
+    if (this.#size < this.#needed) return
+    let buffer = this.#chunks.length === 1 ? this.#chunks[0]! : Buffer.concat(this.#chunks, this.#size)
+    this.#needed = 0
     for (;;) {
       const headerLength = this.#startup ? 0 : 1
-      if (this.#buffer.length < headerLength + 4) return
-      const length = this.#buffer.readInt32BE(headerLength)
-      if (length < 4 || length > MAX_MESSAGE) return this.#end()
+      if (buffer.length < headerLength + 4) break
+      const length = buffer.readInt32BE(headerLength)
+      // A startup message is small: Postgres takes at most 10,000 bytes of one.
+      if (length < 4 || length > (this.#startup ? MAX_STARTUP : MAX_MESSAGE)) return this.#end()
       const total = headerLength + length
-      if (this.#buffer.length < total) return
-      const body = this.#buffer.subarray(headerLength + 4, total)
-      const code = this.#startup ? '' : String.fromCharCode(this.#buffer[0]!)
-      this.#buffer = this.#buffer.subarray(total)
+      if (buffer.length < total) {
+        this.#needed = total
+        break
+      }
+      const body = buffer.subarray(headerLength + 4, total)
+      const code = this.#startup ? '' : String.fromCharCode(buffer[0]!)
+      buffer = buffer.subarray(total)
       this.#deliver(this.#startup ? this.#startupMessage(body) : decode(code, body))
     }
+    this.#chunks = buffer.length ? [buffer] : []
+    this.#size = buffer.length
   }
 
   #startupMessage(body: Buffer): FrontendMessage {

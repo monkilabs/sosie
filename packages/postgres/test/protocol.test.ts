@@ -36,6 +36,20 @@ describe('reading frontend messages', () => {
     expect(await reader.next()).toBeNull()
   })
 
+  it('reads a large message that comes in many chunks, and two that come in one', async () => {
+    const socket = new EventEmitter()
+    const reader = new Reader(socket as unknown as Socket)
+    socket.emit('data', startup({ user: 'kim' }))
+    await reader.next()
+    const big = typed('Q', Buffer.from(`SELECT '${'x'.repeat(1_000_000)}'\0`))
+    const read = reader.next()
+    for (let at = 0; at < big.length; at += 4096) socket.emit('data', big.subarray(at, at + 4096))
+    expect(((await read) as { text: string }).text).toHaveLength(1_000_000 + 9)
+    socket.emit('data', Buffer.concat([typed('Q', Buffer.from('SELECT 1\0')), typed('Q', Buffer.from('SELECT 2\0'))]))
+    expect(await reader.next()).toEqual({ type: 'query', text: 'SELECT 1' })
+    expect(await reader.next()).toEqual({ type: 'query', text: 'SELECT 2' })
+  })
+
   it('reads Bind with text and binary parameters', async () => {
     const socket = new EventEmitter()
     const reader = new Reader(socket as unknown as Socket)
@@ -67,6 +81,8 @@ describe('malformed messages', () => {
   it.each([
     ['a start-up packet with no code', Buffer.from([0, 0, 0, 4])],
     ['a short cancel request', Buffer.from([0, 0, 0, 8, 4, 210, 22, 46])],
+    // Postgres takes at most 10,000 bytes of a start-up message.
+    ['a start-up packet of a megabyte', Buffer.from([0, 16, 0, 0, 0, 3, 0, 0])],
   ])('end the connection on %s, never the process', async (_, bytes) => {
     const socket = new EventEmitter()
     const reader = new Reader(socket as unknown as Socket)
