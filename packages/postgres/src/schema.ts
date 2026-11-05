@@ -343,6 +343,7 @@ const SIMPLE: Record<string, FieldType> = {
   timestamptz: { kind: 'datetime' },
   time: { kind: 'time' },
   timetz: { kind: 'time' },
+  interval: { kind: 'interval' },
   uuid: { kind: 'uuid' },
   json: { kind: 'json' },
   jsonb: { kind: 'json' },
@@ -377,12 +378,12 @@ const OIDS: Record<number, string> = {
   16: 'bool', 17: 'bytea', 18: 'char', 19: 'name', 20: 'int8', 21: 'int2', 23: 'int4', 25: 'text', 26: 'oid',
   114: 'json', 3802: 'jsonb', 700: 'float4', 701: 'float8', 790: 'money', 1700: 'numeric', 1042: 'bpchar',
   1043: 'varchar', 1082: 'date', 1083: 'time', 1114: 'timestamp', 1184: 'timestamptz', 1266: 'timetz',
-  2950: 'uuid', 869: 'inet', 650: 'cidr',
+  1186: 'interval', 2950: 'uuid', 869: 'inet', 650: 'cidr',
 }
 const ARRAY_OIDS: Record<number, number> = {
   1000: 16, 1001: 17, 1002: 18, 1003: 19, 1016: 20, 1005: 21, 1007: 23, 1009: 25, 1028: 26, 199: 114, 3807: 3802,
   1021: 700, 1022: 701, 791: 790, 1231: 1700, 1014: 1042, 1015: 1043, 1182: 1082, 1183: 1083, 1115: 1114,
-  1185: 1184, 1270: 1266, 2951: 2950, 1041: 869, 651: 650,
+  1185: 1184, 1270: 1266, 1187: 1186, 2951: 2950, 1041: 869, 651: 650,
 }
 
 /** The neutral type of a result column no field holds. */

@@ -142,6 +142,23 @@ describe('reading through Sosie', () => {
     expect(found.id).toBe(rows[0].id)
   })
 
+  it('fakes an interval as an interval, a computed one too, and finds its row by the fake', async () => {
+    // As text, as Postgres writes it: the fake is looked up as it was written.
+    const asText = { getTypeParser: () => (value: string) => value }
+    const { rows } = await client.query({ text: 'SELECT m.id, m.lasts, age(u.born_on) AS age FROM memberships m JOIN users u ON u.id = m.user_id ORDER BY m.id', types: asText })
+    seen.push(rows)
+    const { rows: real } = await truth.query({ text: 'SELECT m.lasts, age(u.born_on) AS age FROM memberships m JOIN users u ON u.id = m.user_id ORDER BY m.id', types: asText })
+    const DURATION = /^(-?\d+ (years?|mons?|days?) ?)*(-?\d{2,}:\d{2}:\d{2}(\.\d+)?)?$/
+    for (const [i, row] of rows.entries()) {
+      for (const column of ['lasts', 'age'] as const) {
+        expect(row[column]).toMatch(DURATION)
+        expect(row[column]).not.toBe(real[i]![column])
+      }
+    }
+    const [found] = await query('SELECT id FROM memberships WHERE lasts = $1', [rows[0]!.lasts])
+    expect(String(found.id)).toBe(rows[0]!.id)
+  })
+
   it('fakes a setting a function set from a row, as Postgres reports it', async () => {
     const c = await sosie.client()
     const reported: Record<string, string> = {}

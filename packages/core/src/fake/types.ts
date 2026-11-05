@@ -4,7 +4,7 @@ import { generate, text, type Format } from './formats.js'
 import { matchCase, shape, type Random } from './random.js'
 
 /** Types whose fakes are drawn and stored; booleans, enums, json and arrays are handled around them. */
-export type ScalarKind = 'string' | 'integer' | 'decimal' | 'uuid' | 'date' | 'datetime' | 'time' | 'ip' | 'bytes' | 'objectid'
+export type ScalarKind = 'string' | 'integer' | 'decimal' | 'uuid' | 'date' | 'datetime' | 'time' | 'interval' | 'ip' | 'bytes' | 'objectid'
 
 export interface Draw {
   random: Random
@@ -42,6 +42,8 @@ export function fakeScalar(
     case 'datetime':
     case 'time':
       return shiftTime(real, draw.random)
+    case 'interval':
+      return interval(real, draw.random)
     case 'ip':
       return ip(real, draw.random)
     case 'bytes':
@@ -62,6 +64,24 @@ function objectId(real: string, random: Random): string {
   let rest = ''
   for (let i = 0; i < 16; i++) rest += random.int(0, 15).toString(16)
   return matchCase(real, shifted.toString(16).padStart(8, '0') + rest)
+}
+
+/**
+ * A duration in any form Postgres writes one (1 year 2 mons 3 days 04:05:06.5, @ 3 days 4 hours ago, P1Y2M3DT4H,
+ * 1-2 3 4:05:06): each number another of as many digits, zero only for zero, minutes and seconds under 60 and the
+ * months of year-month under 12, so it reads as a duration again. Its words, signs and punctuation stay.
+ */
+function interval(real: string, random: Random): string {
+  if (/^[+-]?infinity$/.test(real)) return real
+  // Anything but the words, letters and signs an interval is written in is no interval: shaped, as text.
+  if (/[^\d\s:.,+\-@PYMWDTHS]/.test(real.replace(/\b(years?|mons?|days?|hours?|mins?|secs?|ago)\b/g, ''))) return shape(real, random)
+  return real.replace(/\d+/g, (digits, at: number) => {
+    if (/^0+$/.test(digits)) return digits
+    const before = real[at - 1]
+    const max = before === ':' ? 59 : before === '-' && /\d/.test(real[at - 2] ?? '') ? 11 : 10 ** digits.length - 1
+    const min = digits.length > 1 && digits[0] !== '0' ? Math.min(10 ** (digits.length - 1), max) : 1
+    return String(random.int(min, max)).padStart(digits.length, '0')
+  })
 }
 
 /** A string with no format: shaped like the value, so dates stay dates and codes stay codes. */

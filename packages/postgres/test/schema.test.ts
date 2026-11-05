@@ -76,6 +76,7 @@ describe('reading the catalog', () => {
     expect(typeByOid(25, catalog.enums)).toEqual({ kind: 'string' })
     expect(typeByOid(1007, catalog.enums)).toEqual({ kind: 'array', of: { kind: 'integer', bytes: 4 } })
     expect(typeByOid(900, catalog.enums)).toEqual({ kind: 'enum', labels: ['sad', 'ok', 'happy'] })
-    expect(typeByOid(1186, catalog.enums)).toEqual({ kind: 'unknown' })
+    expect(typeByOid(1186, catalog.enums)).toEqual({ kind: 'interval' })
+    expect(typeByOid(142, catalog.enums)).toEqual({ kind: 'unknown' })
   })
 })

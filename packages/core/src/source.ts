@@ -49,6 +49,8 @@ export type FieldType =
   | { kind: 'boolean' }
   | { kind: 'enum'; labels: string[] }
   | { kind: 'date' | 'datetime' | 'time' }
+  /** A duration, as its source writes it: Postgres's interval. */
+  | { kind: 'interval' }
   /** objectid: MongoDB's 12-byte id, as 24 hex digits. */
   | { kind: 'uuid' | 'bytes' | 'ip' | 'objectid' }
   | { kind: 'json' }
