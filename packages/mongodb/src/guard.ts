@@ -90,6 +90,7 @@ export function plan(body: Document): Plan {
   if (body.startTransaction || body.autocommit !== undefined) return { kind: 'refused', refusal: refusal('Sosie does not run transactions: read without one.') }
   if (LOCAL.has(name)) return { kind: 'local' }
   if (WRITES.has(name)) return { kind: 'refused', refusal: WRITE }
+  if (typeof body.$db !== 'string' || !body.$db) return { kind: 'refused', refusal: refusal(`${name} names no database: OP_MSG carries it in $db.`) }
   if (name === 'explain') return { kind: 'refused', refusal: refusal('Sosie does not run explain: a plan shows the real values Sosie puts in your query.') }
   const db = String(body.$db ?? '')
   if (db in SYSTEM_DATABASES && name !== 'listDatabases' && !(name === 'killCursors')) {

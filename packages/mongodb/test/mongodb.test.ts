@@ -96,6 +96,7 @@ describe('the guard', () => {
     expect(refused({ find: 'users', startTransaction: true })).toMatch(/transactions/)
     expect(refused({ explain: { find: 'users' } })).toMatch(/explain/)
     expect(refused({ mapReduce: 'users' })).toMatch(/read-only/)
+    expect(plan({ find: 'users' })).toMatchObject({ kind: 'refused', refusal: { errmsg: expect.stringMatching(/names no database/) } })
   })
 })
 
