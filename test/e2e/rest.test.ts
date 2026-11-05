@@ -498,7 +498,17 @@ describe('the guard and the credentials', () => {
   it('refuses a segment the API could read as another path: an escaped / or \\, or . or ..', async () => {
     const before = api.requests.length
     // At an API, or a proxy before it, that decodes %2F and resolves .., these leave the base or name another kind.
-    for (const path of ['/x%2F..%2F..%2Fadmin%2Fsecret', '/countries/x%2Fusers%2F1', '/users/..%5C..%5Cadmin', '/users/%2E%2E%2F']) {
+    for (const path of [
+      '/x%2F..%2F..%2Fadmin%2Fsecret',
+      '/countries/x%2Fusers%2F1',
+      '/users/..%5C..%5Cadmin',
+      '/users/%2E%2E%2F',
+      // A NUL; Tomcat's ..; for ..; and a .. or a / that a second decoding makes.
+      '/users/1%00',
+      '/users/..;/admin',
+      '/users/%252e%252e',
+      '/users/x%252Fadmin',
+    ]) {
       expect(await sosie.get(path), path).toMatchObject({ status: 400, body: { error: expect.stringMatching(/another path/) } })
     }
     expect(api.requests.slice(before)).toEqual([])
