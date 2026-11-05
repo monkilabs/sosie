@@ -180,6 +180,14 @@ describe('the guard', () => {
     ['$merge', () => db.collection('users').aggregate([{ $merge: { into: 'copy' } }]).toArray()],
     ['$where', () => db.collection('users').find({ $where: 'true' }).toArray()],
     ['$function', () => db.collection('users').aggregate([{ $addFields: { x: { $function: { body: 'function() { return 1 }', args: [], lang: 'js' } } } }]).toArray()],
+    [
+      '$function in let',
+      () =>
+        db
+          .collection('users')
+          .aggregate([{ $match: { $expr: { $eq: ['$$f', 1] } } }], { let: { f: { $function: { body: 'function() { return 1 }', args: [], lang: 'js' } } } })
+          .toArray(),
+    ],
     ['explain', () => db.collection('users').find({}).explain()],
     ['the admin database', () => db.client.db('admin').collection('system.users').find().toArray()],
     ['the local database', () => db.client.db('local').collection('oplog.rs').find().toArray()],

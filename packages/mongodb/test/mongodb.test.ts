@@ -84,6 +84,8 @@ describe('the guard', () => {
     expect(refused({ find: 'system.profile' })).toMatch(/queries/)
     expect(refused({ find: 'users', filter: { $or: [{ $where: 'true' }] } })).toMatch(/\$where/)
     expect(refused({ find: 'users', filter: { x: new Code('1') } })).toMatch(/JavaScript/)
+    expect(refused({ aggregate: 'users', pipeline: [], let: { f: { $function: { body: 'function() {}', args: [], lang: 'js' } } } })).toMatch(/\$function/)
+    expect(refused({ find: 'users', let: { f: { $function: {} } } })).toMatch(/\$function/)
     expect(refused({ aggregate: 'users', pipeline: [{ $facet: { a: [{ $out: 'x' }] } }] })).toMatch(/\$out/)
     expect(refused({ aggregate: 'users', pipeline: [{ $lookup: { from: 'system.profile', as: 'p' } }] })).toMatch(/system\.profile/)
     expect(refused({ aggregate: 'users', pipeline: [{ $group: { _id: null, x: { $accumulator: {} } } }] })).toMatch(/\$accumulator/)

@@ -111,10 +111,9 @@ export function commandName(body: Document): string | undefined {
 
 /** What in a read Sosie does not run: a stage that writes or shows other sessions, server-side JavaScript. */
 function check(body: Document, name: string): Refusal | undefined {
-  if (name === 'find' || name === 'count' || name === 'distinct') {
-    const found = javascript([body.filter, body.query, body.projection])
-    if (found) return refusal(`Sosie does not run ${found}: JavaScript on the server computes what Sosie cannot read.`)
-  }
+  // A command's let defines variables its filter or pipeline reads ($$name): JavaScript there runs as anywhere else.
+  const found = javascript([body.filter, body.query, body.projection, body.let])
+  if (found) return refusal(`Sosie does not run ${found}: JavaScript on the server computes what Sosie cannot read.`)
   if (name === 'aggregate') {
     if (!Array.isArray(body.pipeline)) return refusal('An aggregate needs a pipeline.')
     return stages(body.pipeline as Document[])
