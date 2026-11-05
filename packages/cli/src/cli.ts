@@ -38,6 +38,7 @@ Options for sosie:
   --host <host>    Address to listen on (127.0.0.1)
   --rules <file>   Rules file (./sosie.yml when present)
   --max-rows <n>   Rows a query returns at most (1000)
+  --timeout <s>    Seconds a statement or request may run upstream (30, at most 3600)
 
 Environment:
   SOSIE_UPSTREAM          A database's connection string, or an API's base URL
@@ -79,6 +80,7 @@ async function main(argv: string[]): Promise<void> {
         host: { type: 'string' },
         rules: { type: 'string' },
         'max-rows': { type: 'string' },
+        timeout: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -99,6 +101,7 @@ async function main(argv: string[]): Promise<void> {
     host: values.host ?? '127.0.0.1',
     rules: values.rules,
     maxRows: number(values['max-rows'], 1000, '--max-rows', 1),
+    timeout: number(values.timeout, 30, '--timeout', 1, 3600),
   })
 }
 
@@ -124,6 +127,8 @@ async function start(options: {
   host: string
   rules: string | undefined
   maxRows: number
+  /** Seconds. */
+  timeout: number
 }): Promise<void> {
   const upstream = await readUpstream()
   const source = sources.find((s) => s.matches(upstream, process.env))
@@ -138,7 +143,7 @@ async function start(options: {
 
   let connection
   try {
-    connection = await source.connect(upstream, { maxRows: options.maxRows, statementTimeout: 30_000, env: process.env })
+    connection = await source.connect(upstream, { maxRows: options.maxRows, statementTimeout: options.timeout * 1000, env: process.env })
   } catch (error) {
     throw new Exit(1, fail((error as Error).message))
   }

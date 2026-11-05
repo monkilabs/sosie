@@ -86,7 +86,7 @@ format:
 
 Installed once with `npm i -g @sosie/cli`, the command is just `sosie`.
 Options: `--port` (7674, or the next free one), `--host` (127.0.0.1), `--rules`
-(`./sosie.yml`) and `--max-rows` (1000). Several Sosies, one per upstream, share
+(`./sosie.yml`), `--max-rows` (1000) and `--timeout` (30 s upstream). Several Sosies, one per upstream, share
 one store, so a person is the same fake in each, and `sosie mcp` serves them
 all.
 

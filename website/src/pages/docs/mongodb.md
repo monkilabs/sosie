@@ -78,7 +78,7 @@ its session's: another client neither reads its batches nor closes it.
 
 | Setting | Value |
 | --- | --- |
-| `maxTimeMS` | 30 s on each `find`, `aggregate`, `count` and `distinct`; a client may lower it, never lift it |
+| `maxTimeMS` | 30 s, or `--timeout`, on each `find`, `aggregate`, `count` and `distinct`; a client may lower it, never lift it |
 | Documents per cursor | `--max-rows`: past it, the cursor is closed, and the terminal running Sosie says so |
 | A message half sent | A minute: past it, the connection is closed |
 | Read preference | The connection string's |

@@ -98,7 +98,7 @@ One connection upstream per client, read-only from its start, with:
 | Setting | Value |
 | --- | --- |
 | `transaction_read_only` | `ON` |
-| `max_execution_time` | 30 s; a client may lower it, never lift it |
+| `max_execution_time` | 30 s, or `--timeout`; a client may lower it, never lift it |
 | `sql_mode` | The server's, without the modes that change how a statement is read |
 | `sql_select_limit` | One more than `--max-rows`: a result cut at the cap says so in `SHOW WARNINGS` |
 

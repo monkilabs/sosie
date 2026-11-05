@@ -96,7 +96,7 @@ reads it through its dev server's proxy.
   them: pagination works through the body. Sosie answers `application/json`.
 - **Keys in Pascal or kebab case** (`UserName`, `x-rate`), as .NET APIs often write them, are not taken for
   structure: without a document they are faked. Give such an API its document.
-- **Each request** has a 30 s timeout and a 20 MB body cap.
+- **Each request** has a 30 s timeout, or `--timeout`, and a 20 MB body cap.
 - **Ids across sources.** An API's ids and a database's share fakes only when their names meet (a GraphQL type and a
   Prisma model both `User`, as `User.id`).
 - **A wildcard rule** without a document (`country.*`) passes every top-level key of that entity the API ever answers

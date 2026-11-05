@@ -282,7 +282,8 @@ settled; until 1.0 it may change between minor versions.
 `--help` (`-h`) and `--version` (`-v`) for each. Flags for `sosie`: `--port` (7674; without it, a Sosie whose port is taken tries
 the next nine, so a second Sosie, for another upstream, just starts; `0` lets the system pick; at most 65535), `--host`
 (127.0.0.1), `--rules` (`./sosie.yml` when present), `--max-rows` (1000, at
-least 1). A `--host` other than this
+least 1), `--timeout` (30 s, from 1 to 3600: how long a statement, a command or a request may run upstream; the MCP
+tools still wait at most 50 s, less than MCP clients wait for a tool). A `--host` other than this
 machine is allowed, for running Sosie on a host of its own, with a warning:
 the endpoint has no password, so anyone who can reach it can query the fakes. Exit codes: 0, 1 for a failure (cannot
 connect, a problem in `sosie.yml`, a port in use, a real value found), 2 for a usage error: an unknown flag or
@@ -648,7 +649,7 @@ One `pg` connection per client, opened at its start-up. pg's Client connects
 it; Sosie then takes over the connection's messages and relays each frontend
 message with a Flush, so its own errors fall in the right place among
 upstream's replies. The session is read-only from its start-up options:
-`default_transaction_read_only=on`, `statement_timeout=30s`,
+`default_transaction_read_only=on`, `statement_timeout` at `--timeout` (30 s),
 `idle_in_transaction_session_timeout=5min` (a transaction an agent leaves open
 would hold locks on the database), ISO dates, hex bytea. A client may lower
 either timeout, never lift it. Two more settings are pinned because they change how Postgres reads a
@@ -944,7 +945,7 @@ One session per client, opened with mysql2 at the handshake, and set at its star
 | Setting | Value |
 | --- | --- |
 | `transaction_read_only` | `ON` |
-| `max_execution_time` | The statement timeout, 30 s |
+| `max_execution_time` | The statement timeout: `--timeout`, 30 s by default |
 | `sql_mode` | The server's, without `ANSI_QUOTES`, `NO_BACKSLASH_ESCAPES`, `PIPES_AS_CONCAT`, `IGNORE_SPACE`, `HIGH_NOT_PRECEDENCE` and `ANSI`: MySQL reads each statement's text as Sosie's parser does |
 | `sql_select_limit` | `--max-rows` plus one; a `SELECT` with a `LIMIT` of its own is read to its end, the rows past the cap dropped |
 | Character set | `utf8mb4` |
@@ -1259,7 +1260,7 @@ with every request and is never shown, links included. Headers the client sends,
 Sosie, within the API's origin and its base path only, never to an address with
 a user name in it nor through a segment that decodes to a `/` or `..`, so
 credentials never go elsewhere and the client never sees a real URL. What the
-terminal says when the API cannot be read leaves the query credentials out. Each request has the statement timeout (30 s) and
+terminal says when the API cannot be read leaves the query credentials out. Each request has the statement timeout (`--timeout`, 30 s) and
 a body cap (20 MB), counted as the body arrives; at most 5 redirects are followed. A `401` or `403` from the API tells
 the terminal to check `SOSIE_UPSTREAM_HEADERS`. Sosie sends `Accept: application/json` and `User-Agent: sosie`,
 which those headers may replace. A `SOSIE_OPENAPI` URL on the API's origin is read like any request; one on another
@@ -1512,7 +1513,7 @@ asked for under a query field (`Query.admin: Mutation`), or through an interface
 (`{ operator { deleteUser } }`, where `Mutation implements Operator`), by a fragment or not. Variables that nest
 deeper than 100 levels get `400`. A persisted query without its text is refused. POSTs are
 not redirected: the body and the credentials stay with the API. The API's answer is read up to 20 MB, within the
-statement timeout (30 s).
+statement timeout (`--timeout`, 30 s).
 
 Introspection is answered from the schema Sosie holds, with what the client
 sent, and never reaches the API; so clients introspect an API that has
@@ -1687,7 +1688,7 @@ source learns. Format domains make a person's email the same fake from the datab
 | Address | 127.0.0.1:7674 (7674 spells "sosi" on a phone keypad), and ::1, where `localhost` often goes first; a port another program holds on ::1 counts as taken |
 | Rows per query; items per list of an API's answer | 1,000 |
 | Rows per MCP query | 200 |
-| Statement timeout upstream | 30 s |
+| Statement timeout upstream | 30 s, or `--timeout` |
 | Store | `$SOSIE_HOME/store/`, or `~/.sosie/store/` |
 
 ## Open items
@@ -1700,7 +1701,6 @@ source learns. Format domains make a person's email the same fake from the datab
 - GraphQL: every refusal from the check threads is tagged `SOSIE_TOO_COSTLY`, `Sosie is stopping.` and a failure of
   graphql-js's own included; and an `operationName` that names no operation is answered as if the document had
   several.
-- The statement timeout is 30 s, with no flag to change it.
 - MySQL: MariaDB, refused at start-up.
 - MongoDB: a fake in `$expr`, a `$lookup`'s `let`, or an index bound (`min`, `max`, `hint` by value) is used as
   written; Compass and the drivers other than Node's are not checked; a cursor cut at `--max-rows` says so only in the
