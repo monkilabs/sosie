@@ -280,8 +280,14 @@ function stageShape(stage: Document, current: Shape, entityOf: (name: string) =>
       return doc(current, [[String((spec as Document).field), COMPUTED]])
     case '$fill':
       return doc(current, Object.keys(((spec as Document).output ?? {}) as Document).map((k) => [k, COMPUTED]))
-    case '$documents':
-      return LITERAL
+    case '$documents': {
+      // The client's documents, each value an expression: a literal is the client's, but a variable is the server's
+      // ($$USER_ROLES, the login's roles; $$NOW, its clock), and computed.
+      if (!Array.isArray(spec) || !spec.every((d) => isOperator(d) && !Object.keys(d).some((k) => k.startsWith('$')))) return expression(spec, LITERAL)
+      const keys = new Map<string, Shape[]>()
+      for (const d of spec as Document[]) for (const [k, v] of Object.entries(d)) keys.set(k, [...(keys.get(k) ?? []), expression(v, LITERAL)])
+      return doc(COMPUTED, [...keys].map(([k, shapes]) => [k, either(shapes)]))
+    }
     // Statistics and the schema: sizes, counts and index definitions, no value of a document.
     case '$collStats':
     case '$indexStats':

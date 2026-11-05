@@ -60,6 +60,9 @@ describe('where each value of a result comes from', () => {
     expect(where(faceted, 'a.email')).toBe('users.email')
     expect(where(faceted, 'b.n')).toBe('count')
     expect(where(pipeline([{ $replaceRoot: { newRoot: '$address' } }], users, same), 'city')).toBe('users.address.city')
+    // $documents: the client's literals pass; the server's variables are computed.
+    const made = pipeline([{ $documents: [{ x: 1, r: '$$USER_ROLES' }, { x: 2, t: '$$NOW' }] }], users, same)
+    expect([where(made, 'x'), where(made, 'r'), where(made, 't')]).toEqual(['literal', 'computed', 'computed'])
     expect(where(pipeline([{ $addFields: { 'address.zip': { $concat: ['a', 'b'] } } }], users, same), 'address.city')).toBe('users.address.city')
   })
 })
