@@ -27,7 +27,7 @@ if (sosies.length) {
 }
 
 let found = false
-for (const scan of subagent ? [] : pendingScans()) {
+for (const scan of subagent ? [] : pendingScans(cwd)) {
   if (scan.findings?.length) {
     found = true
     const n = scan.findings.length

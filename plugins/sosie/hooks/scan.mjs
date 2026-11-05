@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path'
 import { addScan, cli, pathsOf, SCAN_TIMEOUT } from './sosie.mjs'
 
 const [file, ...paths] = process.argv.slice(2)
+const project = process.env.SOSIE_SCAN_PROJECT || undefined
 const { out, lock, again } = pathsOf(file)
 const plain = (text) => (text ?? '').replace(/\x1b\[[0-9;]*m/g, '')
 
@@ -45,13 +46,13 @@ try {
       field,
     }))
     if (scan.status === 0 || (scan.status === 1 && findings.length)) {
-      addScan(out, { transcript: paths[0], findings })
+      addScan(out, { transcript: paths[0], findings, project })
     } else {
       // Exit 1 with nothing found is the CLI's own error, its message on the first line; npm's is on its last.
       const lines = plain(scan.stderr).trim().split('\n')
       const why = (scan.status === 1 ? lines[0] : lines.at(-1)) || scan.error?.message || `exit ${scan.status ?? scan.signal}`
       // What it found before it failed is kept, beside why it failed.
-      addScan(out, { transcript: paths[0], findings, failed: why.replace(/^✗\s*/, '') })
+      addScan(out, { transcript: paths[0], findings, failed: why.replace(/^✗\s*/, ''), project })
     }
     if (existsSync(again)) continue
     rmSync(lock, { force: true })

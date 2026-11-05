@@ -300,6 +300,19 @@ describe('the plugin', () => {
         expect(start()).toMatch(/Sosie found 11999 real values in a session's transcript/)
       }, 20_000)
 
+      it('report a session’s findings in its own project, not in another', async () => {
+        const project = join(vscode, 'project-a')
+        const other = join(vscode, 'project-b')
+        mkdirSync(project)
+        mkdirSync(other)
+        run(5, { out: `✗ ${transcript}:99  a real value from users.phone\n  1 real value found in 1 file.\n`, status: 1 })
+        hook('session-end.mjs', { hook_event_name: 'Stop', session_id: 'p1', transcript_path: transcript, cwd: project }, env)
+        await until(() => runs() === 5 && !existsSync(join(scans, 'p1.lock')), 'the scan runs')
+        const at = (cwd: string) => hook('session-start.mjs', { hook_event_name: 'SessionStart', cwd }, env).stdout
+        expect(at(other)).not.toMatch(/line 99/)
+        expect(JSON.parse(at(project)).hookSpecificOutput.additionalContext).toMatch(/line 99, from users\.phone/)
+      })
+
       it('say so when Copilot CLI names a session Sosie cannot find', () => {
         const copilot = join(vscode, 'copilot', 'plugin-data', 'sosie', 'sosie')
         const copilotEnv = { ...env, CLAUDE_PLUGIN_DATA: copilot, COPILOT_PLUGIN_DATA: copilot, COPILOT_HOME: join(vscode, 'nowhere') }

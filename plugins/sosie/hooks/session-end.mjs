@@ -6,7 +6,7 @@
 // longer. So the scan runs in a process of its own, and the next session to start reports what it found.
 import { spawn } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { addScan, copilotCli, hasStore, input, root, scanning, scanPaths, sessionFiles } from './sosie.mjs'
 
 const event = await input()
@@ -18,10 +18,16 @@ if (!subagent && hasStore()) {
   if (paths.length) {
     if (scanning(scan)) writeFileSync(scan.again, '')
     else {
-      spawn(process.execPath, [join(root, 'hooks', 'scan.mjs'), scan.out, ...paths], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+      // The scan keeps the session's project: the next session there reports it, not one in another project.
+      const env = { ...process.env, ...(event.cwd && { SOSIE_SCAN_PROJECT: resolve(event.cwd) }) }
+      spawn(process.execPath, [join(root, 'hooks', 'scan.mjs'), scan.out, ...paths], { detached: true, stdio: 'ignore', windowsHide: true, env }).unref()
     }
   } else if (copilotCli && event.session_id) {
     // Copilot CLI names only the session: one Sosie cannot find is said, not skipped.
-    addScan(scan.out, { transcript: `Copilot CLI's session ${event.session_id}`, failed: 'Sosie could not find where Copilot CLI keeps it' })
+    addScan(scan.out, {
+      transcript: `Copilot CLI's session ${event.session_id}`,
+      failed: 'Sosie could not find where Copilot CLI keeps it',
+      ...(event.cwd && { project: resolve(event.cwd) }),
+    })
   }
 }
