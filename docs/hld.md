@@ -27,8 +27,9 @@ interface. A
 
 ## Non-goals
 
-Writes, databases other than Postgres and MySQL, third-party APIs (for now),
-shell-output filtering, team-shared mappings, and defending against an agent
+Writes, databases beyond those [planned](#how-sosie-grows), an endpoint that
+imitates Oracle's own protocol, third-party APIs (for now), shell-output
+filtering, team-shared mappings, and defending against an agent
 that deliberately hunts for secrets on the machine Sosie runs on (see
 [Threat model](#threat-model)).
 
@@ -118,11 +119,36 @@ same for every source.
 | --- | --- | --- |
 | First, the MVP | Postgres | Most personal data lives in databases, and teams least dare give an agent access to them |
 | Next, also in v0.1 | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
-| After v0.1 | MySQL | The other database most teams run; its result metadata names each value's column, as Postgres's does |
-| Later | Other databases, MariaDB among them; third-party APIs | On demand; many third-party APIs already offer a test mode |
+| v0.2 | MySQL | The other database most teams run; its result metadata names each value's column, as Postgres's does |
+| Next | MySQL's prepared statements, then MongoDB | Prisma, mysql2's `execute()` and Go's driver need the first. MongoDB is the most used database after the SQL ones, above all with the JavaScript developers `npx` reaches; its protocol is open, and its commands are documents, so its guard needs no parser |
+| Then | SQL Server, and Azure SQL with it | The database of most .NET and Microsoft teams. Its protocol is open but the largest yet, and its clients encrypt by default |
+| Only on demand, and through MCP | Oracle | Its protocol is closed, and its results do not say which table a column came from, so it would be the one source that apps and tests cannot connect to unchanged |
+| Later | MariaDB; third-party APIs | On demand; many third-party APIs already offer a test mode |
 
 The core is tested through an in-memory test source, without Postgres, so
 nothing in it can come to depend on one source.
+
+### The next databases
+
+After Postgres and MySQL, the most used databases are Oracle, SQL Server and MongoDB. A source for each is three
+questions: can clients connect to Sosie unchanged, can Sosie be sure a request only reads, and can it tell which
+field each value came from.
+
+| | MongoDB | SQL Server | Oracle |
+| --- | --- | --- | --- |
+| For clients | Its wire protocol, open: `OP_MSG` and BSON, with the first `hello` as `OP_QUERY`. `mongosh`, Compass, Mongoose and MongoDB's own MCP server connect unchanged; FerretDB shows a server of its own can satisfy them | TDS, open ([MS-TDS](https://learn.microsoft.com/openspecs/windows_protocols/ms-tds/)): login, batches, and RPC, which every driver uses for parameters (`sp_executesql`). ODBC Driver 18, JDBC and SqlClient encrypt by default, so the endpoint needs TLS from the start, carried in TDS's own packets | TNS and TTC: closed, known only from Oracle's own thin drivers. Sosie would have to imitate Oracle's logon and whatever each client checks: JDBC, OCI, ODP.NET |
+| Read-only | Commands are documents, allowed by name: `find`, `aggregate` without `$out` or `$merge`, `count`, `distinct`, the `list` commands. Server-side JavaScript (`$where`, `$function`, `$accumulator`) is refused. A login with the built-in `read` role is the layer under it | sqlparser's T-SQL dialect reads the usual reads (`TOP`, `CROSS APPLY`, `FOR JSON`); what it cannot parse is refused, as with MySQL. Writes hide in `SELECT INTO`, `EXEC`, `OUTPUT`, `OPENROWSET` and linked servers. SQL Server has no read-only session, so the login's grants (`db_datareader`, no `EXECUTE`) are the only layer under the guard | sqlparser's Oracle dialect reads the usual reads (`ROWNUM`, `CONNECT BY`, `(+)` joins). `SET TRANSACTION READ ONLY`; database links, `UTL_` and `DBMS_` packages refused |
+| Field of a value | No schema to read: the collection and the dotted path (`users.address.city`), as the REST source learns a body without a document, and `$jsonSchema` validators where a collection has them. `find` keeps paths; what an aggregation renames is read from its pipeline, and what it computes is faked by type. A fake in a filter is a value in a document, turned back with no parse | Results name only the column. Browse mode, or `sp_describe_first_result_set` with browse information, names its database, table and column through views and aliases, as MySQL's metadata does | Oracle names no table for a result column, so every column would rest on the parse, and anything it cannot place would be faked by type |
+| Size | Medium. The protocol is small and needs no parser, but documents and BSON's types (ObjectId, Decimal128, dates) are new to the core | Large: the Postgres source's size, with TLS and RPC from the first day | Very large and brittle as an endpoint; medium as an MCP-only source |
+| Tested on | `mongodb-memory-server`, as MySQL is on `mysql-memory-server` | SQL Server's container, x86 only: Rosetta on Apple silicon | Oracle Database Free's container, large and slow to start |
+
+So MongoDB comes first: it fits Sosie best, and gives the guard least room to be wrong. SQL Server follows, the same
+kind of source as Postgres and MySQL, only bigger. Oracle, if ever, comes as an MCP-only source: `describe` and
+`query`, with node-oracledb's Thin mode upstream. Agents could use it; apps and tests could not.
+
+Each starts with a spike before it is planned in detail. For MongoDB: the handshake with `mongosh`, Compass and
+Mongoose, and how an ObjectId is faked and turned back. For SQL Server: TLS with each driver's defaults, and which
+metadata names the column.
 
 ## The plugin
 
@@ -234,6 +260,7 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
 | A source-agnostic core, with sources as packages behind one interface | Adding MySQL or an API is a new package, not a change to the core | Postgres wired into the core: quicker for v0.1, and the second source would mean a rewrite |
 | A neutral schema between sources and the core | Rules, domains and fakers are written once, for every source | Each source with its own rules and fakers: duplicated, and inconsistent across sources |
 | Speak each upstream's own protocol to clients | One endpoint serves agents, apps, tests and any MCP server for that database | An MCP-only server serves agents, not the app or its tests |
+| Oracle, if ever, through MCP only | Its protocol is closed, each client checks the server its own way, and its results name no column's table | An endpoint that imitates Oracle: large, brittle, and every column faked from the parse alone |
 | Read the live database | No copy to store, refresh or leak | Dump-and-mask tools ([Greenmask](https://greenmask.io), [Tonic Structural](https://www.tonic.ai)) work on a copy that goes stale |
 | Need nothing installed upstream | A read-only login is all the team grants | [PostgreSQL Anonymizer](https://postgresql-anonymizer.readthedocs.io) masks inside the database, which needs an extension and roles there |
 | Fake, not redact | Code needs valid values to run; blanks and tokens break it | Redaction gateways between an agent and a model provider see text, not columns |
