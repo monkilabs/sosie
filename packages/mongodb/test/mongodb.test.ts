@@ -131,6 +131,22 @@ describe('turning fakes back in a filter', () => {
     expect(out._id.toHexString()).toBe('64b7f0c2a1b2c3d4e5f60001')
   })
 
+  it('turns back a $match in a $unionWith’s pipeline, and a $graphLookup’s restriction, against their collections', () => {
+    near.length = 0
+    const [union, graph] = rewritePipeline(
+      [
+        { $unionWith: { coll: 'admins', pipeline: [{ $match: { email: 'fake@x' } }] } },
+        { $graphLookup: { from: 'people', startWith: '$boss', connectFromField: 'boss', connectToField: '_id', as: 'chain', restrictSearchWithMatch: { email: 'fake@y' } } },
+      ],
+      collection('users'),
+      scope,
+      same,
+    )
+    expect(union).toEqual({ $unionWith: { coll: 'admins', pipeline: [{ $match: { email: 'FAKE@X' } }] } })
+    expect((graph as Document).$graphLookup.restrictSearchWithMatch).toEqual({ email: 'FAKE@Y' })
+    expect(near).toEqual(['admins.email', 'people.email'])
+  })
+
   it('turns back a $match after a $group against what the group made', () => {
     near.length = 0
     const [, match] = rewritePipeline([{ $group: { _id: '$email', n: { $sum: 1 } } }, { $match: { _id: 'fake@x' } }], collection('users'), scope, same)

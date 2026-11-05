@@ -68,7 +68,8 @@ export function fieldAt(shape: Shape, path: string, type: Field['type']): Field 
 
 /**
  * A pipeline, each $match turned back against the shape of the documents it filters: a $match after a $group
- * compares with what the group made, a $match after a $lookup with the joined collection's fields.
+ * compares with what the group made, one in a $lookup's or a $unionWith's own pipeline with that collection's
+ * fields, and a $graphLookup's restrictSearchWithMatch with the collection it searches.
  */
 export function rewritePipeline(stages: Document[], start: Shape, scope: RequestScope, entityOf: (name: string) => string): Document[] {
   const out: Document[] = []
@@ -79,6 +80,12 @@ export function rewritePipeline(stages: Document[], start: Shape, scope: Request
     else if (name === '$lookup' && Array.isArray(stage.$lookup?.pipeline) && typeof stage.$lookup.from === 'string') {
       const from = { kind: 'field' as const, entity: entityOf(stage.$lookup.from), path: '' }
       out.push({ $lookup: { ...stage.$lookup, pipeline: rewritePipeline(stage.$lookup.pipeline, from, scope, entityOf) } })
+    } else if (name === '$unionWith' && isDoc(stage.$unionWith) && Array.isArray(stage.$unionWith.pipeline) && typeof stage.$unionWith.coll === 'string') {
+      const other = { kind: 'field' as const, entity: entityOf(stage.$unionWith.coll), path: '' }
+      out.push({ $unionWith: { ...stage.$unionWith, pipeline: rewritePipeline(stage.$unionWith.pipeline, other, scope, entityOf) } })
+    } else if (name === '$graphLookup' && isDoc(stage.$graphLookup) && typeof stage.$graphLookup.from === 'string' && stage.$graphLookup.restrictSearchWithMatch) {
+      const from = { kind: 'field' as const, entity: entityOf(stage.$graphLookup.from), path: '' }
+      out.push({ $graphLookup: { ...stage.$graphLookup, restrictSearchWithMatch: rewriteFilter(stage.$graphLookup.restrictSearchWithMatch, from, scope) } })
     } else if (name === '$facet' && isDoc(stage.$facet)) {
       out.push({ $facet: Object.fromEntries(Object.entries(stage.$facet).map(([k, sub]) => [k, Array.isArray(sub) ? rewritePipeline(sub as Document[], current, scope, entityOf) : sub])) })
     } else out.push(stage)
