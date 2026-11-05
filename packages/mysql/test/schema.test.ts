@@ -6,7 +6,7 @@ import { buildCatalog, enumLabels, typeOf, typeOfColumn } from '../src/schema.js
 describe('the catalog', () => {
   it('reads each column type as a neutral one', () => {
     expect(typeOf('tinyint', 'tinyint(1)')).toEqual({ kind: 'boolean' })
-    expect(typeOf('tinyint', 'tinyint unsigned')).toEqual({ kind: 'integer', bytes: 2 })
+    expect(typeOf('tinyint', 'tinyint unsigned')).toEqual({ kind: 'integer', bytes: 1 })
     expect(typeOf('bigint', 'bigint')).toEqual({ kind: 'integer', bytes: 8 })
     expect(typeOf('decimal', 'decimal(8,2)')).toEqual({ kind: 'decimal' })
     expect(typeOf('varchar', 'varchar(120)', 120)).toEqual({ kind: 'string', maxLength: 120 })

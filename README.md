@@ -141,9 +141,10 @@ npx @sosie/cli
   Your agent, app and mysql:  mysql://127.0.0.1:7674/app
 ```
 
-The `mysql` client and your app read through it, statements as text; prepared
-statements come later. MySQL 8.4 and 9 are tested. Give the login `SELECT` and
-`SHOW VIEW`, so a view's columns share their tables' fakes.
+The `mysql` client and your app read through it: statements as text, several to a
+query, and prepared, as mysql2's `execute()` and Prisma send them. MySQL 8.4 and 9
+are tested. Give the login `SELECT` and `SHOW VIEW`, so a view's columns share
+their tables' fakes.
 
 Postgres, MySQL, REST and GraphQL are the first sources. MongoDB comes next, then SQL
 Server, each a package behind the same interface ([how Sosie grows](docs/hld.md#how-sosie-grows)).

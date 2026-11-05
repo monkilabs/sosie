@@ -95,12 +95,16 @@ packages/
     index.ts         the Source: matches mysql://, refuses MariaDB and MySQL before 8.0, reads the catalog
     endpoint.ts      the TCP server
     protocol.ts      packets, the handshake, the text protocol's results
+    binary.ts        the binary protocol: an execution's parameters, as literals; result rows
     session.ts       one client: the handshake, then each command
+    split.ts         a query of several statements, split where MySQL ends each
     upstream.ts      one read-only session upstream per client, rows as text bytes
     guard.ts         sqlparser's MySQL dialect: allow reads; refuse writes and some tables; find what a literal is compared with
-    rewrite.ts       fakes in literals, back to real values, where they are in the text
+    rewrite.ts       fakes in literals and parameters' values, written in where they are in the text
     schema.ts        information_schema to the neutral schema
     results.ts       which field each result column came from
+    errors.ts        what an error, a warning or a column's name may show
+    mcp.ts           the query tool
   rest/src/
     index.ts         the Source: matches http:// and https://, finds the OpenAPI document
     endpoint.ts      the HTTP server: the guard, paths and queries back to real values
@@ -477,12 +481,13 @@ lists it, for when several Sosies of a kind run; without it, the newest.
 | Tool | From | Input | Returns |
 | --- | --- | --- | --- |
 | `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
-| `query` | Postgres | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice; every value a consistent fake |
+| `query` | Postgres, MySQL | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice (MySQL: its warnings, Sosie's notes among them); every value a consistent fake |
 | `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a GET through Sosie, up to 200 items of each list, within 50 s; it reaches the running Sosie only, whatever the path says |
 | `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list, within 50 s |
 
-When Sosie is not running, every tool says so, and how to start it. A tool for a kind that is not running says which
-kinds are. Every tool is marked read-only. A REST Sosie without a document learns its fields from the answers, and
+Sources that share a tool's name share one tool: `query` goes to the newest Postgres or MySQL Sosie, or the one at
+`address`, and runs as that source's. When Sosie is not running, every tool says so, and how to start it. A tool for a
+kind that is not running says which kinds are. Every tool is marked read-only. A REST Sosie without a document learns its fields from the answers, and
 writes its entry again as it does: `describe` lists each entity a collection names that the API answered with a list,
 with the fields met in it so far. An entity named after another word a client typed (a tenant's slug in
 `/jones/profile`) is not listed: such a word is never shown to another request. Until the agent has listed a
@@ -845,12 +850,42 @@ It listens on 127.0.0.1, and on ::1 too, and its address says `127.0.0.1`: MySQL
 Unix socket. The greeting is the version 10 handshake with the upstream's version, offering `caching_sha2_password`,
 protocol 4.1 and pluggable authentication, and neither TLS nor compression. Any user is taken, with any password or
 none, which Sosie never checks: the address is this machine's. The database a client names is `USE`d. Supported:
-`COM_QUERY`, one statement each, in the text protocol, with the classic EOF packets; `COM_INIT_DB`, `COM_PING`,
-`COM_QUIT`, `COM_RESET_CONNECTION` (a new session upstream, in the database the client was in, as MySQL keeps it: the
-guard reads unqualified names there), `COM_SET_OPTION`, `COM_STATISTICS`; `COM_FIELD_LIST` answers no columns.
-Refused with a clear error: prepared statements (`COM_STMT_*`), `COM_CHANGE_USER`, and several statements in one
-query. The status flags of each OK, whether the session commits each statement and is in a transaction, are the
-server's; after rows, Sosie sets the transaction's when autocommit is off and the statement read a table.
+`COM_QUERY` in the text protocol, with the classic EOF packets; prepared statements (below); `COM_INIT_DB`,
+`COM_PING`, `COM_QUIT`, `COM_RESET_CONNECTION` (a new session upstream, in the database the client was in, as MySQL
+keeps it: the guard reads unqualified names there; prepared statements gone), `COM_SET_OPTION` (multiple statements
+on or off), `COM_STATISTICS`; `COM_FIELD_LIST` answers no columns. Refused: `COM_CHANGE_USER`. The status flags of
+each OK, whether the session commits each statement and is in a transaction, are the server's; after rows, Sosie sets
+the transaction's when autocommit is off and the statement read a table.
+
+Several statements in one query run when the client asked for multiple statements at the handshake, or turned them on
+with `COM_SET_OPTION`. The query is split at each semicolon outside quotes and comments, and each piece parsed on its
+own: it must be one statement, and the pieces as many as the whole query's statements, or the query is refused. Every
+piece is checked before the first runs, a `USE` among them followed, so one refused stops them all; then each is sent
+upstream on its own, on a session that runs one statement per query, and answered with `SERVER_MORE_RESULTS_EXISTS`
+until the last. The first that fails ends the answer with its error, as MySQL's does.
+
+### Prepared statements
+
+`COM_STMT_PREPARE` checks the statement as `COM_QUERY` does, and asks MySQL to prepare it, its literals turned back,
+for its result columns and parameters; Sosie closes it there at once. MySQL's count of parameters must be the guard's,
+and each `?` the guard found must be one in the text: otherwise the statement is refused, since each value is written
+where the guard read a `?`. The answer gives the client an id of Sosie's, MySQL's parameter definitions, and its
+columns, named from the client's text (see Results).
+
+`COM_STMT_EXECUTE` reads the parameters in the binary protocol: the null bitmap, the types (or those bound last), the
+values, and a parameter's data sent ahead with `COM_STMT_SEND_LONG_DATA` (64 MB at most, as `max_allowed_packet`).
+Each is written into the statement's text as a literal, spaced so it runs into nothing: an integer or a decimal as
+itself, a negative one in parentheses, a double as a whole number or with an exponent (a `DOUBLE` to MySQL, not a
+`DECIMAL`), a string quoted with backslash escapes, bytes (a `BLOB`, or a string that is not UTF-8) as `X'…'`, a date
+or time quoted. A parameter compared with a column is looked up as a literal is: bytes by their hex text, a date or
+time with each length of fraction that drops only zeros, so a `Date` a driver read from a `DATETIME(3)` fake finds it.
+A `NaN` or infinite double has no literal: `Incorrect arguments`. The statement then runs upstream as text, and its
+rows are written back in the binary protocol from the text MySQL sent: integers by their width and sign, floats,
+dates and times in their binary forms, everything else as bytes. A value that does not read as its type is sent as
+`NULL`. A client that asks for a cursor gets the rows at once, as MySQL answers a statement that cannot have one;
+`COM_STMT_FETCH` says no cursor is open. `COM_STMT_RESET` drops the data sent ahead; `COM_STMT_CLOSE` the statement.
+A session holds 16,382 at most, as `max_prepared_stmt_count`. One run after a `USE` is checked again in the database
+the session is now in, and runs there.
 
 ### Upstream
 
@@ -926,7 +961,8 @@ A literal compared by `=`, `<>`, `<=>` or `IN` with a column, through aliases, d
 parentheses, an introducer and `COLLATE`, is looked up in that column's domain; a column of MySQL's own catalog is not
 a fake's. Only the literals turned back are replaced, where sqlparser places them in the text; the rest of the
 statement goes upstream as the client wrote it. A literal whose text there does not read as its value (`'a' 'b'`) is
-left alone. A real value is written as a number, or quoted with backslash escapes, which Sosie keeps on.
+left alone. A real value is written as a number, or quoted with backslash escapes, which Sosie keeps on. A prepared
+statement's parameters are written in the same way, each where its `?` is.
 
 ### Results
 
@@ -937,6 +973,12 @@ catalog, or it is `COUNT(…)` or a literal the client wrote. MySQL names no tab
 count or a literal only where every branch has one in its place, and is otherwise faked by type. A column of MySQL's
 data dictionary, a table with no database (`DESCRIBE`, `SHOW INDEX`), passes in a statement that reads only the
 catalog. `SHOW` and `DESCRIBE` pass whole. Bytes are faked in hex and written back as bytes.
+
+MySQL names a computed column by its text as it received it, at most 255 characters, and a derived table's or a CTE's
+column in its `org_name` too: with a real value in it where Sosie turned one back, or wrote a parameter's in. So each
+such name is found in what Sosie sent and taken from the client's own text at the same place, a literal Sosie put
+there read as the client wrote it: a parameter as `?`, as MySQL names it in a prepared statement. A name not found
+there is scrubbed of what was turned back, and anything quoted in it that the client did not write is shown as `'…'`.
 
 So a column MySQL names a table for is faked by what MySQL says of it, whatever the guard made of the statement, and
 any such column from a table of yours makes the statement one that reads data. A column it names no table for rests
@@ -962,12 +1004,12 @@ result cut at the cap.
 
 ### Limits
 
-- Prepared statements, several statements in one query, `LOCK IN SHARE MODE`, `INTO OUTFILE`, the `MOD` operator and
-  `TABLE t` are refused: the first two for now, the rest because the parser does not read them.
+- `LOCK IN SHARE MODE`, `INTO OUTFILE`, the `MOD` operator and `TABLE t` are refused: the parser does not read them.
 - A literal compared through a function (`LOWER(email) = '…'`), or in a row (`(id, email) = (1, '…')`), is used as
   written.
-- `BIT`, spatial and `VECTOR` values come back `NULL`. A `tinyint` other than `tinyint(1)` is faked within a
-  `smallint`'s range.
+- `BIT`, spatial and `VECTOR` values come back `NULL`.
+- A prepared statement's parameter changes a computed value's type where MySQL's would not: `? + 1` with a `DOUBLE`
+  of 5 runs as `5 + 1`. What a statement computes is faked by its type all the same.
 - `SHOW CREATE VIEW` and `information_schema.VIEWS` show a view's definition, a literal in it included.
 - MySQL reports no column for a value it computes, so `MAX(id)` is faked by type, not in `users.id`'s domain; nor for
   a `UNION`'s columns, so they are faked by type too, a total row's label included.
@@ -1344,7 +1386,7 @@ returns and every value a client sends. What each planned source maps:
 | --- | --- | --- | --- |
 | REST (built, above) | A local HTTP address; paths as upstream | `GET` and `HEAD` only | The OpenAPI document when there is one; otherwise where the value sits |
 | GraphQL (built, above) | A local HTTP address, at the API's path | Queries only, no mutations | The schema, by introspection or a file |
-| MySQL (built, above) | MySQL's protocol, statements as text | Reads only, read-only session | Its result metadata, as with Postgres |
+| MySQL (built, above) | MySQL's protocol: statements as text, and prepared | Reads only, read-only session | Its result metadata, as with Postgres |
 | MongoDB (next) | Its wire protocol, `OP_MSG`; a standalone server to the driver | Commands allowed by name; `$out`, `$merge` and server-side JavaScript refused; the `read` role | The collection and the dotted path; an aggregation's pipeline for what it renames |
 | SQL Server (then) | TDS: batches and RPC, with TLS inside it | sqlparser's T-SQL dialect; the login's grants, as there is no read-only session | Browse mode or `sp_describe_first_result_set` |
 | Oracle (on demand) | None: MCP's `describe` and `query` only | sqlparser's Oracle dialect; `SET TRANSACTION READ ONLY` | The parse alone |
@@ -1362,9 +1404,10 @@ domains make a person's email the same fake from the database and from the API.
   it and in `packages/core/test`. This is also the proof that the core needs no
   particular source.
 - **MySQL, end to end.** An embedded MySQL 8.4 from MySQL's own binaries (`mysql-memory-server`), or the server in
-  `SOSIE_TEST_MYSQL_URL`, seeded with the same canary people, read by a login with `SELECT` and `SHOW VIEW`. mysql2 and
-  the `mysql` client read through Sosie; the built CLI starts in front of it. Every answer, error and warning is
-  searched for each canary. CI runs MySQL 8.4 and 9.
+  `SOSIE_TEST_MYSQL_URL`, seeded with the same canary people, read by a login with `SELECT` and `SHOW VIEW`. mysql2
+  (`query()` and `execute()`), the `mariadb` driver and the `mysql` client read through Sosie; the built CLI starts in
+  front of it, and its `query` tool reads through that. Every answer, error, warning and column name is searched for
+  each canary. CI runs MySQL 8.4 and 9.
 - **Postgres, end to end.** An embedded PostgreSQL 18, or the server in
   `SOSIE_TEST_DATABASE_URL`, seeded with canary values: unique emails, names,
   phone numbers, keys and numbers; values with nothing to fake (`''`, `-`,
@@ -1434,5 +1477,4 @@ domains make a person's email the same fake from the database and from the API.
 - GraphQL: `Sosie is stopping.` is tagged `SOSIE_TOO_COSTLY`, and an `operationName` that names no operation is
   answered as if the document had several.
 - The statement timeout is 30 s, with no flag to change it.
-- MySQL: prepared statements (`COM_STMT_PREPARE`, MySQL's binary protocol), as mysql2's `execute()`, Prisma and Go's
-  driver use them; several statements in one query; an MCP tool for SQL beside Postgres's `query`; MariaDB.
+- MySQL: MariaDB, refused at start-up.

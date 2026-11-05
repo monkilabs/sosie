@@ -2,6 +2,7 @@ import type { Connection, Source } from '@sosie/core'
 import mysql2 from 'mysql2/promise'
 import { startEndpoint } from './endpoint.js'
 import { loadParser } from './guard.js'
+import { queryTool } from './mcp.js'
 import { readCatalog, type Catalog } from './schema.js'
 import { config } from './upstream.js'
 
@@ -9,6 +10,7 @@ import { config } from './upstream.js'
 export const mysql: Source = {
   kind: 'mysql',
   matches: (url) => url.protocol === 'mysql:',
+  tools: [queryTool],
   async connect(upstream, options): Promise<Connection> {
     await loadParser()
     const database = decodeURIComponent(upstream.pathname.slice(1))

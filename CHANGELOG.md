@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- MySQL: prepared statements, as mysql2's `execute()`, Prisma's MySQL adapter
+  and Go's driver send them, answered in MySQL's binary protocol. Each runs as
+  text upstream, its parameters written in as literals, so it is checked,
+  turned back and faked as a statement sent as text is; a fake in a parameter
+  finds its row as one in a literal does.
+- MySQL: several statements in one query, when the client turns them on. Each
+  is checked before the first runs, and sent upstream on its own.
+- MySQL: `sosie mcp`'s `query` tool reads a MySQL Sosie as it does a Postgres
+  one.
+- MySQL: a computed column's name no longer shows a real value. MySQL names
+  such a column by its text as Sosie sent it, with the real value in it where
+  Sosie turned back a fake (`email = 'real@…'`), a derived table's column in
+  its `org_name` too; the name is now taken from the client's own text.
+- MySQL: a `tinyint` is faked within its own range, not a `smallint`'s.
+
 ## 0.2.0, 5 November 2026
 
 MySQL, a source of its own; Postgres in binary, as asyncpg and pgx read it;

@@ -12,9 +12,9 @@ const echo: McpTool = {
   run: async (input, running) => ({ ...input, address: running.address }),
 }
 
-async function connect(running: () => Promise<Running[]>) {
+async function connect(running: () => Promise<Running[]>, tools = [{ kind: 'memory', tool: echo }]) {
   const [server, client] = InMemoryTransport.createLinkedPair()
-  await serveMcp({ version: '0.0.0', tools: [{ kind: 'memory', tool: echo }], running, transport: server })
+  await serveMcp({ version: '0.0.0', tools, running, transport: server })
   const mcp = new Client({ name: 'test', version: '0.0.0' })
   await mcp.connect(client)
   return mcp
@@ -66,6 +66,22 @@ describe('sosie mcp', () => {
     expect(text(result)).toBe('Sosie is not running.')
     const other = await connect(async () => [{ ...one, kind: 'postgres' }])
     expect(text(await other.callTool({ name: 'echo', arguments: { text: 'hi' } }))).toBe('Sosie serves postgres here, not memory: echo is for memory.')
+  })
+
+  it('serves a tool two sources share by one name, run by the source of the Sosie it goes to', async () => {
+    const other: McpTool = { ...echo, run: async (input, running) => ({ ...input, by: 'other', address: running.address }) }
+    const sql: Running = { ...one, kind: 'other', address: 'other://db' }
+    const tools = [
+      { kind: 'memory', tool: echo },
+      { kind: 'other', tool: other },
+    ]
+    const mcp = await connect(async () => [sql, one], tools)
+    expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'echo'])
+    expect(JSON.parse(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi' } })))).toEqual({ text: 'hi', by: 'other', address: 'other://db' })
+    const chosen = await mcp.callTool({ name: 'echo', arguments: { text: 'hi', address: 'memory://app' } })
+    expect(JSON.parse(text(chosen))).toEqual({ text: 'hi', address: 'memory://app' })
+    const neither = await connect(async () => [{ ...one, kind: 'rest' }], tools)
+    expect(text(await neither.callTool({ name: 'echo', arguments: { text: 'hi' } }))).toBe('Sosie serves rest here, not memory or other: echo is for memory or other.')
   })
 
   it('serves every running Sosie: describe each, and send a tool to the newest of its kind', async () => {

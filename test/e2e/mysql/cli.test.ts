@@ -3,6 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import mysql2 from 'mysql2/promise'
 import { expect, inject, it } from 'vitest'
 import { canariesIn } from '../canaries.js'
@@ -10,7 +12,7 @@ import { canariesIn } from '../canaries.js'
 const CLI = fileURLToPath(new URL('../../../packages/cli/dist/cli.js', import.meta.url))
 if (!existsSync(CLI)) throw new Error('Build the packages first: npm run build')
 
-it('starts in front of MySQL from the command, says where clients connect, and serves them fakes', async () => {
+it('starts in front of MySQL from the command, says where clients connect, and serves them fakes, over MCP too', async () => {
   const home = mkdtempSync(join(tmpdir(), 'sosie-cli-mysql-'))
   const upstream = inject('mysqlUpstream')
   const child = spawn(process.execPath, [CLI, '--port', '0'], {
@@ -38,6 +40,25 @@ it('starts in front of MySQL from the command, says where clients connect, and s
     const entry = readFileSync(join(home, 'running', `${child.pid}.json`), 'utf8')
     expect(JSON.parse(entry)).toMatchObject({ kind: 'mysql', address })
     expect(entry).not.toContain(new URL(upstream).password)
+    // The query tool runs SQL through the running Sosie, several statements at once.
+    const mcp = new Client({ name: 'test', version: '0.0.0' })
+    await mcp.connect(new StdioClientTransport({ command: process.execPath, args: [CLI, 'mcp'], env: { ...process.env, SOSIE_HOME: home } as Record<string, string>, stderr: 'pipe' }))
+    try {
+      const text = (result: unknown) => (result as { content: { text: string }[] }).content[0]!.text
+      const result = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT email, avatar FROM users ORDER BY id LIMIT 2; SELECT COUNT(*) AS n FROM orders' } })
+      expect(result.isError).toBeFalsy()
+      expect(canariesIn(text(result))).toEqual([])
+      const body = JSON.parse(text(result))
+      expect(body.results[0].rows).toHaveLength(2)
+      expect(body.results[0].rows[0].email).toMatch(/@example\./)
+      expect(body.results[0].rows[0].avatar).toMatch(/^0x[0-9a-f]{8}$/)
+      expect(body.results[1].rows).toEqual([{ n: '5' }])
+      const refused = await mcp.callTool({ name: 'query', arguments: { sql: 'DELETE FROM users' } })
+      expect(refused.isError).toBe(true)
+      expect(text(refused)).toBe('This statement changes data. Sosie is read-only.')
+    } finally {
+      await mcp.close()
+    }
   } finally {
     if (child.exitCode === null) {
       const exited = new Promise((resolve) => child.once('exit', resolve))

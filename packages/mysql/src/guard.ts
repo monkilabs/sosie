@@ -53,6 +53,8 @@ export interface Analysis {
   consts: ConstRef[]
   /** Parameters (?) by position, from 1, and what each is compared with. */
   params: Map<number, Near>
+  /** Where each parameter (?) is in the statement's text, in order. */
+  placeholders: number[]
 }
 
 export interface Limits {
@@ -245,6 +247,7 @@ class Analyzer {
       ...(targets && { targets }),
       consts: this.#consts,
       params,
+      placeholders: order,
     }
   }
 

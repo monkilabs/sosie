@@ -41,11 +41,17 @@ export async function serveMcp({ version, tools, running, transport }: McpOption
       }),
   )
 
-  for (const { kind, tool } of tools) {
+  // Sources may share a tool's name (query, for SQL): one tool, run by the source of the Sosie it goes to.
+  const byName = new Map<string, { kind: string; tool: McpTool }[]>()
+  for (const entry of tools) byName.set(entry.tool.name, [...(byName.get(entry.tool.name) ?? []), entry])
+  for (const [name, group] of byName) {
+    const kinds = group.map((g) => g.kind)
+    const kind = kinds.join(' or ')
+    const inputs = Object.assign({}, ...group.map((g) => g.tool.input)) as McpTool['input']
     const shape = Object.fromEntries(
-      Object.entries(tool.input).map(([name, input]) => {
+      Object.entries(inputs).map(([key, input]) => {
         const field = z.string().describe(input.description)
-        return [name, input.optional ? field.optional() : field]
+        return [key, input.optional ? field.optional() : field]
       }),
     )
     shape.address = z
@@ -53,19 +59,19 @@ export async function serveMcp({ version, tools, running, transport }: McpOption
       .optional()
       .describe(`With several ${kind} Sosies running, the address of the one to use, as describe lists it; the newest when left out.`)
     server.registerTool(
-      tool.name,
-      { description: tool.description, inputSchema: shape, annotations: { readOnlyHint: true } },
+      name,
+      { description: group[0]!.tool.description, inputSchema: shape, annotations: { readOnlyHint: true } },
       async ({ address, ...input }: Record<string, string | undefined>) =>
         respond(async () => {
           const all = await running()
-          const ofKind = all.filter((r) => r.kind === kind)
+          const ofKind = all.filter((r) => kinds.includes(r.kind))
           if (!ofKind.length) {
-            const kinds = [...new Set(all.map((r) => r.kind))].join(' and ')
-            throw new Error(`Sosie serves ${kinds} here, not ${kind}: ${tool.name} is for ${kind}.`)
+            const serving = [...new Set(all.map((r) => r.kind))].join(' and ')
+            throw new Error(`Sosie serves ${serving} here, not ${kind}: ${name} is for ${kind}.`)
           }
           const target = address ? ofKind.find((r) => r.address === address) : ofKind[0]
           if (!target) throw new Error(`No ${kind} Sosie runs at ${address}. Running: ${ofKind.map((r) => r.address).join(', ')}.`)
-          return tool.run(input, target)
+          return group.find((g) => g.kind === target.kind)!.tool.run(input, target)
         }),
     )
   }
