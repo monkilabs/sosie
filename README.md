@@ -36,11 +36,14 @@ The first time, Sosie asks for your first source's connection string at a hidden
 that names the variable to keep it in, never the string itself:
 
 ```
+  No sosie.yml here yet: one, with the first database or API Sosie reads.
+
   Its connection string, or the API's URL (hidden):
   ✓ A Postgres database: db.internal:5432/app
   A name for it (app):
   The variable to keep it in (APP_URL):
   ✓ Wrote sosie.yml: app, its upstream read from ${APP_URL}, never written there. Commit it.
+    Set APP_URL in your terminal, and Sosie starts without asking for it.
 
   ✓ app  db.internal:5432/app, read-only: 42 tables, 3 views
   ✓ Every value is faked
@@ -82,8 +85,8 @@ npx @sosie/cli scan ~/.claude/projects
 
 ### One file: sosie.yml
 
-That is the whole tool: three commands, and one file. `sosie.yml` names every source of the project, two databases, a
-REST API, a GraphQL one, and the fields you decide may pass unchanged. One Sosie serves them all, each at an address of
+That is the whole tool: three commands, and one file. `sosie.yml` names every source of the project, databases and
+APIs, and the fields you decide may pass unchanged. One Sosie serves them all, each at an address of
 its own, from 7674 up; a person is the same fake in each, and `sosie mcp` serves them all.
 
 ```yaml
@@ -103,7 +106,8 @@ sources:
 ```
 
 A connection string or a token is never written in it: each `${NAME}` is read from the terminal Sosie starts in, or
-asked for at a hidden prompt. It is all there is to configure, so there are no flags and no variables of Sosie's own.
+asked for at a hidden prompt. It is all there is to configure: there are no flags, and no variable of Sosie's own but
+`SOSIE_HOME`, where its store is.
 Installed once with `npm i -g @sosie/cli`, the command is just `sosie`.
 [Configuration](https://monkilabs.github.io/sosie/docs/configuration/) has every key.
 
@@ -181,7 +185,7 @@ own terminal, in the project's folder, as above.
   values, so a piece of a fake finds nothing.
 - **Binary results,** as asyncpg, pgx and JDBC ask for them, are the fakes
   written as Postgres would send them. A type Sosie cannot write that way
-  (`regclass`, composites, ranges) is refused in binary, with an error that
+  (`regclass`, `money`, composites, ranges) is refused in binary, with an error that
   names it.
 
 ## What Sosie is not

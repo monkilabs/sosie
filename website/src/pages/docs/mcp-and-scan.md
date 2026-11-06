@@ -31,13 +31,12 @@ Start Sosie first, in your own terminal. When none is running, every tool says s
 
 | Tool | From | Input | Returns |
 | --- | --- | --- | --- |
-| `describe` | Every Sosie | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
+| `describe` | Every source | `entity` (optional) | Each source by its name, kind and address, with its entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres, MySQL | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice or warning |
 | `find` | MongoDB | `collection`; `filter`, `projection`, `sort`, `limit` (optional), as JSON | Up to 200 documents as Extended JSON |
 | `aggregate` | MongoDB | `collection`, `pipeline` as a JSON array | Up to 200 documents as Extended JSON |
-
-| `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a `GET` through Sosie, up to 200 items of each list |
-| `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list |
+| `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a `GET` through Sosie, up to 200 items of each list, within 50 s |
+| `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list, within 50 s |
 
 Every tool is listed whatever runs; one whose kind is not running says which kinds are. `describe` lists each source by
 its name, and a tool takes a `source` by that name. With one source of its kind, it needs none; with several, it names

@@ -42,6 +42,6 @@ One Sosie serves them all, each at an address of its own.
 | `sosie mcp` | MCP server over stdio, for every running `sosie` |
 | `sosie scan <path>…` | Search files and folders for real values; exit 1 if one is found |
 
-PostgreSQL 15 to 18, MySQL 8.4 and 9, MongoDB 6.0 to 8.0, REST and GraphQL APIs; Node 24 or later.
+PostgreSQL 15 to 18, MySQL 8.4 and 9, MongoDB 6.0 to 8.0, REST and GraphQL APIs; Node 24 or 26.
 
 The [docs](https://monkilabs.github.io/sosie/docs/) say more, and the [repository](https://github.com/monkilabs/sosie) has the code.

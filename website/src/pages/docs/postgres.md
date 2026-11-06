@@ -25,7 +25,7 @@ npx @sosie/cli
   ✓ app  db.internal:5432/app, read-only: 42 tables, 3 views
   ✓ Every value is faked
 
-  app:                      postgres://localhost:7674/app
+  app:                       postgres://localhost:7674/app
 ```
 
 The address takes any user and database name and no password. It listens on `127.0.0.1` and `::1` only, unless

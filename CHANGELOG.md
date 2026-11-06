@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+Fixes a review of 0.4.0 found, each marked with the release it came in.
+
+- (0.4) A single bit a client was shown did not turn back: `WHERE flag = '0'`
+  ran on the real `0`s, which showed as `1`, so it found the opposite rows. It
+  turns back by the flip that faked it. Postgres: a bit-string constant,
+  `B'0101'` or `X'5'`, turns back too, as a string of bits does.
+- (0.4) A list cut at the cap told the client to start Sosie with a higher
+  `--max-rows`, a flag Sosie refuses. It says to raise `max-rows` in
+  `sosie.yml`.
+- (0.4) A header's `$${NAME}` is text, and was sent so, but Sosie asked for the
+  variable all the same, or stopped when it was not set.
+- (0.4) GraphQL: a `schema` given as a URL was read as a file path, and Sosie
+  stopped. It is fetched, as REST's is: with the source's `headers` at the
+  API's own origin, following no redirect; without them elsewhere.
+- (0.1) REST: a `schema` URL that answered anything but `200` was read as the
+  document all the same, and Sosie said it was not an OpenAPI document. It says
+  what the URL answered; one elsewhere is capped as an answer is.
+- (0.4) MCP: two running Sosies with a source of one name, as two projects'
+  `app` may be, sent a tool to the newest, named or not: the agent read one
+  database while it meant the other. The tool says where each is, and to stop
+  one or rename it.
+- (0.4) `sosie.yml`: a top rule no source holds is told with every other
+  problem, not once they are fixed. One that only a source learning its fields
+  kept is told at start, as it may be a typo. A reference a rule breaks is told
+  where the rule is, at the top or under its source.
+- (0.4) `sosie.yml`: a misspelt `sources` key was never named; in a terminal,
+  `sosie init` wrote a second one beside it. Only a file whose one problem is
+  that it names no sources is written by `sosie init`; any other is told. A
+  `sources:` with none under it says to add one there, as `sosie init` does.
+- The docs say what an edited `sosie.yml` can still do: it names no host, but
+  it can point a source at another variable of the terminal's, or put one in a
+  header sent to that source's upstream.
+
 ## 0.4.0, 6 November 2026
 
 One Sosie for every source of a project, all set up in `sosie.yml`, which `sosie
@@ -26,8 +61,8 @@ together. This changes how Sosie starts: see Upgrading, below.
 - The plugin's session start names each source, and its kind and address.
 
 Upgrading: `SOSIE_UPSTREAM`, `SOSIE_UPSTREAM_HEADERS`, `SOSIE_OPENAPI`,
-`SOSIE_GRAPHQL_SCHEMA` and the flags `--port`, `--host`, `--rules`,
-`--max-rows` and `--timeout` are gone, each a key of `sosie.yml` now. A
+`SOSIE_GRAPHQL_SCHEMA` and the flags `--port`, `--host`, `--rules` and
+`--max-rows` are gone, each a key of `sosie.yml` now. A
 `sosie.yml` of rules only gets its first source from `sosie init`, its rules
 kept. With `SOSIE_UPSTREAM` still set, `upstream: ${SOSIE_UPSTREAM}` reads it;
 Sosie says so when one of them is set, and a flag given says where it went.

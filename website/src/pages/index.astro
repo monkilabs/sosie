@@ -19,7 +19,7 @@ const columns = ['full_name', 'email', 'status', 'total'];
 
 <Base
   title="Sosie: your AI agent sees a double of your data"
-  description="Sosie sits between your data and your AI agent. The agent, your app and its tests query it as they would your Postgres database or your API, and every value comes back as a realistic, consistent fake."
+  description="Sosie sits between your data and your AI agent. The agent, your app and its tests query it as they would your database or your API, and every value comes back as a realistic, consistent fake."
   path=""
 >
   <main>
@@ -32,7 +32,7 @@ const columns = ['full_name', 'email', 'status', 'total'];
         </h1>
         <p class="hero__lead">
           Sosie sits between your data and your AI agent. The agent, your app and its tests query it as they would your
-          Postgres database or your API, and every value comes back as a realistic fake. The same real value is always the
+          database or your API, and every value comes back as a realistic fake. The same real value is always the
           same fake, so joins hold and code written against the fakes runs on the real data.
         </p>
         <div class="hero__actions">
@@ -109,7 +109,7 @@ const columns = ['full_name', 'email', 'status', 'total'];
           <div class="card">
             <div class="card__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 17 6-6-6-6"></path><path d="M12 19h8"></path></svg></div>
             <h3>Nothing to change in the client</h3>
-            <p><code>psql</code>, node-postgres, Prisma, Drizzle, any Postgres MCP server, <code>curl</code> and GraphQL clients connect to Sosie as to the real thing.</p>
+            <p><code>psql</code>, <code>mysql</code>, mongosh and their drivers, Prisma and Drizzle on Postgres, a database's MCP server, <code>curl</code> and GraphQL clients connect to Sosie as to the real thing.</p>
           </div>
           <div class="card">
             <div class="card__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg></div>
@@ -134,7 +134,7 @@ const columns = ['full_name', 'email', 'status', 'total'];
             <ul class="flow__items">
               <li>AI agent<small>SQL, HTTP or MCP</small></li>
               <li>Your app and its tests</li>
-              <li><code>psql</code>, <code>curl</code>, GraphQL clients</li>
+              <li><code>psql</code>, <code>mysql</code>, mongosh, <code>curl</code></li>
             </ul>
           </div>
           <div class="flow__box flow__box--sosie">
@@ -150,6 +150,8 @@ const columns = ['full_name', 'email', 'status', 'total'];
             <h3>Your data</h3>
             <ul class="flow__items">
               <li>PostgreSQL<small>15 to 18</small></li>
+              <li>MySQL<small>8.4 and 9</small></li>
+              <li>MongoDB<small>6.0 to 8.0</small></li>
               <li>Your REST API<small>with or without OpenAPI</small></li>
               <li>Your GraphQL API<small>by introspection or a schema file</small></li>
             </ul>
@@ -170,15 +172,19 @@ const columns = ['full_name', 'email', 'status', 'total'];
         <div class="sources">
           <div class="source">
             <div class="source__text">
-              <h3>Postgres</h3>
-              <p>The Postgres wire protocol, simple and extended. <code>psql</code>, node-postgres, postgres.js, Drizzle and Prisma 7 work unchanged.</p>
-              <a class="source__link" href={url('docs/postgres/')}>Postgres docs →</a>
+              <h3>Postgres, MySQL, MongoDB</h3>
+              <p>Each database's own wire protocol. <code>psql</code>, <code>mysql</code>, mongosh and their drivers work unchanged, and Drizzle and Prisma 7 on Postgres.</p>
+              <p>
+                <a class="source__link" href={url('docs/postgres/')}>Postgres docs →</a> ·
+                <a class="source__link" href={url('docs/mysql/')}>MySQL →</a> ·
+                <a class="source__link" href={url('docs/mongodb/')}>MongoDB →</a>
+              </p>
             </div>
             <div class="term">
               <div class="term__bar"><i></i><i></i><i></i><span>sosie.yml</span></div>
               <pre>sources:
   shop:
-    upstream: {'${SHOP_URL}'}   <span class="dim"># postgres://…, in your terminal</span></pre>
+    upstream: {'${SHOP_URL}'}   <span class="dim"># postgres://, mysql:// or mongodb://</span></pre>
             </div>
           </div>
           <div class="source">
@@ -204,9 +210,9 @@ const columns = ['full_name', 'email', 'status', 'total'];
             <div class="term">
               <div class="term__bar"><i></i><i></i><i></i><span>your terminal</span></div>
               <pre><span class="cmd">npx @sosie/cli</span>
-  <span class="ok">✓</span> shop     db.internal:5432/shop, read-only: 42 tables
-  <span class="ok">✓</span> billing  api.internal/v1, read-only: OpenAPI 3.1
-  <span class="ok">✓</span> catalog  api.internal/graphql, read-only: 31 types
+  <span class="ok">✓</span> shop     db.internal:5432/shop, read-only: 42 tables, 3 views
+  <span class="ok">✓</span> billing  api.internal/v1, read-only: OpenAPI 3.1, 24 schemas, 41 GET paths
+  <span class="ok">✓</span> catalog  api.internal/graphql, read-only: 31 types, 12 queries
   <span class="ok">✓</span> Every value is faked; 3 fields pass (sosie.yml)
 
   shop:                      postgres://localhost:7674/shop

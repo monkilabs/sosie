@@ -25,7 +25,7 @@ npx @sosie/cli
   ✓ app  db.internal:3306/app, read-only: 42 tables, 3 views
   ✓ Every value is faked
 
-  app:                      mysql://127.0.0.1:7674/app
+  app:                       mysql://127.0.0.1:7674/app
 ```
 
 The address takes any user and no password, and listens on `127.0.0.1` and `::1` only, unless `sosie.yml` gives another
@@ -156,7 +156,7 @@ A computed column's name is its text as you wrote it. MySQL names one by the tex
 in it where Sosie turned a fake back (`email = 'real@…'`), a derived table's column in its `org_name` too; Sosie takes
 the name from your own text, at the same place. In a prepared statement a parameter shows as `?`, as MySQL names it.
 
-> **0.2.0 showed the real value in such a name.** Upgrade to 0.3.0, or on 0.2.0 give a computed column that compares
+> **0.2.0 showed the real value in such a name.** Upgrade to 0.3.0 or later, or on 0.2.0 give a computed column that compares
 > with a fake a name of your own: `SELECT email = '…' AS matches`.
 
 ## Errors and warnings

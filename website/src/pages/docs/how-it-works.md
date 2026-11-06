@@ -56,6 +56,7 @@ Values a query computes are faked by their type, in a domain of their own.
 | Enum | A label of the same enum, by a fixed shuffle per field |
 | Date, time | Shifted by up to a year, the same shift for the same value |
 | Interval | Another duration in the same form, each number of as many digits |
+| Bits | As many bits, each drawn. A single bit is a flag: flipped or not, decided once per field, as a boolean is |
 | Range | Each bound faked as its type, then put in order |
 | JSON | The same structure; each leaf faked by its JSON type, or by the format its key names. A key that looks like a word (`city`, `createdAt`) stays; one that is a value (an email, a name) is faked |
 | Array | Each element faked in the field's domain |
@@ -87,7 +88,8 @@ One SQLite file on the machine Sosie runs on: `~/.sosie/store/store.db`, or unde
 - **One store for every upstream.** Every source of a Sosie, and every Sosie on the machine, shares it, so a person is
   the same fake from the database and from the API.
 
-Booleans, enums and bytes are not stored: their fakes come from the key.
+Booleans, single bits, enums and bytes are not stored: their fakes come from the key, and a boolean or a bit a client
+sends back is turned back by the same flip.
 
 ## Sources
 
