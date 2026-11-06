@@ -511,6 +511,14 @@ describe('sosie, when something is wrong', () => {
     await stop(sosie.child)
   })
 
+  it('names why it cannot listen on a host, and starts nothing', () => {
+    // 192.0.2.1 is for documentation: no machine has it, so nothing can listen on it.
+    const result = run([], { APP_URL: inject('upstream'), SOSIE_HOME: home }, project(ONE('    host: 192.0.2.1\n')))
+    expect(result.status).toBe(1)
+    expect(result.stderr).toBe('  ✗ app: listen EADDRNOTAVAIL: address not available 192.0.2.1\n')
+    expect(result.stdout).toBe('')
+  })
+
   it('stops a statement at the timeout sosie.yml gives, and refuses lifting it', async () => {
     const sosie = await start({ APP_URL: inject('upstream'), SOSIE_HOME: home }, project(`timeout: 1\n${ONE()}`))
     const client = new pg.Client({ connectionString: sosie.address() })
