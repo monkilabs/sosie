@@ -1789,6 +1789,10 @@ source learns. Format domains make a person's email the same fake from the datab
   allowed yet stops Sosie without a terminal and after a no, with nothing sent to the API; a yes is kept, and an edit
   that has the header carry another variable is asked about again.
 - **The dependency rule.** A test reads the imports and manifests.
+- **The release.** `npm run release` is run with an npm of the test's own: it stops on a Node older than the packages
+  need, before anything runs; publishes nothing when a check fails; and publishes one package at a time, the core
+  first and the CLI last, each after the packages it depends on, passing over one already on npm and stopping at one
+  that fails, so a release that stops partway leaves nothing that fails to install, and running it again finishes it.
 - **The plugin.** `test/plugin.test.ts`: the plugin's version and the CLI its server runs are `@sosie/cli`'s, in its
   source and in Claude Code's files, and its hooks read the `running/` entries the core writes. Each assistant's hooks
   file names scripts that are there, by the token it replaces; a session's files are found from a transcript or a

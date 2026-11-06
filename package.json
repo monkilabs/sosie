@@ -20,7 +20,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && vitest run",
     "check": "npm run typecheck && npm test",
-    "release": "npm run check && npm publish --workspaces"
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@prisma/adapter-pg": "^7.10.1",
