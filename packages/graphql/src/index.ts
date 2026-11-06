@@ -65,7 +65,6 @@ export const graphql: Source = {
       label,
       summary: `${neutral.entities.length} types, ${queries} ${queries === 1 ? 'query' : 'queries'}`,
       warnings: [],
-      client: 'curl',
       serve: (listen, faker) => startEndpoint(listen, { upstream: api, schema, fields, faker, maxItems: options.maxRows, secrets, log: (line) => process.stderr.write(`  ! ${line}\n`) }),
       async close() {},
     }

@@ -141,8 +141,6 @@ export interface Connection {
   readonly warnings: string[]
   /** The schema grows as values come (an API without a schema): sosie.yml may name fields not met yet. */
   readonly learns?: boolean
-  /** The tool a developer would point at the address, for the terminal: 'psql', 'curl'. */
-  readonly client?: string
   /**
    * Start the endpoint clients use. Every value it returns goes through the Faker. A source that `learns` its fields
    * calls `learned` with its schema as it grows, so `sosie mcp` can describe what it has met.

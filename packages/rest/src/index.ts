@@ -75,7 +75,6 @@ export const rest: Source = {
       summary: doc ? `${doc.version}, ${doc.schema.entities.length} schemas, ${operations} GET ${operations === 1 ? 'path' : 'paths'}` : 'no OpenAPI document',
       warnings,
       learns: !doc,
-      client: 'curl',
       serve: (listen, faker, learned) =>
         startEndpoint(listen, {
           upstream: api,

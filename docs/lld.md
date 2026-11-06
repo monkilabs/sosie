@@ -198,8 +198,6 @@ export interface Connection {
   readonly warnings: string[]
   /** The schema grows as values come (an API without a document, MongoDB): sosie.yml may name fields not met yet. */
   readonly learns?: boolean
-  /** The tool a developer would point at the address, for the terminal: 'psql', 'curl'. */
-  readonly client?: string
   /** Start the endpoint clients use. Every value it returns goes through the Faker. One that `learns` tells `learned` its schema as it grows. */
   serve(listen: { host: string; port: number }, faker: Faker, learned?: (schema: Schema) => void): Promise<Endpoint>
   close(): Promise<void>
