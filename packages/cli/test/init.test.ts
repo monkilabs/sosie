@@ -127,6 +127,8 @@ describe('sosie init', () => {
     for (const existing of ['sources:\n', 'sources: {}\n']) {
       const { written, text, file } = await answer([], existing)
       expect(text).toBe(existing)
+      // A problem in sosie.yml, as starting says: exit 1, not a usage error.
+      expect(written).toBeInstanceOf(ConfigError)
       let started: unknown
       try {
         readConfig(existing, file, sources)
@@ -141,7 +143,8 @@ describe('sosie init', () => {
     const existing = 'sourcs:\n  app:\n    upstream: ${APP_URL}\n'
     const { written, text } = await answer(['postgres://db/app', '', ''], existing)
     expect(written).toBeInstanceOf(ConfigError)
-    expect((written as ConfigError).problems).toContain('sosie.yml: sourcs is not a key. Did you mean sources? Keys: sources, pass, format, host, max-rows, timeout.')
+    // Not that it names no sources, or to run sosie init: that is what was run.
+    expect((written as ConfigError).problems).toEqual(['sosie.yml: sourcs is not a key. Did you mean sources? Keys: sources, pass, format, host, max-rows, timeout.'])
     expect(text).toBe(existing)
   })
 })

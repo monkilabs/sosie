@@ -51,6 +51,9 @@ export class ConfigError extends Error {
 
 export const DEFAULTS = { host: '127.0.0.1', maxRows: 1000, timeout: 30 } as const
 
+/** What a sosie.yml with no sources key is told: the one problem sosie init mends. */
+export const noSourcesProblem = (file = 'sosie.yml') => `${file} names no sources. Add one under sources:, or run sosie init.`
+
 const TOP = ['sources', 'pass', 'format', 'host', 'max-rows', 'timeout']
 const SOURCE = ['upstream', 'kind', 'schema', 'headers', 'port', 'host', 'max-rows', 'timeout', 'pass', 'format']
 const NAME = /^[a-z][a-z0-9_-]{0,39}$/
@@ -109,7 +112,7 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
   const sources: SourceConfig[] = []
   const given = top.sources
   if (!('sources' in top)) {
-    problems.push(`${file} names no sources. Add one under sources:, or run sosie init.`)
+    problems.push(noSourcesProblem(file))
   } else if (given === null || (typeof given === 'object' && !Array.isArray(given) && !Object.keys(given).length)) {
     // As sosie init says: it writes no second sources key.
     problems.push(`${file} has a sources: key with none under it. Add one there, such as shop: { upstream: \${SHOP_URL} }.`)

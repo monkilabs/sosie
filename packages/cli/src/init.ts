@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { ConfigError, isSourceName, readConfig, sourceNames, variableFor, type Source } from '@sosie/core'
+import { ConfigError, isSourceName, noSourcesProblem, readConfig, sourceNames, variableFor, type Source } from '@sosie/core'
 import { fail, ok } from './print.js'
 import { hiddenPrompt, prompt } from './prompt.js'
 
@@ -33,12 +33,13 @@ export async function init(file: string, terminal: Terminal, sources: Source[]):
   if (existing !== undefined) {
     const names = sourceNames(existing)
     if (names?.length) throw new Error(`sosie.yml names its sources already: ${names.join(', ')}. Add another under sources:.`)
-    if (names) throw new Error('sosie.yml has a sources: key with none under it. Add one there, such as shop: { upstream: ${SHOP_URL} }.')
-    // Anything else wrong is told, and nothing written: a sources key misspelt would end up beside a second one.
+    // Anything else wrong is told, as starting tells it, and nothing written: a sources key misspelt would end up
+    // beside a second one. Not that it names no sources, or to run sosie init: that is what runs.
     try {
       readConfig(existing, file, sources)
     } catch (error) {
-      if (!(error instanceof ConfigError) || !error.unwritten) throw error
+      if (!(error instanceof ConfigError)) throw error
+      if (!error.unwritten) throw new ConfigError(error.problems.filter((p) => p !== noSourcesProblem()))
     }
   }
   const say = (line = '') => terminal.output.write(`${line}\n`)
