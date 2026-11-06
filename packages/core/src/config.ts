@@ -99,12 +99,13 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
 
   const sources: SourceConfig[] = []
   const given = top.sources
-  if (given === undefined || given === null) {
+  if (!('sources' in top)) {
     problems.push(`${file} names no sources. Add one under sources:, or run sosie init.`)
+  } else if (given === null || (typeof given === 'object' && !Array.isArray(given) && !Object.keys(given).length)) {
+    // As sosie init says: it writes no second sources key.
+    problems.push(`${file} has a sources: key with none under it. Add one there, such as shop: { upstream: \${SHOP_URL} }.`)
   } else if (typeof given !== 'object' || Array.isArray(given)) {
     at('sources', ' maps each source by its name to its settings, such as shop: { upstream: ${SHOP_URL} }.')
-  } else if (!Object.keys(given).length) {
-    problems.push(`${file} names no sources. Add one under sources:, or run sosie init.`)
   } else {
     const ports = new Map<number, string>()
     for (const [name, value] of Object.entries(given as Record<string, unknown>)) {

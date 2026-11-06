@@ -449,6 +449,14 @@ describe('sosie, when something is wrong', () => {
     expect(result.stderr).toContain('✗ sosie.yml: contacts.region is not a table of any source.')
   })
 
+  it('says to add a source under a sources key that has none, not to run sosie init, which would refuse', () => {
+    for (const text of ['sources:\n', 'sources: {}\n']) {
+      const result = run([], { SOSIE_HOME: home }, project(text))
+      expect(result.status, text).toBe(1)
+      expect(result.stderr, text).toBe('  ✗ sosie.yml has a sources: key with none under it. Add one there, such as shop: { upstream: ${SHOP_URL} }.\n')
+    }
+  })
+
   it('starts a second Sosie, for another project, on the next free port, and MCP serves both', async () => {
     const shared = mkdtempSync(join(tmpdir(), 'sosie-two-'))
     const shopAt = project('sources:\n  shop:\n    upstream: ${SHOP_URL}\n')

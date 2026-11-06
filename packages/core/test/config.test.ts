@@ -123,8 +123,12 @@ sources:
   })
 
   it('says a file without sources names none, and how to add one', () => {
-    for (const text of ['', 'pass: [orders.status]\n', 'sources: {}\n']) {
+    for (const text of ['', 'pass: [orders.status]\n']) {
       expect(problems(text)).toEqual(['sosie.yml names no sources. Add one under sources:, or run sosie init.'])
+    }
+    // sosie init writes no second sources key: a source goes under the one there.
+    for (const text of ['sources:\n', 'sources: {}\n']) {
+      expect(problems(text)).toEqual(['sosie.yml has a sources: key with none under it. Add one there, such as shop: { upstream: ${SHOP_URL} }.'])
     }
   })
 

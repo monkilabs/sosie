@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { readConfig } from '@sosie/core'
+import { ConfigError, readConfig } from '@sosie/core'
 import { describe, expect, it } from 'vitest'
 import { init } from '../src/init.js'
 import { sources } from '../src/sources.js'
@@ -66,5 +66,19 @@ describe('sosie init', () => {
     const { written, text } = await answer([], existing)
     expect((written as Error).message).toBe('sosie.yml names its sources already: shop. Add another under sources:.')
     expect(text).toBe(existing)
+  })
+
+  it('says of a sources key with none under it what starting Sosie says, and writes no second one', async () => {
+    for (const existing of ['sources:\n', 'sources: {}\n']) {
+      const { written, text, file } = await answer([], existing)
+      expect(text).toBe(existing)
+      let started: unknown
+      try {
+        readConfig(existing, file, sources)
+      } catch (error) {
+        started = error
+      }
+      expect([(written as Error).message]).toEqual((started as ConfigError).problems)
+    }
   })
 })
