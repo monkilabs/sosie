@@ -130,6 +130,17 @@ describe('the plugin', () => {
       rmSync(join(home, 'running'), { recursive: true })
     })
 
+    it('list the newest Sosie’s sources first, as describe does, whichever entry is read first', () => {
+      const source = (name: string) => ({ name, kind: 'postgres', address: `postgres://localhost:7674/${name}`, schema: { entities: [] }, passing: [] })
+      for (const [mine, parents] of [[1, 2], [2, 1]] as const) {
+        writeRunning(home, [source('mine')], process.pid, mine)
+        writeRunning(home, [source('parents')], process.ppid, parents)
+        const names = hooks.running().map((r) => (r as { name: string }).name)
+        expect(names).toEqual(mine > parents ? ['mine', 'parents'] : ['parents', 'mine'])
+        rmSync(join(home, 'running'), { recursive: true })
+      }
+    })
+
     it('find what to scan: a transcript and the folder beside it, or a Copilot CLI session by its id', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sosie-sessions-'))
       writeFileSync(join(dir, 'a.jsonl'), '')
