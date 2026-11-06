@@ -14,7 +14,7 @@ type Node = Record<string, any>
 export function rewriteConsts(analysis: Analysis, scope: RequestScope): boolean {
   let changed = false
   for (const { node, near, array } of analysis.consts) {
-    const value = constValue(node)
+    const value = node.bsval ? bitsOf(node.bsval.bsval) : constValue(node)
     if (value === undefined) continue
     if (array) {
       if (typeof value !== 'string') continue
@@ -72,9 +72,17 @@ function lookupArray(text: string, near: Near, scope: RequestScope): string | un
   return changed ? serializeArray(items, parsed.bounds) : undefined
 }
 
+/** A bit-string constant's bits: B'0101' is 0101, X'1F' 00011111. Postgres hands either over with its letter. */
+function bitsOf(text: string | undefined): string | undefined {
+  const m = /^([bx])(.*)$/i.exec(text ?? '')
+  if (!m) return undefined
+  if (m[1]!.toLowerCase() === 'b') return /^[01]*$/.test(m[2]!) ? m[2] : undefined
+  return /^[0-9a-f]*$/i.test(m[2]!) ? [...m[2]!].map((d) => parseInt(d, 16).toString(2).padStart(4, '0')).join('') : undefined
+}
+
 function replace(node: Node, real: string, kind: string): void {
   const location = node.location
-  for (const key of ['sval', 'ival', 'fval', 'boolval']) delete node[key]
+  for (const key of ['sval', 'ival', 'fval', 'boolval', 'bsval']) delete node[key]
   if (kind === 'boolean') node.boolval = { boolval: /^(t|true|y|yes|on|1)$/i.test(real) }
   else if (kind === 'number' && /^-?\d+$/.test(real) && Math.abs(Number(real)) <= 2147483647) node.ival = { ival: Number(real) }
   else if (kind !== 'string' && /^-?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(real)) node.fval = { fval: real }

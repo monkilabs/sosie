@@ -190,6 +190,17 @@ describe('reading through Sosie', () => {
     expect(rows[0]!.mask).not.toBe(real[0]!.mask)
   })
 
+  it('turns back the bits a WHERE compares, written as a string or as a bit-string constant', async () => {
+    const asText = { getTypeParser: () => (value: string) => value }
+    const { rows } = await client.query({ text: 'SELECT id, flags FROM memberships ORDER BY id LIMIT 1', types: asText })
+    const { id, flags: fake } = rows[0]! as { id: string; flags: string }
+    const hex = parseInt(fake, 2).toString(16)
+    for (const where of [`'${fake}'`, `B'${fake}'`, `X'${hex}'`]) {
+      const found = await client.query({ text: `SELECT id FROM memberships WHERE flags = ${where}`, types: asText })
+      expect(found.rows, where).toEqual([{ id }])
+    }
+  })
+
   it('fakes a setting a function set from a row, as Postgres reports it', async () => {
     const c = await sosie.client()
     const reported: Record<string, string> = {}
