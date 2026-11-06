@@ -121,6 +121,15 @@ describe('the plugin', () => {
       expect(hooks.cli()).toBe(`@sosie/cli@${cli}`)
     })
 
+    it('read an earlier version’s entry as one source, named by its kind, and pass over a Sosie that stopped', () => {
+      mkdirSync(join(home, 'running'), { recursive: true })
+      // 0.3.0 wrote one source, at the top of its entry.
+      writeFileSync(join(home, 'running', `${process.pid}.json`), JSON.stringify({ pid: process.pid, startedAt: 1, kind: 'mysql', address: 'mysql://127.0.0.1:7674/crm', schema: { entities: [] }, passing: [] }))
+      writeRunning(home, [{ name: 'gone', kind: 'postgres', address: 'postgres://localhost:7676/gone', schema: { entities: [] }, passing: [] }], 2 ** 30)
+      expect(hooks.running()).toEqual([{ name: 'mysql', kind: 'mysql', address: 'mysql://127.0.0.1:7674/crm' }])
+      rmSync(join(home, 'running'), { recursive: true })
+    })
+
     it('find what to scan: a transcript and the folder beside it, or a Copilot CLI session by its id', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sosie-sessions-'))
       writeFileSync(join(dir, 'a.jsonl'), '')
