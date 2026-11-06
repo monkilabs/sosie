@@ -97,6 +97,14 @@ describe('sosie init', () => {
     expect(shown).not.toMatch(/kim|s3cret|localhost/)
   })
 
+  it('writes an empty sosie.yml as a new one, with its header', async () => {
+    for (const existing of ['', '\n  \n']) {
+      const { text } = await answer(['postgres://db/app', '', ''], existing)
+      expect(text).toMatch(/^# Sosie: this project's sources/)
+      expect(text).toContain('\nsources:\n  app:\n    upstream: ${APP_URL}\n')
+    }
+  })
+
   it('adds the source to a sosie.yml that names none yet, its rules kept', async () => {
     const { text, file } = await answer(['postgres://db/app', '', ''], 'pass:\n  - orders.status\n')
     expect(text).toBe('pass:\n  - orders.status\n\nsources:\n  app:\n    upstream: ${APP_URL}\n')

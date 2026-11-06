@@ -77,7 +77,8 @@ export async function init(file: string, terminal: Terminal, sources: Source[]):
   }
 
   const block = `sources:\n  ${name}:\n    upstream: \${${variable}}\n`
-  writeFileSync(file, existing === undefined ? `${HEADER}${block}` : `${existing}${!existing || existing.endsWith('\n') ? '' : '\n'}\n${block}`)
+  // An empty sosie.yml is written as a new one is, with its header.
+  writeFileSync(file, !existing?.trim() ? `${HEADER}${block}` : `${existing}${existing.endsWith('\n') ? '' : '\n'}\n${block}`)
   say(ok(`Wrote sosie.yml: ${name}, its upstream read from \${${variable}}, never written there. Commit it.`))
   say(`    Set ${variable} in your terminal, and Sosie starts without asking for it.`)
   return { name, variable, value }
