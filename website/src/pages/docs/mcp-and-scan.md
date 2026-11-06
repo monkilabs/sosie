@@ -41,7 +41,8 @@ Start Sosie first, in your own terminal. When none is running, every tool says s
 
 Every tool is listed whatever runs; one whose kind is not running says which kinds are. `describe` lists each source by
 its name, and a tool takes a `source` by that name. With one source of its kind, it needs none; with several, it names
-them and asks for one, so an agent never reads the wrong database without knowing.
+them and asks for one, so an agent never reads the wrong database without knowing. Sosies of two projects may run at
+once, their sources listed together; a name both use goes to neither, and the tool says where each is.
 
 ## The plugin
 

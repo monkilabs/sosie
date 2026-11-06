@@ -588,7 +588,8 @@ never read the wrong database without knowing.
 
 Sources that share a tool's name share one tool: `query` goes to the Postgres or MySQL source named, and runs as
 that source's. Several Sosies (another project's) may run at once: their sources are listed together, the newest
-Sosie's first, and a name two of them share goes to the newest. When Sosie is not running, every tool says so, and how to start it. A tool for a
+Sosie's first. A name two of them share goes to neither: the tool says where each is, and to stop one or rename
+its source. When Sosie is not running, every tool says so, and how to start it. A tool for a
 kind that is not running says which kinds are. Every tool is marked read-only. A MongoDB Sosie, and a REST Sosie without a document, learn their fields from the
 answers, and write their entries again as they do. For REST, `describe` lists each entity a collection names that the API answered with a list,
 with the fields met in it so far. An entity named after another word a client typed (a tenant's slug in

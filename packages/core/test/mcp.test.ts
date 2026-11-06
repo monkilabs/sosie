@@ -107,6 +107,21 @@ describe('sosie mcp', () => {
     expect(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi', source: 'shop' } }))).toBe('No memory source is named shop: app, crm.')
   })
 
+  it('never picks one of two sources that share a name, run by two Sosies: it says where each is', async () => {
+    // Two projects' Sosies, each with a source named app, as sosie init suggests the database's name.
+    const theirs: Running = { ...one, address: 'memory://other-project/app' }
+    const mcp = await connect(async () => [theirs, one])
+    const said = 'Two running Sosies have a source named app, at memory://other-project/app and memory://app. Stop one, or rename its source in sosie.yml.'
+    for (const args of [{ text: 'hi' }, { text: 'hi', source: 'app' }]) {
+      const result = await mcp.callTool({ name: 'echo', arguments: args })
+      expect(result.isError).toBe(true)
+      expect(text(result)).toBe(said)
+    }
+    // A name only one of them has is still found.
+    const crm = await connect(async () => [theirs, one, { ...one, name: 'crm', address: 'memory://crm' }])
+    expect(JSON.parse(text(await crm.callTool({ name: 'echo', arguments: { text: 'hi', source: 'crm' } })))).toEqual({ text: 'hi', address: 'memory://crm' })
+  })
+
   it('lists a Sosie that has met no entity yet, as an API without a schema document', async () => {
     const learning: Running = { name: 'api', kind: 'rest', address: 'http://localhost:7675', schema: { entities: [] }, passing: [] }
     const mcp = await connect(async () => [learning, one])
