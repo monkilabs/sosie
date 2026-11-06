@@ -17,7 +17,7 @@ const orders = [
   { id: 12, userId: 2, total: 1500, status: 'shipped', note: null },
 ]
 
-const openapi = {
+export const openapi = {
   openapi: '3.1.0',
   info: { title: 'Shop', version: '1' },
   paths: {

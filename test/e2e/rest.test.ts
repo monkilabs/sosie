@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { request as httpRequest } from 'node:http'
+import { createServer, request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { createFaker, loadRules, normalize, Store, storeDir, type Running, type Schema } from '@sosie/core'
 import { rest } from '@sosie/rest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { startApi, startRecorder, TOKEN, type FakeApi } from './api.js'
+import { openapi, startApi, startRecorder, TOKEN, type FakeApi } from './api.js'
 import { canariesIn } from './canaries.js'
 import { startSosie } from './sosie.js'
 
@@ -27,12 +27,14 @@ async function startRest(
     query = '',
     userinfo = '',
     learned = undefined as ((schema: Schema) => void) | undefined,
+    schema = undefined as string | undefined,
   } = {},
 ) {
   const connection = await rest.connect(new URL(`${api.url.replace('//', `//${userinfo}`)}${query}`), {
     maxRows,
     statementTimeout: 5000,
     headers,
+    ...(schema && { schema }),
   })
   // The same key on every run, so the same fakes. With a key of its own each run, a value's fake could by chance be
   // one of the API's own words: a single word is faked as a word, and a value Sosie gave, typed where a path starts
@@ -680,6 +682,43 @@ describe('an API with an OpenAPI document', () => {
       expect((await s.get(`/users?active=${user.active}`)).body.data).toContainEqual(user)
     }
     await s.close()
+    await documented.close()
+  })
+
+  it('reads the document from the schema given: a file, and asks the API for none', async () => {
+    const bare = await startApi()
+    const file = join(mkdtempSync(join(tmpdir(), 'sosie-openapi-')), 'openapi.json')
+    writeFileSync(file, JSON.stringify(openapi))
+    const s = await startRest(bare, { schema: file })
+    expect(s.connection.summary).toBe('OpenAPI 3.1, 4 schemas, 5 GET paths')
+    expect(s.connection.learns).toBe(false)
+    expect(bare.requests).toEqual([])
+    await s.close()
+    await expect(startRest(bare, { schema: join(file, '..', 'none.json') })).rejects.toThrow(/^Cannot read its schema: ENOENT/)
+    await bare.close()
+  })
+
+  it('reads a schema URL at the API’s own origin with its credentials, and one elsewhere with none', async () => {
+    const documented = await startApi({ withOpenapi: true })
+    const origin = new URL(documented.url).origin
+    const own = await startRest(documented, { schema: `${origin}/v1/openapi.json` })
+    expect(own.connection.summary).toBe('OpenAPI 3.1, 4 schemas, 5 GET paths')
+    expect(documented.requests).toEqual([{ method: 'GET', path: '/v1/openapi.json', authorization: `Bearer ${TOKEN}` }])
+    await own.close()
+    await expect(startRest(documented, { schema: `${origin}/v1/nothing.json` })).rejects.toThrow(`Cannot read its schema: ${new URL(origin).host}/v1/nothing.json answered 404.`)
+
+    const asked: (string | undefined)[] = []
+    const cdn = createServer((req, res) => {
+      asked.push(req.headers.authorization)
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(openapi))
+    })
+    await new Promise<void>((resolve) => cdn.listen(0, '127.0.0.1', resolve))
+    const elsewhere = await startRest(documented, { schema: `http://localhost:${(cdn.address() as { port: number }).port}/openapi.json` })
+    expect(elsewhere.connection.summary).toBe('OpenAPI 3.1, 4 schemas, 5 GET paths')
+    expect(asked).toEqual([undefined])
+    await elsewhere.close()
+    await new Promise<void>((resolve) => cdn.close(() => resolve()))
     await documented.close()
   })
 })

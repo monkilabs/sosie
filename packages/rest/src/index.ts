@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { secretParts, upstreamHeaders, why, type Connection, type Source } from '@sosie/core'
+import { readCapped, secretParts, upstreamHeaders, why, type Connection, type Source } from '@sosie/core'
 import { startEndpoint } from './endpoint.js'
 import { requestTool } from './mcp.js'
 import { parseDocument, readApi, type Api } from './openapi.js'
@@ -96,10 +96,22 @@ export const rest: Source = {
 async function readDocument(location: string, api: RestUpstream): Promise<string> {
   if (!/^https?:\/\//i.test(location)) return readFileSync(location, 'utf8')
   const url = new URL(location)
-  if (url.origin === api.base.origin) return (await api.get(url)).body
-  const response = await fetch(url, { signal: AbortSignal.timeout(api.timeout) })
-  return response.text()
+  const answered = (status: number) => new Error(`${url.host}${url.pathname} answered ${status}.`)
+  if (url.origin === api.base.origin) {
+    const answer = await api.get(url)
+    if (answer.status !== 200) throw answered(answer.status)
+    return answer.body
+  }
+  const response = await fetch(url, { headers: { 'user-agent': 'sosie' }, signal: AbortSignal.timeout(api.timeout) })
+  if (response.status !== 200) {
+    await response.body?.cancel()
+    throw answered(response.status)
+  }
+  return readCapped(response, MAX_DOCUMENT)
 }
+
+/** A document's size at most, as an answer's. */
+const MAX_DOCUMENT = 20 * 1024 * 1024
 
 export { parseDocument, readApi } from './openapi.js'
 export { route, singular } from './paths.js'
