@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.4.0, 6 November 2026
 
-**One Sosie for every source of a project, all set up in `sosie.yml`.** This
-changes how Sosie starts: see Upgrading, below.
+One Sosie for every source of a project, all set up in `sosie.yml`, which `sosie
+init` writes; values that came back `NULL` faked; and a command that could hang
+for good after its work no longer does. All seven packages move to 0.4.0
+together. This changes how Sosie starts: see Upgrading, below.
 
 - `sosie.yml` names every source of the project, two databases, a REST API, a
   GraphQL one, each by a name of the team's, with the same keys: `upstream`,
@@ -29,6 +31,9 @@ Upgrading: `SOSIE_UPSTREAM`, `SOSIE_UPSTREAM_HEADERS`, `SOSIE_OPENAPI`,
 `sosie.yml` of rules only gets its first source from `sosie init`, its rules
 kept. With `SOSIE_UPSTREAM` still set, `upstream: ${SOSIE_UPSTREAM}` reads it;
 Sosie says so when one of them is set, and a flag given says where it went.
+
+Fixes and the rest, those marked with a version in that release and the ones
+after it:
 
 - Postgres: a column of a domain over another domain, an enum or an array,
   and an enum array a query computes (`array_agg(role)`), are faked by their
