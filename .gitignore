@@ -5,3 +5,4 @@ dist/
 *.log
 test/e2e/prisma/generated/
 .astro/
+.DS_Store
