@@ -28,6 +28,8 @@ const sends = new Map<number, TypeSend>(
       [1186, 'interval', 'interval_send'],
       [1266, 'timetz', 'timetz_send'],
       [1700, 'numeric', 'numeric_send'],
+      [1560, 'bit', 'bit_send'],
+      [1562, 'varbit', 'varbit_send'],
       [2950, 'uuid', 'uuid_send'],
       [3802, 'jsonb', 'jsonb_send'],
       [869, 'inet', 'inet_send'],
@@ -103,6 +105,21 @@ describe('the binary format', () => {
     // An array: one dimension, a null, int4 elements, length 2 from 1, then each element.
     expect(hex(1007, '{7,NULL}')).toBe('00000001' + '00000001' + '00000017' + '00000002' + '00000001' + '0000000400000007' + 'ffffffff')
     expect(hex(1007, '{}')).toBe('000000000000000000000017')
+  })
+
+  it('reads and writes bit and varbit as their number of bits, then the bits eight to a byte, the first the highest', () => {
+    for (const text of ['', '1', '10110', '10110101', '101101011']) {
+      expect(codec(1560).decode(codec(1560).encode(text)), `bit ${text}`).toBe(text)
+      expect(codec(1562).decode(codec(1562).encode(text)), `varbit ${text}`).toBe(text)
+    }
+    expect(hex(1560, '10110')).toBe('00000005' + 'b0')
+    expect(hex(1562, '101101011')).toBe('00000009' + 'b580')
+    expect(hex(1562, '')).toBe('00000000')
+    // A count of bits that says another number of bytes than follow, or none, is not bits; nor is text of other digits.
+    for (const bytes of ['00000009b5', '00000005b080', 'ffffffff', '000000']) {
+      expect(() => codec(1562).decode(Buffer.from(bytes, 'hex')), bytes).toThrow(new Error(`Not bits: ${bytes}`))
+    }
+    expect(() => codec(1560).encode('10201')).toThrow(new Error('Not bits: 10201'))
   })
 
   it('refuses an array whose dimensions the message cannot hold, before building anything', () => {
