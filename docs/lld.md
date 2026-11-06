@@ -562,7 +562,7 @@ CREATE INDEX value_scan ON value (mac_ci) WHERE scannable = 1;
   are derived from it with HKDF.
 - **Allocation.** The fake is drawn from a seed taken from the value's keyed
   hash. A fake is never the value itself, unless the value has no letter or
-  digit to fake: draws stop after a fixed number of attempts. For keys and text, a fake is unique
+  digit to fake: draws stop after a fixed number of attempts. For keys, text and bits, a fake is unique
   within its domain: if it is taken, the seed advances, and a numeric key gets
   one more digit for every 16 draws that were taken. After 64 taken draws the next is kept, taken or not, so a domain with few
   fakes to draw from (first names, in a large table) can give two real values one fake; a lookup by it, naming

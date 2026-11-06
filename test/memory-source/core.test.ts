@@ -335,6 +335,17 @@ describe('fakes by type', async () => {
     }
   })
 
+  it('bits: no two values of a field share a fake while it has bits to spare, so a WHERE on each finds its own rows', async () => {
+    const { faker } = await serve()
+    const flags: Field = { id: 'users.flags', name: 'flags', type: { kind: 'bits', length: 4 } }
+    // Twelve of the sixteen values four bits hold: drawn as they come, two would almost surely share a fake.
+    const reals = Array.from({ length: 12 }, (_, i) => i.toString(2).padStart(4, '0'))
+    const fakes = reals.map((real) => faker.value(real, flags) as string)
+    for (const fake of fakes) expect(fake).toMatch(/^[01]{4}$/)
+    expect(new Set(fakes).size).toBe(reals.length)
+    for (const [i, fake] of fakes.entries()) expect(faker.request().lookup(fake, flags)).toBe(reals[i])
+  })
+
   it('checks a field that passes for every value the request turned back at once, not one by one', async () => {
     const { faker } = await serve('pass:\n  - users.city\n')
     const email = { id: 'users.email', name: 'email', type: { kind: 'string' } } as const

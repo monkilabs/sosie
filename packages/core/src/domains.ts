@@ -52,7 +52,8 @@ export function planner(schema: Schema, rules: Rules): (field: Field) => FieldPl
     } else {
       const given = field.format && (FORMATS as readonly string[]).includes(field.format) ? (field.format as Format) : undefined
       const format = rules.format.get(field.id) ?? given ?? (field.type.kind === 'string' ? formatByName(field, entity) : undefined)
-      const unique = !!field.key || !!field.references || field.type.kind === 'string' || field.type.kind === 'uuid'
+      // Bits as text: a short field has few fakes to draw from, and two values sharing one would find neither by it.
+      const unique = !!field.key || !!field.references || ['string', 'uuid', 'bits'].includes(field.type.kind)
       plan =
         format && PERSONAL.has(format)
           ? { domain: `format:${format}`, format, unique: true }

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- (0.4) Two values of a bit field could share a fake, in a short field almost
+  always: a field of four bits gave twelve values six fakes. A WHERE on such a
+  fake ran as written, and found no row, or the rows it does not stand for.
+  Bits are faked as text is: no two values of a field share a fake while it has
+  bits to spare.
+
 ## 0.4.1, 6 November 2026
 
 The fixes a review of 0.4.0 found, two of them queries that found the wrong rows
