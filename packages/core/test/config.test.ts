@@ -123,13 +123,24 @@ sources:
   })
 
   it('says a file without sources names none, and how to add one', () => {
+    const unwritten = (text: string) => {
+      try {
+        read(text)
+      } catch (error) {
+        return (error as ConfigError).unwritten
+      }
+    }
     for (const text of ['', 'pass: [orders.status]\n']) {
       expect(problems(text)).toEqual(['sosie.yml names no sources. Add one under sources:, or run sosie init.'])
+      expect(unwritten(text)).toBe(true)
     }
     // sosie init writes no second sources key: a source goes under the one there.
     for (const text of ['sources:\n', 'sources: {}\n']) {
       expect(problems(text)).toEqual(['sosie.yml has a sources: key with none under it. Add one there, such as shop: { upstream: ${SHOP_URL} }.'])
+      expect(unwritten(text)).toBe(false)
     }
+    // Something else wrong is told first, never written around.
+    expect(unwritten('sourcs:\n  app:\n    upstream: ${APP_URL}\n')).toBe(false)
   })
 
   it('refuses a key a source’s kind does not take, saying why', () => {

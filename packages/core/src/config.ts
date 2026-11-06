@@ -39,7 +39,11 @@ export interface Kind {
 }
 
 export class ConfigError extends Error {
-  constructor(readonly problems: string[]) {
+  /** `unwritten`: sosie.yml has no sources key and nothing else wrong, so its first source is still to be written. */
+  constructor(
+    readonly problems: string[],
+    readonly unwritten = false,
+  ) {
     super(problems.join('\n'))
     this.name = 'ConfigError'
   }
@@ -204,7 +208,7 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
     }
   }
 
-  if (problems.length) throw new ConfigError(problems)
+  if (problems.length) throw new ConfigError(problems, !('sources' in top) && problems.length === 1)
   return {
     file,
     rules: { ...(top.pass !== undefined && { pass: top.pass }), ...(top.format !== undefined && { format: top.format }) },

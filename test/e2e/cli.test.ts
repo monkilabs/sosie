@@ -449,6 +449,15 @@ describe('sosie, when something is wrong', () => {
     expect(result.stderr).toContain('✗ sosie.yml: contacts.region is not a table of any source.')
   })
 
+  it('names a misspelt sources key, and never writes a second one', () => {
+    const text = 'sourcs:\n  app:\n    upstream: ${APP_URL}\n'
+    const dir = project(text)
+    const result = run([], { APP_URL: inject('upstream'), SOSIE_HOME: home }, dir)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('✗ sosie.yml: sourcs is not a key. Did you mean sources?')
+    expect(readFileSync(join(dir, 'sosie.yml'), 'utf8')).toBe(text)
+  })
+
   it('says to add a source under a sources key that has none, not to run sosie init, which would refuse', () => {
     for (const text of ['sources:\n', 'sources: {}\n']) {
       const result = run([], { SOSIE_HOME: home }, project(text))

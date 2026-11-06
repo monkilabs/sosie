@@ -81,4 +81,12 @@ describe('sosie init', () => {
       expect([(written as Error).message]).toEqual((started as ConfigError).problems)
     }
   })
+
+  it('tells what else is wrong in a sosie.yml with no sources key, a misspelt one among it, and writes nothing', async () => {
+    const existing = 'sourcs:\n  app:\n    upstream: ${APP_URL}\n'
+    const { written, text } = await answer(['postgres://db/app', '', ''], existing)
+    expect(written).toBeInstanceOf(ConfigError)
+    expect((written as ConfigError).problems).toContain('sosie.yml: sourcs is not a key. Did you mean sources? Keys: sources, pass, format, host, max-rows, timeout.')
+    expect(text).toBe(existing)
+  })
 })

@@ -16,7 +16,6 @@ import {
   serveMcp,
   settingsProblems,
   sosieHome,
-  sourceNames,
   Store,
   storeDir,
   storeDirs,
@@ -131,7 +130,8 @@ async function initCommand(typed?: Record<string, string>): Promise<void> {
     if (typed) typed[written.variable] = written.value
     else process.stdout.write('    Start Sosie with npx @sosie/cli.\n')
   } catch (error) {
-    throw new Exit(error instanceof ConfigError ? 1 : 2, fail((error as Error).message))
+    if (error instanceof ConfigError) throw new Exit(1, error.problems.map(fail).join('\n'))
+    throw new Exit(2, fail((error as Error).message))
   }
 }
 
@@ -290,13 +290,16 @@ async function start(): Promise<void> {
   await stopped
 }
 
-/** Whether sosie.yml has no sources key, so that its first source is still to be written. */
+/**
+ * Whether sosie.yml has no sources key and nothing else wrong, so that its first source is still to be written. One
+ * with something else wrong (a sources key misspelt) is told when it is read, never written a second.
+ */
 function noSources(file: string): boolean {
   try {
-    return sourceNames(readFileSync(file, 'utf8')) === undefined
-  } catch {
-    // Told when it is read.
+    readConfig(readFileSync(file, 'utf8'), file, sources)
     return false
+  } catch (error) {
+    return error instanceof ConfigError && error.unwritten
   }
 }
 
