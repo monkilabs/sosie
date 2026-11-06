@@ -206,6 +206,7 @@ its translations follow it.
 | Left in English | The CLI and everything it prints, `sosie.yml`'s keys, code and commands, and the messages the docs quote, so a reader can match them against their terminal. Also the skill, which agents read, and the design documents, which contributors read |
 | In step | Each translation names the English it was made from, by the hash of its source file. A page whose English changed since says so at its top and links to the English; a page not translated yet is the English one, saying so. The site check lists every page that is due, and never fails for one, so an English change is never held up |
 | Terms | A short glossary per language, for the words the docs use as terms (source, upstream, fake, pass, rule), so each is the same word on every page. Sosie stays Sosie |
+| Made by | Claude translates every page; no native speaker reads it before it is published. So each page is read again against its English, by a second pass that looks only for a sentence whose meaning changed, and the site check makes sure every code span and code block, every command, key and quoted message, is the English one, character for character |
 
 A language is published whole, every page of it at once, never page by page.
 
