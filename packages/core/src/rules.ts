@@ -23,6 +23,11 @@ export class RulesError extends Error {
   }
 }
 
+/** A YAML error, by its first line: the rest quotes the text around it. Its colon, which led to that, is a full stop. */
+export function yamlProblem(file: string, error: unknown): string {
+  return `${file}: ${(error as Error).message.split('\n')[0]!.replace(/:\s*$/, '.')}`
+}
+
 export const NO_RULES: Rules = { pass: new Set(), format: new Map(), warnings: [] }
 
 /** Rules as one part of sosie.yml writes them, the top's or a source's: not yet checked. */
@@ -188,7 +193,7 @@ export function loadRules(text: string, schema: Schema, file = 'sosie.yml', { le
   try {
     doc = parse(text)
   } catch (error) {
-    throw new RulesError([`${file}: ${(error as Error).message.split('\n')[0]}`])
+    throw new RulesError([yamlProblem(file, error)])
   }
   if (doc == null) return NO_RULES
   if (typeof doc !== 'object' || Array.isArray(doc)) throw new RulesError([`${file}: expected the keys pass and format.`])

@@ -132,7 +132,7 @@ sources:
     const shop = 'sources:\n  shop:\n    upstream: ${SHOP_URL}\n'
     const billing = (more: string) => `sources:\n  billing:\n    upstream: \${BILLING_URL}\n${more}`
     for (const [text, problem] of [
-      ['sources: [\n', 'sosie.yml: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1:'],
+      ['sources: [\n', 'sosie.yml: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1.'],
       ['- shop\n', 'sosie.yml: expected keys such as sources, pass and format.'],
       ['shop\n', 'sosie.yml: expected keys such as sources, pass and format.'],
       ['sources: [shop]\n', 'sosie.yml: sources maps each source by its name to its settings, such as shop: { upstream: ${SHOP_URL} }.'],

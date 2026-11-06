@@ -25,6 +25,10 @@ describe('sosie.yml', () => {
     expect(rules.format.get('users.account')).toBe('iban')
   })
 
+  it('tells a YAML error by its first line, ended as a sentence', () => {
+    expect(problems('pass: [\n')).toEqual(['sosie.yml: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1.'])
+  })
+
   it('names a typo and suggests the field meant', () => {
     expect(problems('pass:\n  - users.emial\n')).toEqual(['sosie.yml: users.emial is not a field. Did you mean users.email?'])
     expect(problems('pass:\n  - user.email\n')).toEqual(['sosie.yml: user is not a table. Did you mean users?'])

@@ -1,6 +1,6 @@
 import { basename, dirname, isAbsolute, resolve } from 'node:path'
 import { parse } from 'yaml'
-import { suggest, type RuleSet } from './rules.js'
+import { suggest, yamlProblem, type RuleSet } from './rules.js'
 
 /**
  * sosie.yml: the project's sources, and how their values are faked. The only configuration there is. Settings at the
@@ -71,7 +71,7 @@ export function sourceNames(text: string, file = 'sosie.yml'): string[] | undefi
   try {
     doc = parse(text)
   } catch (error) {
-    throw new ConfigError([`${file}: ${(error as Error).message.split('\n')[0]}`])
+    throw new ConfigError([yamlProblem(file, error)])
   }
   if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !('sources' in doc)) return undefined
   const sources = (doc as { sources: unknown }).sources
@@ -90,7 +90,7 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
     doc = parse(text)
     written = parse(text, { schema: 'failsafe' })
   } catch (error) {
-    throw new ConfigError([`${file}: ${(error as Error).message.split('\n')[0]}`])
+    throw new ConfigError([yamlProblem(file, error)])
   }
   if (doc == null) doc = {}
   if (typeof doc !== 'object' || Array.isArray(doc)) throw new ConfigError([`${file}: expected keys such as sources, pass and format.`])
