@@ -89,6 +89,14 @@ describe('sosie init', () => {
     }
   })
 
+  it('says a string with no // after its scheme is no URL, and quotes no part of it', async () => {
+    // new URL() reads kim: and localhost: as schemes: the user name, or the host, would be quoted as one.
+    const { written, shown } = await answer(['kim:s3cret@db.internal/shop', 'localhost:5432/shop', 'postgres://db/shop', '', ''])
+    expect(written).toMatchObject({ name: 'shop' })
+    expect(shown.split('That is not a URL.')).toHaveLength(3)
+    expect(shown).not.toMatch(/kim|s3cret|localhost/)
+  })
+
   it('adds the source to a sosie.yml that names none yet, its rules kept', async () => {
     const { text, file } = await answer(['postgres://db/app', '', ''], 'pass:\n  - orders.status\n')
     expect(text).toBe('pass:\n  - orders.status\n\nsources:\n  app:\n    upstream: ${APP_URL}\n')

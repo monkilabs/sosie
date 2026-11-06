@@ -90,10 +90,14 @@ export function upstreamUrl(text: string): URL {
   if (/^mongodb:\/\/[^/?#]*,/.test(text)) {
     throw new Error('Give one host of the replica set, with its replicaSet option: mongodb://user:password@host:27017/database?replicaSet=rs0. The driver finds the others.')
   }
+  const none = new Error('That is not a URL. It looks like postgres://user:password@host:5432/database, or https://api.example.com/v1.')
+  // new URL() reads kim:secret@db, or localhost:5432/db, as a scheme and a path: the scheme said would quote the user
+  // name or the host. Every upstream has // after its scheme.
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) throw none
   try {
     return new URL(text)
   } catch {
-    throw new Error('That is not a URL. It looks like postgres://user:password@host:5432/database, or https://api.example.com/v1.')
+    throw none
   }
 }
 
