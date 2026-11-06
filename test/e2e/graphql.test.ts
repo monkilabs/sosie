@@ -559,12 +559,12 @@ describe('the guard', () => {
     expect(await status({ origin: 'http://127.0.0.1:5173', 'sec-fetch-site': 'cross-site' })).toBe(200)
   })
 
-  it('cuts a list at --max-rows, and says so', async () => {
+  it('cuts a list at max-rows, and says so', async () => {
     const small = await startGraphqlSosie(api, { maxRows: 2 })
     const { body } = await small.ask('{ users { id } }')
     expect(body.data.users).toHaveLength(2)
     expect(body.extensions).toEqual({
-      sosie: 'Sosie returned the first 2 items of a list; the rest were cut. Narrow the query, or start Sosie with a higher --max-rows.',
+      sosie: 'Sosie returned the first 2 items of a list; the rest were cut. Narrow the query, or raise max-rows in sosie.yml.',
     })
     await small.close()
   })

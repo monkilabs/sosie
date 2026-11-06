@@ -431,7 +431,7 @@ export class Session {
           backend.notice({
             severity: 'NOTICE',
             code: '01000',
-            message: `Sosie returned the first ${this.#ctx.maxRows} rows; the rest were cut. Narrow the query, or start Sosie with a higher --max-rows.`,
+            message: `Sosie returned the first ${this.#ctx.maxRows} rows; the rest were cut. Narrow the query, or raise max-rows in sosie.yml.`,
           }),
         )
         return this.#write(backend.commandComplete(`${command} ${allowed}`))

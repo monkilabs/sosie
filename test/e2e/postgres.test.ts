@@ -554,7 +554,7 @@ describe('errors and limits', () => {
     expect(await query('SELECT * FROM events')).toHaveLength(100)
     expect(await query('SELECT * FROM events WHERE id > $1', [0])).toHaveLength(100)
     expect(await query('SELECT * FROM events LIMIT 20')).toHaveLength(20)
-    expect(notices.filter((n) => n.startsWith('Sosie returned the first 100 rows'))).toHaveLength(2)
+    expect(notices.filter((n) => n === 'Sosie returned the first 100 rows; the rest were cut. Narrow the query, or raise max-rows in sosie.yml.')).toHaveLength(2)
   })
 
   it('stops a statement on cancel', async () => {

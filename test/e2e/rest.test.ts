@@ -330,11 +330,11 @@ describe('an API without an OpenAPI document', () => {
     await fresh.close()
   })
 
-  it('cuts a list at --max-rows, and says so', async () => {
+  it('cuts a list at max-rows, and says so', async () => {
     const small = await startRest(api, { maxRows: 2 })
     const { body, notice } = await small.get('/users')
     expect(body.data).toHaveLength(2)
-    expect(notice).toBe('Sosie returned the first 2 items of a list; the rest were cut. Narrow the request, or start Sosie with a higher --max-rows.')
+    expect(notice).toBe('Sosie returned the first 2 items of a list; the rest were cut. Narrow the request, or raise max-rows in sosie.yml.')
     expect((await small.get('/users/1')).notice).toBeNull()
     await small.close()
   })

@@ -368,7 +368,7 @@ describe('errors and limits', () => {
     expect(await query('SELECT id FROM users', c)).toHaveLength(5)
     expect(await query('SELECT id FROM users LIMIT 30', c)).toHaveLength(5)
     const [note] = await query('SHOW WARNINGS', c)
-    expect(note!.Message).toMatch(/first 5 rows/)
+    expect(note!.Message).toBe('Sosie returned the first 5 rows; the rest were cut. Narrow the query, or raise max-rows in sosie.yml.')
     await small.close()
   })
 

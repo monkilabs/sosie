@@ -320,7 +320,7 @@ describe('cursors and limits', () => {
       expect(docs).toHaveLength(5)
       const first = keep(await (await capped.client()).db().collection('users').find().batchSize(100).toArray())
       expect(first).toHaveLength(5)
-      const cuts = said.mock.calls.filter(([line]) => String(line).includes('was cut at --max-rows (5)'))
+      const cuts = said.mock.calls.filter(([line]) => String(line).includes('was cut at max-rows (5).'))
       expect(cuts).toHaveLength(2)
     } finally {
       said.mockRestore()
