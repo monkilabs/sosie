@@ -67,7 +67,6 @@ export async function serveMcp({ version, tools, running, transport }: McpOption
             const serving = [...new Set(all.map((r) => r.kind))].join(' and ')
             throw new Error(`Sosie serves ${serving} here, not ${kind}: ${name} is for ${kind}.`)
           }
-          const names = [...new Set(ofKind.map((r) => r.name))].join(', ')
           const target = pick(all, ofKind, source, name, kind)
           return group.find((g) => g.kind === target.kind)!.tool.run(input, target)
         }),
