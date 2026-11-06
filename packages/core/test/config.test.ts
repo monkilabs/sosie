@@ -122,6 +122,63 @@ sources:
     ])
   })
 
+  it('says of each thing written wrong how it is written', () => {
+    const shop = 'sources:\n  shop:\n    upstream: ${SHOP_URL}\n'
+    const billing = (more: string) => `sources:\n  billing:\n    upstream: \${BILLING_URL}\n${more}`
+    for (const [text, problem] of [
+      ['sources: [\n', 'sosie.yml: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1:'],
+      ['- shop\n', 'sosie.yml: expected keys such as sources, pass and format.'],
+      ['shop\n', 'sosie.yml: expected keys such as sources, pass and format.'],
+      ['sources: [shop]\n', 'sosie.yml: sources maps each source by its name to its settings, such as shop: { upstream: ${SHOP_URL} }.'],
+      ['sources:\n  shop: ${SHOP_URL}\n', 'sosie.yml: sources.shop holds its settings, at least its upstream: shop: { upstream: ${SHOP_URL} }.'],
+      [billing('    schema: ""\n'), 'sosie.yml: sources.billing.schema is a file, by its path from sosie.yml, or a URL.'],
+      [billing('    schema: " "\n'), 'sosie.yml: sources.billing.schema is a file, by its path from sosie.yml, or a URL.'],
+      [billing('    headers: [Authorization]\n'), 'sosie.yml: sources.billing.headers maps each header to its value, such as Authorization: Bearer ${TOKEN}.'],
+      [billing('    headers:\n      X Team: core\n'), 'sosie.yml: sources.billing.headers: a header is named in letters, digits and dashes.'],
+      [billing('    headers:\n      X-Teams: [core, web]\n'), 'sosie.yml: sources.billing.headers.X-Teams is a value on one line.'],
+      [billing('    headers:\n      X-Team: { name: core }\n'), 'sosie.yml: sources.billing.headers.X-Team is a value on one line.'],
+      [billing('    headers:\n      Authorization: Bearer ${TOKEN\n'), 'sosie.yml: sources.billing.headers.Authorization names a variable as ${NAME}: letters, digits and _.'],
+      [`host: ""\n${shop}`, 'sosie.yml: host is an address to listen on, such as 127.0.0.1.'],
+      [`max-rows: 0\n${shop}`, 'sosie.yml: max-rows is a whole number from 1, not 0.'],
+      [`timeout: 3601\n${shop}`, 'sosie.yml: timeout is a whole number from 1 to 3600, not 3601.'],
+      [`database: shop\n${shop}`, 'sosie.yml: database is not a key. Keys: sources, pass, format, host, max-rows, timeout.'],
+      [`${shop}    database: shop\n`, 'sosie.yml: sources.shop.database is not a key of a source. Keys: upstream, kind, schema, headers, port, host, max-rows, timeout, pass, format.'],
+      [`${shop}    kind: 5\n`, 'sosie.yml: sources.shop.kind is one of postgres, mysql, rest, graphql.'],
+    ] as const) {
+      expect(problems(text), text).toEqual([problem])
+    }
+  })
+
+  it('names every problem of each source at once, going on past one it cannot read', () => {
+    expect(
+      problems(`
+host: ""
+max-rows: 0
+sources:
+  shop: \${SHOP_URL}
+  billing:
+    upstream: \${BILLING_URL}
+    kind: 5
+    schema: ""
+    headers:
+      X Team: core
+      X-Teams: [core, web]
+      Authorization: Bearer \${TOKEN
+    timeout: 3601
+`),
+    ).toEqual([
+      'sosie.yml: host is an address to listen on, such as 127.0.0.1.',
+      'sosie.yml: max-rows is a whole number from 1, not 0.',
+      'sosie.yml: sources.shop holds its settings, at least its upstream: shop: { upstream: ${SHOP_URL} }.',
+      'sosie.yml: sources.billing.kind is one of postgres, mysql, rest, graphql.',
+      'sosie.yml: sources.billing.schema is a file, by its path from sosie.yml, or a URL.',
+      'sosie.yml: sources.billing.headers: a header is named in letters, digits and dashes.',
+      'sosie.yml: sources.billing.headers.X-Teams is a value on one line.',
+      'sosie.yml: sources.billing.headers.Authorization names a variable as ${NAME}: letters, digits and _.',
+      'sosie.yml: sources.billing.timeout is a whole number from 1 to 3600, not 3601.',
+    ])
+  })
+
   it('says a file without sources names none, and how to add one', () => {
     const unwritten = (text: string) => {
       try {
