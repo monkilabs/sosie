@@ -393,6 +393,27 @@ describe('fakes by type', async () => {
     expect((users[0]!.tags as Value[])[0]).toBe((users[1]!.tags as Value[])[0])
   })
 
+  it('array or range text a source could not split: its shape kept, never its contents', async () => {
+    const { faker } = await serve()
+    const tags: Field = { id: 'users.tags', name: 'tags', type: { kind: 'array', of: { kind: 'string' } } }
+    const stay: Field = { id: 'users.stay', name: 'stay', type: { kind: 'range', of: { kind: 'datetime' } } }
+    const shapeOf = (text: string) => text.replace(/[a-z]/g, 'a').replace(/[A-Z]/g, 'A').replace(/\d/g, '9')
+    const array = '{"Quillon Vantablack",vantaville}'
+    const range = '["2026-01-01 10:00:00+01","2026-02-01 00:00:00+01")'
+    for (const [real, fake] of [
+      [array, faker.value(array, tags)],
+      [range, faker.value(range, stay)],
+      [array, faker.computed(array, tags.type)],
+      [range, faker.computed(range, stay.type)],
+    ] as [string, string][]) {
+      expect(shapeOf(fake)).toBe(shapeOf(real))
+      expect(fake).not.toMatch(/quillon|vanta|2026-0[12]-01/i)
+    }
+    expect(shapeOf(array)).toBe('{"Aaaaaaa Aaaaaaaaaa",aaaaaaaaaa}')
+    expect(shapeOf(range)).toBe('["9999-99-99 99:99:99+99","9999-99-99 99:99:99+99")')
+    expect(faker.value(array, tags)).toBe(faker.value(array, tags))
+  })
+
   it('ip addresses: from the documentation ranges', () => {
     for (const [, fake] of pairs('last_ip')) expect(fake).toMatch(/^(192\.0\.2|198\.51\.100|203\.0\.113)\.\d+$/)
   })
@@ -431,6 +452,24 @@ describe('requests', async () => {
     expect(request.lookup(users[0]!.email as string, email)).toBe(CANARIES.email)
     expect(request.lookup(users[0]!.email as string)).toBe(CANARIES.email)
     expect(request.lookup('nobody@example.com', email)).toBeUndefined()
+  })
+
+  it('look up a fake compared with an array or a range field as one of its elements', () => {
+    const labels = ['sad', 'ok', 'happy']
+    const moods: Field = { id: 'users.moods', name: 'moods', type: { kind: 'array', of: { kind: 'enum', labels } } }
+    const flags: Field = { id: 'users.flags', name: 'flags', type: { kind: 'array', of: { kind: 'boolean' } } }
+    // A range over an enum, as CREATE TYPE … AS RANGE (subtype = mood) makes one, and over integers.
+    const span: Field = { id: 'users.span', name: 'span', type: { kind: 'range', of: { kind: 'enum', labels } } }
+    const during: Field = { id: 'users.during', name: 'during', type: { kind: 'range', of: { kind: 'integer', bytes: 4 } } }
+    for (const [field, reals] of [
+      [moods, labels],
+      [flags, ['t', 'f']],
+      [span, ['sad', 'happy']],
+      [during, ['10', '20']],
+    ] as [Field, string[]][]) {
+      const fakes = faker.value(reals, field) as string[]
+      expect(fakes.map((fake) => faker.request().lookup(fake, field)), field.id).toEqual(reals)
+    }
   })
 
   it('leave a fake that names several real values as written', () => {
