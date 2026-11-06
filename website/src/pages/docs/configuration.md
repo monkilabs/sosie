@@ -75,9 +75,20 @@ npx @sosie/cli
 
 Only `upstream` and the values of `headers` read variables. `upstream` is always one whole variable, never a URL
 written out, not even in part: Sosie refuses one, so a file an agent can edit never names a host. A header may hold
-text around its variable (`Bearer ${TOKEN}`): headers go only to their own source's upstream. An edit can still choose
-among your variables: point a source at another, or put one in a header. Review `sosie.yml` as you review code. Write
-`$$` for a `$`.
+text around its variable (`Bearer ${TOKEN}`): headers go only to their own source's upstream. Write `$$` for a `$`.
+
+The first time a source is to send a variable, Sosie shows what it sends and where, and asks, before anything is
+sent:
+
+```
+  ! sosie.yml has a source send a variable it has not sent to its upstream before:
+    billing sends BILLING_TOKEN, in Authorization, to billing.internal/v1 (BILLING_API_URL).
+  Send it? (y/N)
+```
+
+Your yes is kept on your machine, in `~/.sosie/allowed.json`, never in `sosie.yml`: an agent that edits the file to
+have a header carry another variable, or send one to another upstream, is asked about the same way. Without a
+terminal to ask in, Sosie stops and says so; start it in a terminal once.
 
 ### Field ids
 

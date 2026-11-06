@@ -7,6 +7,7 @@ import {
   clearRunning,
   ConfigError,
   createFaker,
+  headerVariables,
   interpolate,
   readConfig,
   readRunning,
@@ -32,10 +33,11 @@ import {
   type SourceConfig,
   type SourceRules,
 } from '@sosie/core'
-import { init, sourceFor, upstreamUrl } from './init.js'
+import { allow, unallowed } from './allowed.js'
+import { init, labelOf, sourceFor, upstreamUrl } from './init.js'
 import { loopback } from './listen.js'
 import { columns, fail, found, ok, warn } from './print.js'
-import { hiddenPrompt } from './prompt.js'
+import { hiddenPrompt, prompt } from './prompt.js'
 import { serveAll } from './serve.js'
 import { sources } from './sources.js'
 
@@ -173,6 +175,7 @@ async function start(): Promise<void> {
 
   const values = await readVariables(config, typed)
   const plans = planSources(config, values)
+  await askToSend(file, plans)
 
   const connections: Connection[] = []
   const closeAll = async () => {
@@ -327,6 +330,38 @@ async function readVariables(config: Config, typed: Record<string, string>): Pro
     }
   }
   return values
+}
+
+/**
+ * A source that sends a variable it has not sent to its upstream before, as sosie.yml now says, is asked about before
+ * anything is sent: an agent may edit sosie.yml, and have a header carry another of the terminal's variables, or send
+ * one to a host another variable holds. Once allowed, this machine remembers it; without a terminal, Sosie stops.
+ */
+async function askToSend(file: string, plans: Plan[]): Promise<void> {
+  const home = sosieHome()
+  const asked = unallowed(home, file, plans.map((p) => p.config))
+  if (!asked.length) return
+  let count = 0
+  const lines = asked.map((config) => {
+    const plan = plans.find((p) => p.config === config)!
+    const sent = Object.entries(config.headers).flatMap(([header, template]) => {
+      const names = headerVariables(template)
+      count += names.length
+      return names.length ? [`${names.join(' and ')}, in ${header}`] : []
+    })
+    return `    ${config.name} sends ${sent.join('; ')}, to ${labelOf(plan.upstream)} (${config.upstream}).`
+  })
+  const what = 'sosie.yml has a source send a variable it has not sent to its upstream before'
+  if (!process.stdin.isTTY) throw new Exit(2, [fail(`${what}, and there is no terminal to ask in. Start Sosie in a terminal once to allow it:`), ...lines].join('\n'))
+  process.stdout.write(`${[warn(`${what}:`), ...lines].join('\n')}\n`)
+  let answer: string
+  try {
+    answer = await prompt(`  Send ${count === 1 ? 'it' : 'them'}? (y/N) `, process.stdin, process.stdout)
+  } catch (error) {
+    throw new Exit(2, fail((error as Error).message))
+  }
+  if (!/^y(es)?$/i.test(answer)) throw new Exit(1, fail('Nothing sent.'))
+  allow(home, file, plans.map((p) => p.config))
 }
 
 /** Each source's upstream read, its kind's source found, its headers' variables filled in: every problem at once. */

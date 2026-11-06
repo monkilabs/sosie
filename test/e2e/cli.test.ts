@@ -5,8 +5,11 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { readConfig } from '@sosie/core'
 import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
+import { allow } from '../../packages/cli/src/allowed.js'
+import { sources } from '../../packages/cli/src/sources.js'
 import { startApi, TOKEN } from './api.js'
 import { canariesIn } from './canaries.js'
 import { SDL, startGraphql } from './graphql-api.js'
@@ -116,6 +119,13 @@ function project(yaml: string, files: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'sosie-project-'))
   writeFileSync(join(dir, 'sosie.yml'), yaml)
   for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text)
+  return dir
+}
+
+/** Allow what a project's sources send its upstreams, as its developer did once in a terminal. */
+function allowSends(home: string, dir: string): string {
+  const file = join(dir, 'sosie.yml')
+  allow(home, file, readConfig(readFileSync(file, 'utf8'), file, sources).sources)
   return dir
 }
 
@@ -270,7 +280,7 @@ sources:
       Authorization: Bearer \${MEMBERS_TOKEN}
     max-rows: 2
 `)
-    const sosie = await start({ SHOP_URL: inject('upstream'), MEMBERS_URL: api.url, DIRECTORY_URL: gql.url, MEMBERS_TOKEN: TOKEN, SOSIE_HOME: home }, dir)
+    const sosie = await start({ SHOP_URL: inject('upstream'), MEMBERS_URL: api.url, DIRECTORY_URL: gql.url, MEMBERS_TOKEN: TOKEN, SOSIE_HOME: home }, allowSends(home, dir))
     try {
       const out = sosie.stdout()
       expect(out).toMatch(/✓ shop {7}127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 6 tables, 2 views/)
@@ -336,7 +346,7 @@ describe('sosie, in front of an API', () => {
     const api = await startApi()
     const home = mkdtempSync(join(tmpdir(), 'sosie-cli-rest-'))
     const dir = project(`sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n    headers:\n      Authorization: Bearer \${APP_TOKEN}\n`)
-    const sosie = await start({ APP_URL: api.url, APP_TOKEN: TOKEN, SOSIE_HOME: home }, dir)
+    const sosie = await start({ APP_URL: api.url, APP_TOKEN: TOKEN, SOSIE_HOME: home }, allowSends(home, dir))
     const out = sosie.stdout()
     expect(out).toMatch(/✓ app {2}127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document/)
     expect(out).toContain('! app: No OpenAPI document found')
@@ -363,13 +373,66 @@ describe('sosie, in front of an API', () => {
   })
 })
 
+describe('sosie, before a source sends a variable', () => {
+  const billing = (header = 'Bearer ${APP_TOKEN}') => `sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n    headers:\n      Authorization: ${header}\n`
+
+  it('asks, and sends nothing until it is allowed: without a terminal it stops, and a no stops it', async () => {
+    const api = await startApi()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-sends-'))
+    const dir = project(billing())
+    const vars = { APP_URL: api.url, APP_TOKEN: TOKEN, SOSIE_HOME: home }
+    const said = `    app sends APP_TOKEN, in Authorization, to ${new URL(api.url).host}/v1 (APP_URL).\n`
+    try {
+      const closed = run([], vars, dir)
+      expect(closed.status).toBe(2)
+      expect(closed.stderr).toBe(
+        `  ✗ sosie.yml has a source send a variable it has not sent to its upstream before, and there is no terminal to ask in. Start Sosie in a terminal once to allow it:\n${said}`,
+      )
+      const no = run([], vars, dir, 'n\n')
+      expect(no.status).toBe(1)
+      expect(no.stdout).toBe(`  ! sosie.yml has a source send a variable it has not sent to its upstream before:\n${said}  Send it? (y/N) `)
+      expect(no.stderr).toBe('  ✗ Nothing sent.\n')
+      expect(api.requests).toEqual([])
+      expect(existsSync(join(home, 'allowed.json'))).toBe(false)
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('remembers a yes for this project, and asks again when sosie.yml has a source send another variable', async () => {
+    const api = await startApi()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-sends-'))
+    const dir = project(billing())
+    const vars = { APP_URL: api.url, APP_TOKEN: TOKEN, OTHER_TOKEN: TOKEN, SOSIE_HOME: home }
+    try {
+      const yes = await start(vars, dir, 'y\n')
+      expect(yes.stdout()).toContain('  Send it? (y/N) ')
+      expect(await stop(yes.child)).toBe(0)
+      expect(readFileSync(join(home, 'allowed.json'), 'utf8')).not.toContain(TOKEN)
+      // Allowed: the next start, a terminal or not, asks nothing.
+      const again = await start(vars, dir)
+      expect(again.stdout()).not.toContain('Send it?')
+      expect(await stop(again.child)).toBe(0)
+      // An edit that has the header carry another variable is asked about, and nothing is sent meanwhile.
+      writeFileSync(join(dir, 'sosie.yml'), billing('Bearer ${OTHER_TOKEN}'))
+      const sent = api.requests.length
+      const edited = run([], vars, dir)
+      expect(edited.status).toBe(2)
+      expect(edited.stderr).toContain('    app sends OTHER_TOKEN, in Authorization,')
+      expect(api.requests).toHaveLength(sent)
+    } finally {
+      await api.close()
+    }
+  })
+})
+
 describe('sosie, in front of a GraphQL API', () => {
   const graphqlSource = (more = '') => `sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n    headers:\n      Authorization: Bearer \${APP_TOKEN}\n${more}`
 
   it('starts on its path, and serves GraphQL clients and MCP', async () => {
     const api = await startGraphql()
     const home = mkdtempSync(join(tmpdir(), 'sosie-cli-gql-'))
-    const sosie = await start({ APP_URL: api.url, APP_TOKEN: TOKEN, SOSIE_HOME: home }, project(graphqlSource()))
+    const sosie = await start({ APP_URL: api.url, APP_TOKEN: TOKEN, SOSIE_HOME: home }, allowSends(home, project(graphqlSource())))
     expect(sosie.stdout()).toMatch(/✓ app {2}127\.0\.0\.1:\d+\/api\/graphql, read-only: 10 types, 19 queries/)
     expect(sosie.address()).toMatch(/^http:\/\/localhost:\d+\/api\/graphql$/)
     const mcp = await mcpClient(home)
@@ -386,7 +449,7 @@ describe('sosie, in front of a GraphQL API', () => {
     const home = mkdtempSync(join(tmpdir(), 'sosie-cli-gql-'))
     for (const [path, more] of [['/graphql/v1', ''], ['/query', '    kind: graphql\n    schema: ./schema.graphql\n']] as const) {
       const upstream = api.url.replace('/api/graphql', path)
-      const sosie = await start({ APP_URL: upstream, APP_TOKEN: TOKEN, SOSIE_HOME: home }, project(graphqlSource(more), { 'schema.graphql': SDL }))
+      const sosie = await start({ APP_URL: upstream, APP_TOKEN: TOKEN, SOSIE_HOME: home }, allowSends(home, project(graphqlSource(more), { 'schema.graphql': SDL })))
       expect(sosie.stdout()).toMatch(/read-only: 10 types, 19 queries/)
       expect(sosie.address()).toMatch(new RegExp(`^http://localhost:\\d+${path}$`))
       const answer = await fetch(sosie.address(), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: '{ users { email } }' }) })
@@ -490,11 +553,13 @@ describe('sosie, in a terminal', () => {
   it('asks at a hidden prompt for each variable sosie.yml names that is not set, in the order named', async () => {
     const api = await startApi()
     const dir = project(`sources:\n  a:\n    upstream: \${A_URL}\n    port: 0\n  b:\n    upstream: \${B_URL}\n    port: 0\n    headers:\n      Authorization: Bearer \${B_TOKEN}\n`)
-    const sosie = await start({ A_URL: undefined, B_URL: undefined, B_TOKEN: TOKEN, SOSIE_HOME: home }, dir, `${inject('upstream')}\n${api.url}\n`)
+    const sosie = await start({ A_URL: undefined, B_URL: undefined, B_TOKEN: TOKEN, SOSIE_HOME: home }, dir, `${inject('upstream')}\n${api.url}\ny\n`)
     try {
       const out = sosie.stdout()
-      // B_TOKEN is set: only the two that are not are asked for.
-      expect(out).toMatch(/^ {2}A_URL \(hidden\): \n {2}B_URL \(hidden\): \n\n {2}✓ a {2}/)
+      // B_TOKEN is set: only the two that are not are asked for. Then whether b may send it, as it never has.
+      expect(out).toMatch(
+        /^ {2}A_URL \(hidden\): \n {2}B_URL \(hidden\): \n {2}! sosie\.yml has a source send a variable it has not sent to its upstream before:\n {4}b sends B_TOKEN, in Authorization, to 127\.0\.0\.1:\d+\/v1 \(B_URL\)\.\n {2}Send it\? \(y\/N\) \n {2}✓ a {2}/,
+      )
       expect(out).toMatch(/✓ a {2}127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 6 tables, 2 views/)
       expect(out).toMatch(/✓ b {2}127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document/)
       expect(out + sosie.stderr()).not.toContain('reader')

@@ -148,6 +148,7 @@ packages/
     prompt.ts        the prompts, hidden or not
     print.ts         the ✓, ! and ✗ lines, and the two columns of addresses
     serve.ts         each source on its port: the one given, or the next free from 7674 that no source was given
+    allowed.ts       what each project's sources may send of the terminal's variables, as the developer allowed it
     listen.ts        whether an address is this machine's only, for the warning on host
   */test/            each package's unit tests
 plugins/sosie/       the plugin: the MCP server, the skill, the hooks for Claude Code, Copilot CLI and VS Code
@@ -293,10 +294,12 @@ settled; until 1.0 it may change between minor versions.
 | `sosie scan <path>…` | Search files and folders for real values; exit 1 if one is found |
 
 `--help` (`-h`) and `--version` (`-v`) are the only flags: everything else is in `sosie.yml`. Exit codes: 0; 1 for a
-failure (a problem in `sosie.yml`, a source that cannot connect, a port in use, a real value found); 2 for a usage
+failure (a problem in `sosie.yml`, a source that cannot connect, a port in use, a real value found, a no to what a
+source would send); 2 for a usage
 error (an unknown command or flag; a flag an earlier version took, which says where in `sosie.yml` it went; no
 `sosie.yml` and no terminal to write one in; a variable `sosie.yml` names, not set, and no terminal to type it;
-`sosie init` where `sosie.yml` names its sources already; a prompt cancelled or ended; a `scan` with nothing to scan
+`sosie init` where `sosie.yml` names its sources already; a source to send a variable not allowed yet, and no terminal
+to ask in; a prompt cancelled or ended; a `scan` with nothing to scan
 or no store to compare with). The command is the first word that is no flag.
 
 The connection strings are never arguments, which show in shell history and in the process list, where an agent can
@@ -398,10 +401,25 @@ not set, or empty, is asked for at a hidden prompt, by its name, or without a te
 at once. Only `upstream` and the values of `headers` read variables; a `${` anywhere else is an error, and `$$`
 writes a `$`. `upstream` is one whole variable, never a URL written out, not even in part: an agent can edit the file,
 and a host written there beside a password from the environment would send the password to a host it chose.
-`headers` go only to their source's own upstream, so text around a variable (`Bearer ${TOKEN}`) is safe. An edit can
-still choose among the terminal's variables: point a source at another, or put one in a header, which an HTTP source
-sends as it connects, before the banner names its host. A value read is never printed; one that is not a URL is said
-to be none, without it.
+`headers` go only to their source's own upstream, so text around a variable (`Bearer ${TOKEN}`) is safe. A value read
+is never printed; one that is not a URL is said to be none, without it.
+
+**What a source sends.** An edit could still have a header carry another of the terminal's variables, or have a source
+send one to a host another variable holds, as an HTTP source does when it connects. So what each source sends of the
+terminal's variables, the variable its upstream is read from and each header's, is kept, once the developer allows
+it, in `$SOSIE_HOME/allowed.json`, for each project (`sosie.yml`'s real path): the names only, never a value, in a
+file only the user reads (0600). A source whose sends are not there is asked about before any source connects:
+
+```
+  ! sosie.yml has a source send a variable it has not sent to its upstream before:
+    billing sends BILLING_TOKEN, in Authorization, to billing.internal/v1 (BILLING_URL).
+  Send it? (y/N)
+```
+
+A yes keeps it, beside what was allowed before, so a branch that says otherwise is asked about once; a no stops
+Sosie with nothing sent (exit 1); without a terminal, Sosie stops and says to start it in one (exit 2). The text
+around a variable, a header that names none, and a variable's value are never asked about: a source whose headers
+name no variable sends none.
 
 **Sources.** A name is at most 40 characters, and two sources may not share a `port`. A key a source does not take
 is an error that says why: `sosie.yml: sources.shop.headers: shop is a postgres source, which takes no headers.` A
@@ -441,14 +459,15 @@ both, and a source added to `sosie.yml` never changes another's fakes. A rule at
 2. Read each `${NAME}`: from the environment, or at a hidden prompt.
 3. Pick each source's kind, by its `kind` or its URL, and check the keys it takes: every problem, of every source, at
    once.
-4. `connect` each, in the order listed: it reads its catalog on a read-only connection and returns the neutral
+4. Ask about each source that is to send a variable not allowed yet (see What a source sends), before any connects.
+5. `connect` each, in the order listed: it reads its catalog on a read-only connection and returns the neutral
    schema. One that cannot connect closes those that did, and stops Sosie, named:
    `✗ crm: Cannot connect to crm.internal:3306/crm: …`.
-5. Check the rules against each schema, every problem at once, a top rule no source holds among them. For a source
+6. Check the rules against each schema, every problem at once, a top rule no source holds among them. For a source
    that learns its fields, a field not met yet is kept, with a warning, and `entity.*` holds for every field of the
    entity as it is met.
-6. Open the store, creating its key on first use: one store, one Faker per source over it.
-7. `serve` each, in the order listed, on its port, or on the next free from 7674 that no source was given; 100 are
+7. Open the store, creating its key on first use: one store, one Faker per source over it.
+8. `serve` each, in the order listed, on its port, or on the next free from 7674 that no source was given; 100 are
    tried before Sosie gives up. Write the entry under `running/`; print the addresses.
 
 ## Core: domains
@@ -1766,7 +1785,9 @@ source learns. Format domains make a person's email the same fake from the datab
   as in a terminal too, its input a TTY: the first run writes `sosie.yml` and starts with the string typed, and a
   variable not set is asked for. `sosie init` and the prompts are run with what a terminal sends: a CRLF, whole or in
   two pieces, Ctrl+C, a backspace, raw mode on and off. Ports are tested on real sockets: a given one kept for its
-  source, the next free taken, and one that cannot listen closing those that did.
+  source, the next free taken, and one that cannot listen closing those that did. A source to send a variable not
+  allowed yet stops Sosie without a terminal and after a no, with nothing sent to the API; a yes is kept, and an edit
+  that has the header carry another variable is asked about again.
 - **The dependency rule.** A test reads the imports and manifests.
 - **The plugin.** `test/plugin.test.ts`: the plugin's version and the CLI its server runs are `@sosie/cli`'s, in its
   source and in Claude Code's files, and its hooks read the `running/` entries the core writes. Each assistant's hooks
@@ -1796,6 +1817,7 @@ source learns. Format domains make a person's email the same fake from the datab
 | Statement timeout upstream | 30 s, or `timeout` |
 | Configuration | `./sosie.yml`, the only one: no flags, no variables of Sosie's own but `SOSIE_HOME` |
 | Store | `$SOSIE_HOME/store/`, or `~/.sosie/store/` |
+| What each source may send | `$SOSIE_HOME/allowed.json`: the variables' names, as allowed in a terminal |
 
 ## Open items
 
