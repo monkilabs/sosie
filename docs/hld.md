@@ -153,7 +153,8 @@ flowchart LR
 A source is a package with one interface: it connects to its upstream
 read-only, describes it in the neutral schema, serves an endpoint, and hands
 every value to the core. Rules, fakes, the store, `scan` and `describe` stay the
-same for every source.
+same for every source. The site and its docs grow too, into other languages
+([below](#in-other-languages)).
 
 | Order | Source | Why then |
 | --- | --- | --- |
@@ -190,6 +191,23 @@ Each starts with a spike before it is planned in detail. MongoDB's showed the dr
 Sosie's own, and that an ObjectId needs a type of its own in the core, faked in one domain wherever it is held; it is
 built (see the [low-level design](lld.md#mongodb-source)). For SQL Server: TLS with each driver's defaults, and which
 metadata names the column.
+
+### In other languages
+
+The README, the landing page and the site's docs, in German, Spanish, Chinese, French and Portuguese. That is about
+15,000 words a language, most of them the docs. English stays the original: a page is written in English first, and
+its translations follow it.
+
+| | |
+| --- | --- |
+| Languages | German (`de`), Spanish (`es`), Chinese, simplified (`zh-CN`), French (`fr`), Portuguese, as in Brazil (`pt-BR`) |
+| The site | Astro's own i18n routing: English at `/sosie/`, each language under its code (`/sosie/de/`). A switch in the header, `hreflang` links between a page's languages, and every language in the sitemap |
+| The README | `README.de.md` and the others beside `README.md`, with a line of links to each at the top of every one |
+| Left in English | The CLI and everything it prints, `sosie.yml`'s keys, code and commands, and the messages the docs quote, so a reader can match them against their terminal. Also the skill, which agents read, and the design documents, which contributors read |
+| In step | Each translation names the English it was made from, by the hash of its source file. A page whose English changed since says so at its top and links to the English; a page not translated yet is the English one, saying so. The site check lists every page that is due, and never fails for one, so an English change is never held up |
+| Terms | A short glossary per language, for the words the docs use as terms (source, upstream, fake, pass, rule), so each is the same word on every page. Sosie stays Sosie |
+
+A language is published whole, every page of it at once, never page by page.
 
 ## The plugin
 
