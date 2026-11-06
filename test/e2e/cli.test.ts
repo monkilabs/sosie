@@ -22,11 +22,19 @@ const env = (more: Record<string, string | undefined> = {}) => {
 }
 
 /**
- * Run the CLI to the end, within 20 s: spawnSync holds the test's thread, where no test timeout can fire, so one
- * that never ends is killed and fails the test with what it printed.
+ * Node's flags that have the CLI take its stdin, a pipe, for a terminal. A pipe has no raw mode, so the CLI reads
+ * each answer as a line, as it does when typed ahead.
  */
-function run(args: string[], more: Record<string, string | undefined> = {}, cwd?: string) {
-  const result = spawnSync(process.execPath, [CLI, ...args], { env: env(more), encoding: 'utf8', cwd, input: '', timeout: 20_000, killSignal: 'SIGKILL' })
+const TERMINAL = ['--import', 'data:text/javascript,process.stdin.isTTY=true']
+
+/**
+ * Run the CLI to the end, within 20 s: spawnSync holds the test's thread, where no test timeout can fire, so one
+ * that never ends is killed and fails the test with what it printed. With `typed`, it runs in a terminal, these lines
+ * typed in it.
+ */
+function run(args: string[], more: Record<string, string | undefined> = {}, cwd?: string, typed?: string) {
+  const flags = typed === undefined ? [] : TERMINAL
+  const result = spawnSync(process.execPath, [...flags, CLI, ...args], { env: env(more), encoding: 'utf8', cwd, input: typed ?? '', timeout: 20_000, killSignal: 'SIGKILL' })
   if (result.error || result.signal) {
     throw new Error(`sosie ${args.join(' ')} did not end: ${result.error?.message ?? result.signal}\n${result.stdout}${result.stderr}`)
   }
@@ -114,10 +122,16 @@ function project(yaml: string, files: Record<string, string> = {}): string {
 /** One source, named app, its upstream in APP_URL, on a port the system picks. */
 const ONE = (more = '') => `sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n${more}`
 
-/** Start `sosie` in a project and wait for its banner; `address` says where a source of it listens. */
-async function start(more: Record<string, string | undefined>, cwd: string) {
-  const child = spawn(process.execPath, [CLI], { env: env(more), cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+/**
+ * Start `sosie` in a project and wait for its banner; `address` says where a source of it listens. With `typed`, it
+ * starts in a terminal, these lines typed in it, and the terminal left open.
+ */
+async function start(more: Record<string, string | undefined>, cwd: string, typed?: string) {
+  const flags = typed === undefined ? [] : TERMINAL
+  const child = spawn(process.execPath, [...flags, CLI], { env: env(more), cwd, stdio: 'pipe' })
   children.add(child)
+  if (typed === undefined) child.stdin.end()
+  else child.stdin.write(typed)
   let stdout = ''
   let stderr = ''
   child.stdout.on('data', (d) => (stdout += d))
@@ -128,7 +142,7 @@ async function start(more: Record<string, string | undefined>, cwd: string) {
     child.on('exit', () => (clearTimeout(timer), reject(new Error(`exited: ${stdout}${stderr}`))))
   })
   const address = (name = 'app') => new RegExp(`^  ${name}:\\s+(\\S+)`, 'm').exec(stdout)![1]!
-  return { child, address, stdout: () => stdout }
+  return { child, address, stdout: () => stdout, stderr: () => stderr }
 }
 
 function stop(child: ChildProcess, signal: NodeJS.Signals = 'SIGINT'): Promise<number | null> {
@@ -382,6 +396,75 @@ describe('sosie, in front of a GraphQL API', () => {
       expect(await stop(sosie.child)).toBe(0)
     }
     await api.close()
+  })
+})
+
+describe('sosie, in a terminal', () => {
+  const home = mkdtempSync(join(tmpdir(), 'sosie-cli-tty-'))
+  const empty = () => mkdtempSync(join(tmpdir(), 'sosie-empty-project-'))
+
+  it('writes sosie.yml where there is none, then starts with the string typed, never asking for it again nor printing it', async () => {
+    const dir = empty()
+    const sosie = await start({ SHOP_URL: undefined, SOSIE_HOME: home }, dir, `${inject('upstream')}\nshop\n\n`)
+    try {
+      const out = sosie.stdout()
+      expect(out).toContain('  No sosie.yml here yet: one, with the first database or API Sosie reads.')
+      expect(out).toMatch(/ {2}Its connection string, or the API's URL \(hidden\): \n {2}✓ A Postgres database: 127\.0\.0\.1:\d+\/sosie_test_\w+\n/)
+      expect(out).toContain('✓ Wrote sosie.yml: shop, its upstream read from ${SHOP_URL}, never written there. Commit it.')
+      expect(out).not.toContain('SHOP_URL (hidden)')
+      expect(out).not.toContain('Start Sosie with npx @sosie/cli.')
+      expect(out).toMatch(/✓ shop {2}127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 6 tables, 2 views/)
+      expect(out + sosie.stderr()).not.toContain('reader')
+      expect(readFileSync(join(dir, 'sosie.yml'), 'utf8')).toMatch(/^# Sosie: this project's sources[^]*\nsources:\n {2}shop:\n {4}upstream: \$\{SHOP_URL\}\n$/)
+    } finally {
+      expect(await stop(sosie.child)).toBe(0)
+    }
+  })
+
+  it('asks at a hidden prompt for each variable sosie.yml names that is not set, in the order named', async () => {
+    const api = await startApi()
+    const dir = project(`sources:\n  a:\n    upstream: \${A_URL}\n    port: 0\n  b:\n    upstream: \${B_URL}\n    port: 0\n    headers:\n      Authorization: Bearer \${B_TOKEN}\n`)
+    const sosie = await start({ A_URL: undefined, B_URL: undefined, B_TOKEN: TOKEN, SOSIE_HOME: home }, dir, `${inject('upstream')}\n${api.url}\n`)
+    try {
+      const out = sosie.stdout()
+      // B_TOKEN is set: only the two that are not are asked for.
+      expect(out).toMatch(/^ {2}A_URL \(hidden\): \n {2}B_URL \(hidden\): \n\n {2}✓ a {2}/)
+      expect(out).toMatch(/✓ a {2}127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 6 tables, 2 views/)
+      expect(out).toMatch(/✓ b {2}127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document/)
+      expect(out + sosie.stderr()).not.toContain('reader')
+      expect(out + sosie.stderr()).not.toContain(TOKEN)
+    } finally {
+      expect(await stop(sosie.child)).toBe(0)
+      await api.close()
+    }
+    const closed = run([], { APP_URL: undefined, SOSIE_HOME: home }, project(ONE()), '')
+    expect(closed.status).toBe(2)
+    expect(closed.stdout).toBe('  APP_URL (hidden): \n')
+    expect(closed.stderr).toBe('  ✗ No input.\n')
+  })
+
+  it('writes sosie.yml with sosie init, and ends with 1 for a sosie.yml with a problem, 2 for anything else', () => {
+    const dir = empty()
+    const wrote = run(['init'], { SOSIE_HOME: home }, dir, 'postgres://kim:secret@db.internal/shop\n\n\n')
+    expect(wrote.status).toBe(0)
+    expect(wrote.stdout).toContain(
+      '✓ Wrote sosie.yml: shop, its upstream read from ${SHOP_URL}, never written there. Commit it.\n    Set SHOP_URL in your terminal, and Sosie starts without asking for it.\n    Start Sosie with npx @sosie/cli.\n',
+    )
+    expect(wrote.stdout + wrote.stderr).not.toContain('secret')
+    expect(readFileSync(join(dir, 'sosie.yml'), 'utf8')).toContain('\nsources:\n  shop:\n    upstream: ${SHOP_URL}\n')
+
+    const misspelt = run(['init'], { SOSIE_HOME: home }, project('sourcs:\n  app:\n    upstream: ${APP_URL}\n'), '')
+    expect(misspelt.status).toBe(1)
+    expect(misspelt.stderr).toContain('  ✗ sosie.yml: sourcs is not a key. Did you mean sources?')
+    const named = run(['init'], { SOSIE_HOME: home }, dir, '')
+    expect(named.status).toBe(2)
+    expect(named.stderr).toBe('  ✗ sosie.yml names its sources already: shop. Add another under sources:.\n')
+    const unreadable = empty()
+    const thrice = run(['init'], { SOSIE_HOME: home }, unreadable, 'redis://kim:secret@cache/0\nftp://kim:secret@files\nkim:secret\n')
+    expect(thrice.status).toBe(2)
+    expect(thrice.stderr).toBe('  ✗ Nothing written.\n')
+    expect(thrice.stdout).not.toContain('secret')
+    expect(existsSync(join(unreadable, 'sosie.yml'))).toBe(false)
   })
 })
 
