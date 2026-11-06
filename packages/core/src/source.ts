@@ -108,15 +108,23 @@ export interface SourceOptions {
   maxRows: number
   /** Milliseconds a statement may run upstream. */
   statementTimeout: number
-  /** Where a source reads its own settings, never arguments: SOSIE_UPSTREAM_HEADERS, SOSIE_OPENAPI. */
-  env?: Record<string, string | undefined>
+  /** sosie.yml's `headers` for an HTTP upstream, each ${VAR} read: credentials, sent upstream and never shown. */
+  headers?: Record<string, string>
+  /** sosie.yml's `schema`: a file, by an absolute path, or a URL. */
+  schema?: string
 }
 
 export interface Source {
   /** 'postgres', 'mysql', 'mongodb', 'rest', 'graphql'. */
   readonly kind: string
-  /** Whether this source handles this upstream, or this endpoint address; `env` can say so where the URL cannot. */
-  matches(url: URL, env?: Record<string, string | undefined>): boolean
+  /** What it reads, for the terminal: 'Postgres database', 'REST API'. */
+  readonly title: string
+  /** The URL schemes it reads, as URL's protocol writes them: 'postgres:'. A `kind` given for another is an error. */
+  readonly schemes: readonly string[]
+  /** Whether this source reads this upstream, when sosie.yml gives it no kind; or serves this endpoint address. */
+  matches(url: URL): boolean
+  /** The keys of a source in sosie.yml it takes beyond every source's. Any other is an error. */
+  readonly settings?: readonly ('headers' | 'schema')[]
   /** Connect read-only and describe the upstream in neutral terms. */
   connect(upstream: URL, options: SourceOptions): Promise<Connection>
   /** MCP tools this source adds beside the core's describe: Postgres adds query. They talk to the running endpoint, never to the upstream. */
@@ -149,8 +157,10 @@ export interface Endpoint {
   close(): Promise<void>
 }
 
-/** What `sosie mcp` knows about the running endpoint. */
+/** What `sosie mcp` knows about a source a running Sosie serves. */
 export interface Running {
+  /** Its name in sosie.yml. */
+  name: string
   kind: string
   address: string
   schema: Schema

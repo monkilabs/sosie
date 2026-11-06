@@ -200,7 +200,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       variables: real.variables,
       ...(operationName && { operationName }),
     })
-    if (answer.status === 401 || answer.status === 403) ctx.log(`The API answered ${answer.status}: check SOSIE_UPSTREAM_HEADERS.`)
+    if (answer.status === 401 || answer.status === 403) ctx.log(`The API answered ${answer.status}: check the source's headers.`)
     if (!/json/i.test(answer.type)) return failed(502, 'The API did not answer with JSON; Sosie fakes JSON only.')
     let body: { data?: unknown; errors?: unknown }
     try {

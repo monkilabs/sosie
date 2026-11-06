@@ -7,19 +7,28 @@ lead: Your API's own paths on a local address. GET and HEAD only, with Sosie's c
 
 ## Start it
 
-`SOSIE_UPSTREAM` is the API's base URL. Its credentials go in `SOSIE_UPSTREAM_HEADERS`, one `Name: value` per line:
+A source in `sosie.yml`: its `upstream` is the API's base URL, and its credentials go in `headers`, each read from a
+variable of yours.
+
+```yaml
+sources:
+  api:
+    upstream: ${API_URL}
+    headers:
+      Authorization: Bearer ${API_TOKEN}
+```
 
 ```sh
-export SOSIE_UPSTREAM='https://api.internal/v1'
-export SOSIE_UPSTREAM_HEADERS="$(cat ~/.config/api.headers)"   # Authorization: Bearer …
+export API_URL='https://api.internal/v1'
+export API_TOKEN="$(cat ~/.config/api.token)"
 npx @sosie/cli
 ```
 
 ```
-  ✓ api.internal/v1, read-only: OpenAPI 3.1, 24 schemas, 41 GET paths
+  ✓ api  api.internal/v1, read-only: OpenAPI 3.1, 24 schemas, 41 GET paths
   ✓ Every value is faked
 
-  Your agent, app and curl:  http://localhost:7674/v1
+  api:                       http://localhost:7674/v1
 ```
 
 `http://localhost:7674/v1/users` reads `https://api.internal/v1/users`.
@@ -36,8 +45,8 @@ A `GET` that writes is the API's to guard: Sosie sends every `GET` on.
 
 The API's credentials are Sosie's, never the client's:
 
-- **`SOSIE_UPSTREAM_HEADERS`** holds them, one `Name: value` per line. Read them from a file or a secret manager, so they
-  stay out of your shell's history.
+- **The source's `headers`** hold them, each value read from a variable (`Bearer ${API_TOKEN}`), never written in
+  `sosie.yml`. Set the variable from a file or a secret manager, so it stays out of your shell's history.
 - **A user and password in the URL** become a Basic header.
 - **A query on the URL** (`?api_key=…`) goes with every request and is never shown, in links neither.
 
@@ -47,8 +56,8 @@ holds Sosie's own credentials, in a key or in a field that passes, they are fake
 
 ## The OpenAPI document
 
-Sosie names each value's field from the API's OpenAPI document, 3.x or Swagger 2.0, JSON or YAML: the file or URL in
-`SOSIE_OPENAPI`, or the first of these the API serves under its base:
+Sosie names each value's field from the API's OpenAPI document, 3.x or Swagger 2.0, JSON or YAML: the source's `schema`, a
+file or URL, or the first of these the API serves under its base:
 
 `openapi.json`, `openapi.yaml`, `swagger.json`, `v3/api-docs`, `api-docs`, `docs/openapi.json`
 
@@ -67,7 +76,7 @@ email is the same fake from the database and from the API.
 
 - A key that is structure (`city`, `createdAt`) stays; one that is a value (a map keyed by email) is faked.
 - An integer beyond 2^53, a 64-bit id, keeps its digits exactly, so its fake leads back to its record.
-- A list keeps its first `--max-rows` items, and the `sosie-notice` header says the rest were cut.
+- A list keeps its first `max-rows` items, and the `sosie-notice` header says the rest were cut.
 - Status codes pass. A JSON error body is faked as no entity's, so no rule passes anything in it.
 
 ## Links
@@ -96,7 +105,7 @@ reads it through its dev server's proxy.
   them: pagination works through the body. Sosie answers `application/json`.
 - **Keys in Pascal or kebab case** (`UserName`, `x-rate`), as .NET APIs often write them, are not taken for
   structure: without a document they are faked. Give such an API its document.
-- **Each request** has a 30 s timeout, or `--timeout`, and a 20 MB body cap.
+- **Each request** has a 30 s timeout, or the source's `timeout`, and a 20 MB body cap.
 - **Ids across sources.** An API's ids and a database's share fakes only when their names meet (a GraphQL type and a
   Prisma model both `User`, as `User.id`).
 - **A wildcard rule** without a document (`country.*`) passes every top-level key of that entity the API ever answers

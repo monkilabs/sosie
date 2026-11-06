@@ -7,23 +7,32 @@ lead: A local endpoint that speaks MongoDB's wire protocol. mongosh, the Node.js
 
 ## Start it
 
+A source in `sosie.yml`, its connection string in a variable of yours. `npx @sosie/cli` writes this for you the first
+time.
+
+```yaml
+sources:
+  app:
+    upstream: ${APP_URL}
+```
+
 ```sh
-export SOSIE_UPSTREAM='mongodb://readonly:…@db.internal:27017/app'
+export APP_URL='mongodb://readonly:…@db.internal:27017/app'
 npx @sosie/cli
 ```
 
 ```
-  ✓ db.internal:27017/app, read-only: 12 collections, 1 view
+  ✓ app  db.internal:27017/app, read-only: 12 collections, 1 view
   ✓ Every value is faked
 
-  Your agent, app and mongosh: mongodb://127.0.0.1:7674/app?directConnection=true
+  app:                      mongodb://127.0.0.1:7674/app?directConnection=true
 ```
 
 The address takes no user and no password: a client that sends a login is told so. It listens on `127.0.0.1` and
-`::1` only, unless you pass `--host`. `directConnection=true` tells the driver Sosie is one server, not a replica set
+`::1` only, unless `sosie.yml` gives another `host`. `directConnection=true` tells the driver Sosie is one server, not a replica set
 to discover.
 
-`SOSIE_UPSTREAM` names the database. Atlas's `mongodb+srv://` strings work as they are. For a replica set, give one
+The connection string names the database. Atlas's `mongodb+srv://` strings work as they are. For a replica set, give one
 host and its `replicaSet` option: the driver finds the other members from it.
 
 MongoDB 6.0, 7.0 and 8.0 are tested; anything older is refused at start-up.
@@ -78,8 +87,8 @@ its session's: another client neither reads its batches nor closes it.
 
 | Setting | Value |
 | --- | --- |
-| `maxTimeMS` | 30 s, or `--timeout`, on each `find`, `aggregate`, `count` and `distinct`; a client may lower it, never lift it |
-| Documents per cursor | `--max-rows`: past it, the cursor is closed, and the terminal running Sosie says so |
+| `maxTimeMS` | 30 s, or the source's `timeout`, on each `find`, `aggregate`, `count` and `distinct`; a client may lower it, never lift it |
+| Documents per cursor | `max-rows`: past it, the cursor is closed, and the terminal running Sosie says so |
 | A message half sent | A minute: past it, the connection is closed |
 | Read preference | The connection string's |
 | Heartbeats | Polled, so no `hello` waits on each server |
@@ -133,7 +142,7 @@ ObjectId, a UUID and binary data their own. Sosie learns each field as documents
   nothing.
 - A value Sosie never showed is used as written, so it filters on the real value it happens to be.
 - A stage Sosie does not know the shape of is refused, as is anything it cannot read: change streams, JavaScript.
-- A cursor cut at `--max-rows` ends with nothing to say so: MongoDB has no warnings for Sosie to add one to. The
+- A cursor cut at `max-rows` ends with nothing to say so: MongoDB has no warnings for Sosie to add one to. The
   terminal running Sosie says so.
 - A timestamp (BSON's internal type) is faked as a date, to the second. `MinKey` and `MaxKey` pass.
 - `listIndexes` and `listCollections` show an index's filter and a view's pipeline as they were written, a value in

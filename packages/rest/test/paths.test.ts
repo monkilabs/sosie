@@ -61,13 +61,12 @@ describe('paths in links', () => {
 })
 
 describe('upstream headers', () => {
-  it('reads one Name: value per line, from a real newline or a written one', () => {
-    expect(parseHeaders('Authorization: Bearer a:b\nX-Team: core')).toEqual({ authorization: 'Bearer a:b', 'x-team': 'core' })
-    expect(parseHeaders('Authorization: Bearer x\\nX-Team: core')).toEqual({ authorization: 'Bearer x', 'x-team': 'core' })
+  it('reads each as sosie.yml names it, by its lowercase name', () => {
+    expect(parseHeaders({ Authorization: 'Bearer a:b', 'X-Team': ' core ' })).toEqual({ authorization: 'Bearer a:b', 'x-team': 'core' })
     expect(parseHeaders(undefined)).toEqual({})
-    // A line that is no header is named by its number, never quoted: it may hold the secret.
-    for (const bad of ['Authorization Bearer sk_live_1', 'X Team: core', 'Authorization: Bearer a\rb']) {
-      expect(() => parseHeaders(`Accept: */*\n${bad}`)).toThrow('SOSIE_UPSTREAM_HEADERS: line 2 is not a header. Write one Name: value per line.')
-    }
+    // One that is no header is named, never its value: it may hold the secret.
+    expect(() => parseHeaders({ Accept: '*/*', 'X Team': 'core' })).toThrow('The header named in headers is not a valid one')
+    expect(() => parseHeaders({ Authorization: 'Bearer sk_live_1\rb' })).toThrow(/^The header Authorization is not a valid one/)
+    expect(() => parseHeaders({ Authorization: 'Bearer sk_live_1\rb' })).not.toThrow(/sk_live/)
   })
 })

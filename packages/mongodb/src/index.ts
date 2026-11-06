@@ -15,6 +15,8 @@ const ADMIN_ACTIONS = new Set(['anyAction', 'createUser', 'grantRole', 'shutdown
 /** The MongoDB source: a local MongoDB endpoint in front of a real database, read-only, every value faked. */
 export const mongodb: Source = {
   kind: 'mongodb',
+  title: 'MongoDB database',
+  schemes: ['mongodb:', 'mongodb+srv:'],
   matches: (url) => url.protocol === 'mongodb:' || url.protocol === 'mongodb+srv:',
   tools: [findTool, aggregateTool],
   async connect(upstream, options): Promise<Connection> {

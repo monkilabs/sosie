@@ -23,7 +23,7 @@ async function connect(running: () => Promise<Running[]>, tools = [{ kind: 'memo
 const text = (result: unknown) => ((result as { content: { text: string }[] }).content[0]!.text)
 
 describe('sosie mcp', () => {
-  const one: Running = { kind: 'memory', address: 'memory://app', schema, passing: ['orders.status'] }
+  const one: Running = { name: 'app', kind: 'memory', address: 'memory://app', schema, passing: ['orders.status'] }
   const running = async (): Promise<Running[]> => [one]
 
   it('lists describe and the source tools', async () => {
@@ -31,24 +31,25 @@ describe('sosie mcp', () => {
     const { tools } = await mcp.listTools()
     expect(tools.map((t) => t.name)).toEqual(['describe', 'echo'])
     expect(tools[1]!.inputSchema.required).toEqual(['text'])
-    expect(Object.keys(tools[1]!.inputSchema.properties!)).toEqual(['text', 'extra', 'address'])
+    expect(Object.keys(tools[1]!.inputSchema.properties!)).toEqual(['text', 'extra', 'source'])
   })
 
   it('describes entities, fields, keys, references and what passes', async () => {
     const mcp = await connect(running)
     const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
-    expect(all.entities.map((e: { entity: string }) => e.entity)).toEqual(['users', 'orders', 'countries'])
+    expect(all.sources.map((s: { source: string; kind: string; address: string }) => [s.source, s.kind, s.address])).toEqual([['app', 'memory', 'memory://app']])
+    expect(all.sources[0].entities.map((e: { entity: string }) => e.entity)).toEqual(['users', 'orders', 'countries'])
     const orders = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'orders' } })))
     expect(orders.note).toMatch(/consistent fake/)
-    expect(orders.entities[0].fields).toContainEqual({ field: 'user_id', type: 'integer', references: 'users.id' })
-    expect(orders.entities[0].fields).toContainEqual({
+    expect(orders.sources[0].entities[0].fields).toContainEqual({ field: 'user_id', type: 'integer', references: 'users.id' })
+    expect(orders.sources[0].entities[0].fields).toContainEqual({
       field: 'status',
       type: 'enum(new, paid, shipped)',
       passes: 'real values, listed in sosie.yml',
     })
     const missing = await mcp.callTool({ name: 'describe', arguments: { entity: 'order' } })
     expect(missing.isError).toBe(true)
-    expect(text(missing)).toMatch(/order is not an entity/)
+    expect(text(missing)).toMatch(/order is not an entity of any upstream/)
   })
 
   it('runs a source tool against the running endpoint', async () => {
@@ -64,50 +65,50 @@ describe('sosie mcp', () => {
     const result = await stopped.callTool({ name: 'describe', arguments: {} })
     expect(result.isError).toBe(true)
     expect(text(result)).toBe('Sosie is not running.')
-    const other = await connect(async () => [{ ...one, kind: 'postgres' }])
+    const other = await connect(async () => [{ ...one, name: 'shop', kind: 'postgres' }])
     expect(text(await other.callTool({ name: 'echo', arguments: { text: 'hi' } }))).toBe('Sosie serves postgres here, not memory: echo is for memory.')
   })
 
-  it('serves a tool two sources share by one name, run by the source of the Sosie it goes to', async () => {
+  it('serves a tool two kinds share by one name, run by the kind of the source it goes to', async () => {
     const other: McpTool = { ...echo, run: async (input, running) => ({ ...input, by: 'other', address: running.address }) }
-    const sql: Running = { ...one, kind: 'other', address: 'other://db' }
+    const sql: Running = { ...one, name: 'db', kind: 'other', address: 'other://db' }
     const tools = [
       { kind: 'memory', tool: echo },
       { kind: 'other', tool: other },
     ]
     const mcp = await connect(async () => [sql, one], tools)
     expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'echo'])
-    expect(JSON.parse(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi' } })))).toEqual({ text: 'hi', by: 'other', address: 'other://db' })
-    const chosen = await mcp.callTool({ name: 'echo', arguments: { text: 'hi', address: 'memory://app' } })
+    expect(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi' } }))).toBe('Several memory or other sources run: db, app. Name the one to use in source.')
+    expect(JSON.parse(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi', source: 'db' } })))).toEqual({ text: 'hi', by: 'other', address: 'other://db' })
+    const chosen = await mcp.callTool({ name: 'echo', arguments: { text: 'hi', source: 'app' } })
     expect(JSON.parse(text(chosen))).toEqual({ text: 'hi', address: 'memory://app' })
-    const neither = await connect(async () => [{ ...one, kind: 'rest' }], tools)
+    const neither = await connect(async () => [{ ...one, name: 'api', kind: 'rest' }], tools)
     expect(text(await neither.callTool({ name: 'echo', arguments: { text: 'hi' } }))).toBe('Sosie serves rest here, not memory or other: echo is for memory or other.')
   })
 
-  it('serves every running Sosie: describe each, and send a tool to the newest of its kind', async () => {
-    const api: Running = { kind: 'rest', address: 'http://localhost:7675', schema: { entities: [{ id: 'User', name: 'User', fields: [] }] }, passing: [] }
-    const older: Running = { ...one, address: 'memory://older' }
-    const mcp = await connect(async () => [api, one, older])
+  it('serves every source: describe each by its name, and send a tool to the one named', async () => {
+    const api: Running = { name: 'billing', kind: 'rest', address: 'http://localhost:7675', schema: { entities: [{ id: 'User', name: 'User', fields: [] }] }, passing: [] }
+    const crm: Running = { ...one, name: 'crm', address: 'memory://crm' }
+    const mcp = await connect(async () => [api, one, crm])
     const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
-    expect(all.sources.map((s: { kind: string; address: string }) => [s.kind, s.address])).toEqual([
-      ['rest', 'http://localhost:7675'],
-      ['memory', 'memory://app'],
-      ['memory', 'memory://older'],
+    expect(all.sources.map((s: { source: string; kind: string; address: string }) => [s.source, s.kind, s.address])).toEqual([
+      ['billing', 'rest', 'http://localhost:7675'],
+      ['app', 'memory', 'memory://app'],
+      ['crm', 'memory', 'memory://crm'],
     ])
     const users = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
-    expect(users.sources.map((s: { address: string }) => s.address)).toEqual(['memory://app', 'memory://older'])
-    expect(JSON.parse(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi' } }))).address).toBe('memory://app')
-    expect(JSON.parse(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi', address: 'memory://older' } })))).toEqual({
-      text: 'hi',
-      address: 'memory://older',
-    })
-    const wrong = await mcp.callTool({ name: 'echo', arguments: { text: 'hi', address: 'http://localhost:7675' } })
-    expect(wrong.isError).toBe(true)
-    expect(text(wrong)).toBe('No memory Sosie runs at http://localhost:7675. Running: memory://app, memory://older.')
+    expect(users.sources.map((s: { source: string }) => s.source)).toEqual(['app', 'crm'])
+    // Never the wrong database without knowing: with two of a kind, the agent names one.
+    const unnamed = await mcp.callTool({ name: 'echo', arguments: { text: 'hi' } })
+    expect(unnamed.isError).toBe(true)
+    expect(text(unnamed)).toBe('Several memory sources run: app, crm. Name the one to use in source.')
+    expect(JSON.parse(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi', source: 'crm' } })))).toEqual({ text: 'hi', address: 'memory://crm' })
+    expect(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi', source: 'billing' } }))).toBe('billing is a rest source: echo is for memory (app, crm).')
+    expect(text(await mcp.callTool({ name: 'echo', arguments: { text: 'hi', source: 'shop' } }))).toBe('No memory source is named shop: app, crm.')
   })
 
   it('lists a Sosie that has met no entity yet, as an API without a schema document', async () => {
-    const learning: Running = { kind: 'rest', address: 'http://localhost:7675', schema: { entities: [] }, passing: [] }
+    const learning: Running = { name: 'api', kind: 'rest', address: 'http://localhost:7675', schema: { entities: [] }, passing: [] }
     const mcp = await connect(async () => [learning, one])
     const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
     expect(all.sources.map((s: { address: string; entities: unknown[] }) => [s.address, s.entities.length])).toEqual([

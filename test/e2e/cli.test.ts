@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,15 +33,90 @@ function run(args: string[], more: Record<string, string | undefined> = {}, cwd?
   return { status: result.status, stdout: result.stdout, stderr: result.stderr }
 }
 
+/**
+ * Run the CLI to the end without holding the test's thread, within 20 s. One that does not end is asked for Node's
+ * diagnostic report before it is killed, and fails the test with where it was: its JavaScript stack, and what kept it
+ * waiting. No report at all means it was held in native code, outside JavaScript.
+ */
+async function watched(args: string[], more: Record<string, string | undefined> = {}, cwd?: string) {
+  const reports = mkdtempSync(join(tmpdir(), 'sosie-report-'))
+  const child = spawn(process.execPath, ['--report-on-signal', '--report-signal=SIGUSR2', `--report-directory=${reports}`, CLI, ...args], {
+    env: env(more),
+    cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let stdout = ''
+  let stderr = ''
+  child.stdout.on('data', (d) => (stdout += d))
+  child.stderr.on('data', (d) => (stderr += d))
+  const status = await new Promise<number | null | 'late'>((resolve) => {
+    const timer = setTimeout(() => resolve('late'), 20_000)
+    child.on('exit', (code) => (clearTimeout(timer), resolve(code)))
+  })
+  if (status !== 'late') return { status, stdout, stderr }
+  child.kill('SIGUSR2')
+  await new Promise((r) => setTimeout(r, 3000))
+  const [file] = readdirSync(reports)
+  // On Linux, what the process is doing, as the kernel sees it: running or asleep, on what, with which files open.
+  const proc = (path: string) => {
+    try {
+      return readFileSync(`/proc/${child.pid}/${path}`, 'utf8').trim()
+    } catch {
+      return ''
+    }
+  }
+  const tasks = (() => {
+    try {
+      return readdirSync(`/proc/${child.pid}/task`).map((t) => `${t}: ${proc(`task/${t}/stat`).split(') ')[1]?.split(' ')[0] ?? '?'} ${proc(`task/${t}/wchan`)} ${proc(`task/${t}/comm`)}`)
+    } catch {
+      return []
+    }
+  })()
+  const fds = (() => {
+    try {
+      return readdirSync(`/proc/${child.pid}/fd`).map((fd) => {
+        try {
+          return readlinkSync(`/proc/${child.pid}/fd/${fd}`)
+        } catch {
+          return fd
+        }
+      })
+    } catch {
+      return []
+    }
+  })()
+  const kernel = tasks.length ? ['Threads (state, wchan, name):', ...tasks, 'Open:', ...fds, `Syscall: ${proc('syscall')}`] : []
+  child.kill('SIGKILL')
+  let where = 'No report: it was busy, or held in native code.'
+  if (file) {
+    const report = JSON.parse(readFileSync(join(reports, file), 'utf8'))
+    const handles = (report.libuv ?? []).filter((h: { is_active?: boolean }) => h.is_active).map((h: { type: string; details?: string }) => `${h.type}${h.details ? ` ${h.details}` : ''}`)
+    const native = (report.nativeStack ?? []).slice(0, 25).map((f: { symbol: string }) => f.symbol)
+    where = [...(report.javascriptStack?.stack ?? []), 'Active handles:', ...handles, 'Native stack:', ...native].join('\n')
+  }
+  throw new Error(`sosie ${args.join(' ')} did not end in 20 s. Where it was:\n${where}\n${kernel.join('\n')}\n${stdout}${stderr}`)
+}
+
 /** Every Sosie a test started: one that a failing test left running is stopped with the file. */
 const children = new Set<ChildProcess>()
 afterAll(() => {
   for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
 })
 
-/** Start `sosie` and wait for its banner. */
-async function start(more: Record<string, string | undefined>, args: string[] = ['--port', '0']) {
-  const child = spawn(process.execPath, [CLI, ...args], { env: env(more), stdio: ['ignore', 'pipe', 'pipe'] })
+/** A project: a folder with this sosie.yml, and its other files. */
+function project(yaml: string, files: Record<string, string> = {}): string {
+  const dir = mkdtempSync(join(tmpdir(), 'sosie-project-'))
+  writeFileSync(join(dir, 'sosie.yml'), yaml)
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text)
+  return dir
+}
+
+/** One source, named app, its upstream in APP_URL, on a port the system picks. */
+const ONE = (more = '') => `sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n${more}`
+
+/** Start `sosie` in a project and wait for its banner; `address` says where a source of it listens. */
+async function start(more: Record<string, string | undefined>, cwd: string) {
+  const child = spawn(process.execPath, [CLI], { env: env(more), cwd, stdio: ['ignore', 'pipe', 'pipe'] })
   children.add(child)
   let stdout = ''
   let stderr = ''
@@ -49,10 +124,10 @@ async function start(more: Record<string, string | undefined>, args: string[] = 
   child.stderr.on('data', (d) => (stderr += d))
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`no banner: ${stdout}${stderr}`)), 15_000)
-    child.stdout.on('data', () => stdout.includes('Claude Code:') && (clearTimeout(timer), resolve()))
+    child.stdout.on('data', () => stdout.includes('Any MCP client:') && (clearTimeout(timer), resolve()))
     child.on('exit', () => (clearTimeout(timer), reject(new Error(`exited: ${stdout}${stderr}`))))
   })
-  const address = /Your agent, app and \w+:\s+(\S+)/.exec(stdout)![1]!
+  const address = (name = 'app') => new RegExp(`^  ${name}:\\s+(\\S+)`, 'm').exec(stdout)![1]!
   return { child, address, stdout: () => stdout }
 }
 
@@ -78,7 +153,7 @@ describe('sosie', () => {
   const transcript: string[] = []
 
   beforeAll(async () => {
-    sosie = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home })
+    sosie = await start({ APP_URL: inject('upstream'), SOSIE_HOME: home }, project(ONE()))
   })
   afterAll(async () => {
     if (sosie.child.exitCode === null) await stop(sosie.child)
@@ -86,9 +161,9 @@ describe('sosie', () => {
 
   it('prints where it reads from and where clients connect, and no credentials', () => {
     const out = sosie.stdout()
-    expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 6 tables, 2 views/)
+    expect(out).toMatch(/✓ app {2}127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 6 tables, 2 views/)
     expect(out).toContain('✓ Every value is faked')
-    expect(out).toMatch(/Your agent, app and psql:\s+postgres:\/\/localhost:\d+\/sosie_test_\w+/)
+    expect(out).toMatch(/\n {2}app: +postgres:\/\/localhost:\d+\/sosie_test_\w+\n/)
     // The plugin for Claude Code, from this repository's marketplace; the bare server for any other client.
     expect(out).toContain('claude plugin marketplace add monkilabs/sosie')
     expect(out).toContain('claude plugin install sosie@sosie')
@@ -96,11 +171,11 @@ describe('sosie', () => {
     expect(out).not.toContain('reader')
     const running = readFileSync(join(home, 'running', `${sosie.child.pid}.json`), 'utf8')
     expect(running).not.toContain('reader')
-    expect(JSON.parse(running).address).toBe(sosie.address)
+    expect(JSON.parse(running).sources).toMatchObject([{ name: 'app', kind: 'postgres', address: sosie.address() }])
   })
 
   it('serves fakes to node-postgres', async () => {
-    const client = new pg.Client({ connectionString: sosie.address })
+    const client = new pg.Client({ connectionString: sosie.address() })
     await client.connect()
     const { rows } = await client.query('SELECT email, full_name, phone FROM users ORDER BY id')
     await client.end()
@@ -113,33 +188,30 @@ describe('sosie', () => {
     const mcp = await mcpClient(home)
     expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'find', 'aggregate', 'graphql', 'request'])
     const users = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
-    expect(users.entities[0].fields).toContainEqual({ field: 'email', type: 'string', key: 'unique' })
+    expect(users.sources[0]).toMatchObject({ source: 'app', kind: 'postgres' })
+    expect(users.sources[0].entities[0].fields).toContainEqual({ field: 'email', type: 'string', key: 'unique' })
     const result = await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT * FROM users u JOIN orders o ON o.user_id = u.id' } })
     expect(result.isError).toBeFalsy()
     const body = JSON.parse(text(result))
     expect(body.rows).toHaveLength(5)
     expect(canariesIn(text(result))).toEqual([])
     transcript.push(text(result))
-    const several = JSON.parse(text(await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT 1 AS a; SELECT 2 AS b' } })))
+    const several = JSON.parse(text(await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT 1 AS a; SELECT 2 AS b', source: 'app' } })))
     expect(several.results.map((r: { rows: unknown[] }) => r.rows)).toEqual([[{ a: 1 }], [{ b: 2 }]])
-    // A flag before the command, as a client's configuration may write it, still serves MCP and stays.
-    const flagged = await mcpClient(home, ['--rules', 'sosie.yml', 'mcp'])
-    expect((await flagged.listTools()).tools.map((t) => t.name)).toContain('describe')
-    await flagged.close()
     const refused = await mcp.callTool({ name: 'query', arguments: { sql: 'DELETE FROM users' } })
     expect(refused.isError).toBe(true)
     expect(text(refused)).toBe('This statement changes data. Sosie is read-only.')
     await mcp.close()
   })
 
-  it('scans: nothing real in what it served, and the real value where one is', () => {
+  it('scans: nothing real in what it served, and the real value where one is', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sosie-transcripts-'))
     writeFileSync(join(dir, 'session.jsonl'), transcript.join('\n'))
-    const clean = run(['scan', dir], { SOSIE_HOME: home })
+    const clean = await watched(['scan', dir], { SOSIE_HOME: home })
     expect(clean.stdout).toContain('✓ No real values found in 1 file.')
     expect(clean.status).toBe(0)
     writeFileSync(join(dir, 'leak.md'), 'The agent wrote:\nZephyrine Orrowmoor ordered twice.\n')
-    const leak = run(['scan', dir], { SOSIE_HOME: home })
+    const leak = await watched(['scan', dir], { SOSIE_HOME: home })
     expect(leak.status).toBe(1)
     // Zephyrine is also a key in a profile, so the first real value found on the line may be either.
     expect(leak.stdout).toMatch(new RegExp(`✗ ${join(dir, 'leak.md')}:2  a real value from (format:full_name|users\\.profile\\.\\$\\.\\*key)\n`))
@@ -158,17 +230,100 @@ describe('sosie', () => {
   })
 })
 
+describe('sosie, every source of a project in one', () => {
+  it('serves a database, a REST API and a GraphQL API, each at its own address, the same person one fake in all', async () => {
+    const api = await startApi()
+    const gql = await startGraphql()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-all-'))
+    const dir = project(`# A rule at the top holds for every source that has the table.
+pass: [countries.*]
+sources:
+  shop:
+    upstream: \${SHOP_URL}
+    port: 0
+  members:
+    upstream: \${MEMBERS_URL}
+    port: 0
+    headers:
+      Authorization: Bearer \${MEMBERS_TOKEN}
+  directory:
+    upstream: \${DIRECTORY_URL}
+    port: 0
+    headers:
+      Authorization: Bearer \${MEMBERS_TOKEN}
+    max-rows: 2
+`)
+    const sosie = await start({ SHOP_URL: inject('upstream'), MEMBERS_URL: api.url, DIRECTORY_URL: gql.url, MEMBERS_TOKEN: TOKEN, SOSIE_HOME: home }, dir)
+    try {
+      const out = sosie.stdout()
+      expect(out).toMatch(/✓ shop {7}127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 6 tables, 2 views/)
+      expect(out).toMatch(/✓ members {4}127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document/)
+      expect(out).toMatch(/✓ directory {2}127\.0\.0\.1:\d+\/api\/graphql, read-only: 10 types, 19 queries/)
+      expect(out).toContain('✓ Every value is faked; 2 fields pass (sosie.yml)')
+      expect(out).toContain('! members: No OpenAPI document found')
+      expect(out).not.toContain(TOKEN)
+      for (const name of ['shop', 'members', 'directory']) expect(sosie.address(name)).toMatch(/^(postgres|http):\/\/localhost:\d+\//)
+
+      const db = new pg.Client({ connectionString: sosie.address('shop') })
+      await db.connect()
+      const { rows } = await db.query("SELECT email FROM users WHERE full_name = 'Quillon Vantablack'")
+      await db.end()
+      // The two answers below are real ones Sosie faked: the same person, one fake, in every source.
+      const people = (await (await fetch(`${sosie.address('members')}/users`)).json()) as { data: { email: string }[] }
+      const graphqlAnswer = await fetch(sosie.address('directory'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: '{ users { email } }' }) })
+      const directory = (await graphqlAnswer.json()) as { data: { users: { email: string }[] } }
+      expect(directory.data.users).toHaveLength(2)
+      expect(people.data.map((u) => u.email)).toContain(rows[0].email)
+      expect(directory.data.users.map((u) => u.email)).toContain(rows[0].email)
+      expect(canariesIn(JSON.stringify([rows, people, directory]))).toEqual([])
+
+      const running = JSON.parse(readFileSync(join(home, 'running', `${sosie.child.pid}.json`), 'utf8'))
+      expect(running.sources.map((s: { name: string; kind: string }) => [s.name, s.kind])).toEqual([
+        ['shop', 'postgres'],
+        ['members', 'rest'],
+        ['directory', 'graphql'],
+      ])
+      const mcp = await mcpClient(home)
+      try {
+        const described = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
+        expect(described.sources.map((s: { source: string }) => s.source)).toEqual(['shop', 'members', 'directory'])
+        // One source of each kind: each tool finds its own without a name.
+        expect(JSON.parse(text(await mcp.callTool({ name: 'query', arguments: { sql: 'SELECT count(*) AS n FROM users' } }))).rows).toEqual([{ n: '40' }])
+        expect(JSON.parse(text(await mcp.callTool({ name: 'request', arguments: { path: '/users' } }))).body.data).toHaveLength(3)
+        expect(JSON.parse(text(await mcp.callTool({ name: 'graphql', arguments: { query: '{ users { email } }', source: 'directory' } }))).data.users).toHaveLength(2)
+      } finally {
+        await mcp.close()
+      }
+    } finally {
+      expect(await stop(sosie.child)).toBe(0)
+      await api.close()
+      await gql.close()
+    }
+  })
+
+  it('starts none when one cannot connect, and names it', () => {
+    const dir = project(`sources:\n  shop:\n    upstream: \${SHOP_URL}\n    port: 0\n  crm:\n    upstream: \${CRM_URL}\n    port: 0\n`)
+    // Port 1: nothing listens there, and no test's server can take it meanwhile, as one could a port just closed.
+    const result = run([], { SHOP_URL: inject('upstream'), CRM_URL: 'postgres://kim:secret@127.0.0.1:1/crm', SOSIE_HOME: mkdtempSync(join(tmpdir(), 'sosie-cli-')) }, dir)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('✗ crm: Cannot connect to 127.0.0.1:1/crm')
+    expect(result.stderr).not.toContain('secret')
+    expect(result.stdout).not.toContain('shop:')
+  })
+})
+
 describe('sosie, in front of an API', () => {
   it('starts, serves curl and MCP, and says it found no OpenAPI document', async () => {
     const api = await startApi()
     const home = mkdtempSync(join(tmpdir(), 'sosie-cli-rest-'))
-    const sosie = await start({ SOSIE_UPSTREAM: api.url, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home }, ['--port', '0'])
+    const dir = project(`sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n    headers:\n      Authorization: Bearer \${APP_TOKEN}\n`)
+    const sosie = await start({ APP_URL: api.url, APP_TOKEN: TOKEN, SOSIE_HOME: home }, dir)
     const out = sosie.stdout()
-    expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document/)
-    expect(out).toContain('! No OpenAPI document found')
-    expect(out).toMatch(/Your agent, app and curl:\s+http:\/\/localhost:\d+\/v1/)
+    expect(out).toMatch(/✓ app {2}127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document/)
+    expect(out).toContain('! app: No OpenAPI document found')
+    expect(sosie.address()).toMatch(/^http:\/\/localhost:\d+\/v1$/)
     expect(out).not.toContain(TOKEN)
-    const users = (await (await fetch(`${sosie.address}/users`)).json()) as { data: unknown[] }
+    const users = (await (await fetch(`${sosie.address()}/users`)).json()) as { data: unknown[] }
     expect(users.data).toHaveLength(3)
     // The running file is written again as the API's answers show fields, so describe lists them.
     const entry = join(home, 'running', `${sosie.child.pid}.json`)
@@ -176,8 +331,8 @@ describe('sosie, in front of an API', () => {
     const mcp = await mcpClient(home)
     expect((await mcp.listTools()).tools.map((t) => t.name)).toEqual(['describe', 'query', 'find', 'aggregate', 'graphql', 'request'])
     const described = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
-    expect(described.entities.map((e: { entity: string }) => e.entity)).toEqual(['user'])
-    expect(described.entities[0].fields.map((f: { field: string }) => f.field)).toEqual(expect.arrayContaining(['id', 'email', 'name']))
+    expect(described.sources[0].entities.map((e: { entity: string }) => e.entity)).toEqual(['user'])
+    expect(described.sources[0].entities[0].fields.map((f: { field: string }) => f.field)).toEqual(expect.arrayContaining(['id', 'email', 'name']))
     const result = JSON.parse(text(await mcp.callTool({ name: 'request', arguments: { path: '/users' } })))
     expect(result.body.data).toHaveLength(3)
     expect(canariesIn(JSON.stringify([users, result]))).toEqual([])
@@ -190,12 +345,14 @@ describe('sosie, in front of an API', () => {
 })
 
 describe('sosie, in front of a GraphQL API', () => {
+  const graphqlSource = (more = '') => `sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n    headers:\n      Authorization: Bearer \${APP_TOKEN}\n${more}`
+
   it('starts on its path, and serves GraphQL clients and MCP', async () => {
     const api = await startGraphql()
     const home = mkdtempSync(join(tmpdir(), 'sosie-cli-gql-'))
-    const sosie = await start({ SOSIE_UPSTREAM: api.url, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home }, ['--port', '0'])
-    expect(sosie.stdout()).toMatch(/✓ 127\.0\.0\.1:\d+\/api\/graphql, read-only: 10 types, 19 queries/)
-    expect(sosie.address).toMatch(/^http:\/\/localhost:\d+\/api\/graphql$/)
+    const sosie = await start({ APP_URL: api.url, APP_TOKEN: TOKEN, SOSIE_HOME: home }, project(graphqlSource()))
+    expect(sosie.stdout()).toMatch(/✓ app {2}127\.0\.0\.1:\d+\/api\/graphql, read-only: 10 types, 19 queries/)
+    expect(sosie.address()).toMatch(/^http:\/\/localhost:\d+\/api\/graphql$/)
     const mcp = await mcpClient(home)
     const result = JSON.parse(text(await mcp.callTool({ name: 'graphql', arguments: { query: '{ users { email } }' } })))
     expect(result.data.users).toHaveLength(3)
@@ -205,17 +362,15 @@ describe('sosie, in front of a GraphQL API', () => {
     await api.close()
   })
 
-  it("starts at a path such as Supabase's /graphql/v1, or at any path with SOSIE_GRAPHQL_SCHEMA", async () => {
+  it("starts at a path such as Supabase's /graphql/v1, or at any path with kind: graphql and its schema", async () => {
     const api = await startGraphql()
     const home = mkdtempSync(join(tmpdir(), 'sosie-cli-gql-'))
-    const schema = join(home, 'schema.graphql')
-    writeFileSync(schema, SDL)
-    for (const [path, more] of [['/graphql/v1', {}], ['/query', { SOSIE_GRAPHQL_SCHEMA: schema }]] as const) {
+    for (const [path, more] of [['/graphql/v1', ''], ['/query', '    kind: graphql\n    schema: ./schema.graphql\n']] as const) {
       const upstream = api.url.replace('/api/graphql', path)
-      const sosie = await start({ SOSIE_UPSTREAM: upstream, SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, SOSIE_HOME: home, ...more })
+      const sosie = await start({ APP_URL: upstream, APP_TOKEN: TOKEN, SOSIE_HOME: home }, project(graphqlSource(more), { 'schema.graphql': SDL }))
       expect(sosie.stdout()).toMatch(/read-only: 10 types, 19 queries/)
-      expect(sosie.address).toMatch(new RegExp(`^http://localhost:\\d+${path}$`))
-      const answer = await fetch(sosie.address, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: '{ users { email } }' }) })
+      expect(sosie.address()).toMatch(new RegExp(`^http://localhost:\\d+${path}$`))
+      const answer = await fetch(sosie.address(), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: '{ users { email } }' }) })
       const body = (await answer.json()) as { data: { users: unknown[] } }
       expect(body.data.users).toHaveLength(3)
       expect(canariesIn(JSON.stringify(body))).toEqual([])
@@ -227,65 +382,80 @@ describe('sosie, in front of a GraphQL API', () => {
 
 describe('sosie, when something is wrong', () => {
   const home = mkdtempSync(join(tmpdir(), 'sosie-cli-'))
+  const empty = () => mkdtempSync(join(tmpdir(), 'sosie-empty-project-'))
 
-  it('asks for SOSIE_UPSTREAM when there is no terminal to type it in', () => {
-    const result = run([], { SOSIE_UPSTREAM: undefined, SOSIE_HOME: home })
+  it('says how to write sosie.yml when there is none, and no terminal to write it in', () => {
+    const result = run([], { SOSIE_HOME: home }, empty())
     expect(result.status).toBe(2)
-    expect(result.stderr).toContain("Set SOSIE_UPSTREAM to your database's connection string")
+    expect(result.stderr).toContain('✗ There is no sosie.yml here. Run sosie init in a terminal, or write it:')
+    expect(result.stderr).toContain('upstream: ${SHOP_URL}')
+    // An earlier version's variable, still set: what reads it now.
+    expect(run([], { SOSIE_UPSTREAM: 'postgres://kim:secret@db/app', SOSIE_HOME: home }, empty()).stderr).toContain('SOSIE_UPSTREAM is set: upstream: ${SOSIE_UPSTREAM} reads it.')
+    const init = run(['init'], { SOSIE_HOME: home }, empty())
+    expect(init.status).toBe(2)
+    expect(init.stderr).toContain('sosie init asks for the first source at a hidden prompt: run it in a terminal')
+  })
+
+  it('asks for a variable sosie.yml names, when there is no terminal to type it in', () => {
+    const result = run([], { APP_URL: undefined, SOSIE_HOME: home }, project(ONE()))
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain('✗ Set APP_URL, which sosie.yml names, in the terminal Sosie starts in, or start it in a terminal to type it.')
   })
 
   it('names an upstream it cannot read, without echoing it', () => {
-    const result = run([], { SOSIE_UPSTREAM: 'redis://kim:secret@db/0', SOSIE_HOME: home })
-    expect(result.status).toBe(2)
-    expect(result.stderr).toContain('Sosie reads postgres://, mysql:// and mongodb:// databases, and http:// or https:// APIs, for now; not redis://.')
+    const dir = project(ONE())
+    const result = run([], { APP_URL: 'redis://kim:secret@db/0', SOSIE_HOME: home }, dir)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('✗ sosie.yml: sources.app: Sosie reads postgres://, postgresql://, mysql://, mongodb://, mongodb+srv://, http:// and https:// upstreams, for now; not redis://.')
     expect(result.stderr).not.toContain('secret')
-    const notUrl = run([], { SOSIE_UPSTREAM: 'host=db password=secret', SOSIE_HOME: home })
-    expect(notUrl.stderr).toContain('The upstream is not a URL.')
+    const notUrl = run([], { APP_URL: 'host=db password=secret', SOSIE_HOME: home }, dir)
+    expect(notUrl.stderr).toContain('✗ sosie.yml: sources.app: APP_URL: it is not a URL.')
     expect(notUrl.stderr).not.toContain('secret')
     // A replica set's hosts, with their ports or without: one is enough.
     for (const hosts of ['h1:27017,h2:27017', 'h1,h2']) {
-      const listed = run([], { SOSIE_UPSTREAM: `mongodb://kim:secret@${hosts}/app?replicaSet=rs0`, SOSIE_HOME: home })
-      expect(listed.status).toBe(2)
+      const listed = run([], { APP_URL: `mongodb://kim:secret@${hosts}/app?replicaSet=rs0`, SOSIE_HOME: home }, dir)
+      expect(listed.status).toBe(1)
       expect(listed.stderr).toContain('Give one host of the replica set')
       expect(listed.stderr).not.toContain('secret')
     }
   })
 
-  it('says when it cannot connect', () => {
-    // Port 1: nothing listens there, and no test's server can take it meanwhile, as one could a port just closed.
-    const port = 1
-    const result = run([], { SOSIE_UPSTREAM: `postgres://kim:secret@127.0.0.1:${port}/app`, SOSIE_HOME: home })
+  it('refuses an upstream written in sosie.yml, without echoing it', () => {
+    const result = run([], { SOSIE_HOME: home }, project('sources:\n  app:\n    upstream: postgres://kim:secret@db/app\n'))
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain(`✗ Cannot connect to 127.0.0.1:${port}/app`)
+    expect(result.stderr).toContain('✗ sosie.yml: sources.app.upstream is one variable, such as ${APP_URL}, set in the terminal Sosie starts in')
     expect(result.stderr).not.toContain('secret')
-    // A rules file that is not there is a usage error, told before Sosie tries to connect.
-    const missing = run(['--rules', 'nope.yml'], { SOSIE_UPSTREAM: `postgres://kim:secret@127.0.0.1:${port}/app`, SOSIE_HOME: home })
-    expect(missing.status).toBe(2)
-    expect(missing.stderr).toContain('✗ No rules file at nope.yml.')
   })
 
-  it('names a typo in sosie.yml and suggests the field meant', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sosie-rules-'))
-    writeFileSync(join(dir, 'sosie.yml'), 'pass:\n  - users.emial\n')
-    const result = run([], { SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home }, dir)
-    expect(result.status).toBe(1)
-    expect(result.stderr).toContain('✗ sosie.yml: users.emial is not a field. Did you mean users.email?')
+  it('names a typo in sosie.yml and suggests what was meant', () => {
+    const top = run([], { APP_URL: inject('upstream'), SOSIE_HOME: home }, project(`pass:\n  - users.emial\n${ONE()}`))
+    expect(top.status).toBe(1)
+    expect(top.stderr).toContain("✗ sosie.yml: users.emial is not a field of app's users. Did you mean users.email? A rule for one source goes under it.")
+    const own = run([], { APP_URL: inject('upstream'), SOSIE_HOME: home }, project(ONE('    pass: [users.emial]\n')))
+    expect(own.stderr).toContain('✗ sosie.yml: sources.app: users.emial is not a field. Did you mean users.email?')
+    const key = run([], { SOSIE_HOME: home }, project(`max_rows: 5\n${ONE()}`))
+    expect(key.stderr).toContain('✗ sosie.yml: max_rows is not a key. Did you mean max-rows?')
   })
 
-  it('starts a second Sosie on the next free port, and MCP serves both', async () => {
+  it('starts a second Sosie, for another project, on the next free port, and MCP serves both', async () => {
     const shared = mkdtempSync(join(tmpdir(), 'sosie-two-'))
-    const first = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: shared }, [])
-    const second = await start({ SOSIE_UPSTREAM: inject('admin'), SOSIE_HOME: shared }, []).catch(async (error) => {
+    const shopAt = project('sources:\n  shop:\n    upstream: ${SHOP_URL}\n')
+    const adminAt = project('sources:\n  admin:\n    upstream: ${ADMIN_URL}\n')
+    const first = await start({ SHOP_URL: inject('upstream'), SOSIE_HOME: shared }, shopAt)
+    const second = await start({ ADMIN_URL: inject('admin'), SOSIE_HOME: shared }, adminAt).catch(async (error) => {
       await stop(first.child)
       throw error
     })
     try {
       // Other programs may hold and free ports meanwhile: the second only needs one of its own.
-      expect(new URL(second.address).port).not.toBe(new URL(first.address).port)
+      expect(new URL(second.address('admin')).port).not.toBe(new URL(first.address('shop')).port)
       const mcp = await mcpClient(shared)
       try {
         const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'countries' } })))
-        expect(all.sources.map((s: { address: string }) => s.address)).toEqual([second.address, first.address])
+        expect(all.sources.map((s: { source: string; address: string }) => [s.source, s.address])).toEqual([
+          ['admin', second.address('admin')],
+          ['shop', first.address('shop')],
+        ])
       } finally {
         await mcp.close()
       }
@@ -296,26 +466,25 @@ describe('sosie, when something is wrong', () => {
   })
 
   it('stops when its terminal closes, and leaves no running file', async () => {
-    const sosie = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home })
+    const sosie = await start({ APP_URL: inject('upstream'), SOSIE_HOME: home }, project(ONE()))
     expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`))).toBe(true)
     expect(await stop(sosie.child, 'SIGHUP')).toBe(0)
     expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`))).toBe(false)
   })
 
-  it('counts the fields that pass', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sosie-rules-'))
-    writeFileSync(join(dir, 'rules.yml'), 'pass:\n  - countries.*\n')
-    const sosie = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home }, ['--port', '0', '--rules', join(dir, 'rules.yml')])
-    expect(sosie.stdout()).toContain(`✓ Every value is faked; 2 fields pass (${join(dir, 'rules.yml')})`)
-    const busy = run(['--port', new URL(sosie.address).port], { SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home })
+  it('counts the fields that pass, and names a port in use', async () => {
+    const sosie = await start({ APP_URL: inject('upstream'), SOSIE_HOME: home }, project(`pass:\n  - countries.*\n${ONE()}`))
+    expect(sosie.stdout()).toContain('✓ Every value is faked; 2 fields pass (sosie.yml)')
+    const port = new URL(sosie.address()).port
+    const busy = run([], { APP_URL: inject('upstream'), SOSIE_HOME: home }, project(`sources:\n  app:\n    upstream: \${APP_URL}\n    port: ${port}\n`))
     expect(busy.status).toBe(1)
-    expect(busy.stderr).toMatch(/Port \d+ is in use\. Is Sosie already running\?/)
+    expect(busy.stderr).toContain(`✗ app: port ${port} is in use. Is Sosie already running? Give it another in sosie.yml.`)
     await stop(sosie.child)
   })
 
-  it('stops a statement at the --timeout it was started with, and refuses lifting it', async () => {
-    const sosie = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home }, ['--port', '0', '--timeout', '1'])
-    const client = new pg.Client({ connectionString: sosie.address })
+  it('stops a statement at the timeout sosie.yml gives, and refuses lifting it', async () => {
+    const sosie = await start({ APP_URL: inject('upstream'), SOSIE_HOME: home }, project(`timeout: 1\n${ONE()}`))
+    const client = new pg.Client({ connectionString: sosie.address() })
     await client.connect()
     const slow = await client.query('SELECT pg_sleep(3)').catch((error: { code: string }) => error)
     expect((slow as { code: string }).code).toBe('57014')
@@ -325,23 +494,18 @@ describe('sosie, when something is wrong', () => {
     await stop(sosie.child)
   })
 
-  it('explains its commands', () => {
-    expect(run(['--help']).stdout).toContain('sosie scan <path>...')
+  it('explains its commands, and says where a flag of an earlier version went', () => {
+    expect(run(['--help']).stdout).toContain('sosie init            Write sosie.yml, with the first source.')
     expect(run(['--version']).stdout.trim()).toBe(VERSION)
     expect(run(['serve']).status).toBe(2)
-    expect(run(['--port', 'x'], { SOSIE_UPSTREAM: 'postgres://x' }).stderr).toContain('--port takes a whole number from 0 to 65535, not x.')
-    // Refused before Sosie connects, as a usage error, not when it comes to listen.
-    const high = run(['--port', '70000'], { SOSIE_UPSTREAM: 'postgres://x' })
-    expect(high.status).toBe(2)
-    expect(high.stderr).toContain('--port takes a whole number from 0 to 65535, not 70000.')
-    expect(run(['--max-rows', '0'], { SOSIE_UPSTREAM: 'postgres://x' }).stderr).toContain('--max-rows takes a whole number from 1, not 0.')
-    const forever = run(['--timeout', '0'], { SOSIE_UPSTREAM: 'postgres://x' })
-    expect(forever.status).toBe(2)
-    expect(forever.stderr).toContain('--timeout takes a whole number from 1 to 3600, not 0.')
+    const port = run(['--port', '7674'])
+    expect(port.status).toBe(2)
+    expect(port.stderr).toContain('✗ --port is in sosie.yml now: port, under a source.')
+    expect(run(['--max-rows=5']).stderr).toContain('✗ --max-rows is in sosie.yml now: max-rows.')
     expect(run(['scan']).status).toBe(2)
-    const empty = run(['scan', '.'], { SOSIE_HOME: mkdtempSync(join(tmpdir(), 'sosie-empty-')) })
-    expect(empty.status).toBe(2)
-    expect(empty.stderr).toContain('Nothing to compare with')
+    const nothing = run(['scan', '.'], { SOSIE_HOME: mkdtempSync(join(tmpdir(), 'sosie-empty-')) })
+    expect(nothing.status).toBe(2)
+    expect(nothing.stderr).toContain('Nothing to compare with')
     expect(run(['scan', '/no/such/path'], { SOSIE_HOME: home }).stderr).toContain('No such file or folder: /no/such/path')
   })
 })

@@ -65,7 +65,8 @@ packages/
   core/src/
     index.ts         what the core exports to sources and the CLI
     source.ts        the Source interface, the neutral schema, the Faker
-    rules.ts         sosie.yml, checked against the neutral schema
+    config.ts        sosie.yml: its sources and settings, every problem at once, the variables they name
+    rules.ts         sosie.yml's rules, each source's checked against its schema
     domains.ts       which domain a field's values fake in
     naming.ts        which field shares another's values, by name, for sources without foreign keys
     fake/
@@ -130,7 +131,7 @@ packages/
     fake.ts          a JSON body, every value faked by its field
     mcp.ts           the request tool
   graphql/src/
-    index.ts         the Source: matches a graphql segment in the path, or a schema in SOSIE_GRAPHQL_SCHEMA; reads the schema
+    index.ts         the Source: matches a graphql segment in the path, or kind: graphql; reads the schema
     endpoint.ts      the HTTP server: parse, queries only, variables, errors by phase
     check.ts         the two threads that validate queries and answer introspection, within time and memory
     check-worker.ts  one such thread
@@ -140,10 +141,11 @@ packages/
     fake.ts          the data, every leaf faked by its schema field
     mcp.ts           the graphql tool
   cli/src/
-    cli.ts           sosie, sosie mcp, sosie scan
+    cli.ts           sosie, sosie init, sosie mcp, sosie scan
+    init.ts          sosie init: the first source, asked for at a hidden prompt, and the sosie.yml that names it
     sources.ts       the sources this CLI knows
-    prompt.ts        the hidden prompt
-    listen.ts        whether an address is this machine's only, for the warning on --host
+    prompt.ts        the prompts, hidden or not
+    listen.ts        whether an address is this machine's only, for the warning on host
   */test/            each package's unit tests
 plugins/sosie/       the plugin: the MCP server, the skill, the hooks for Claude Code, Copilot CLI and VS Code
 test/
@@ -163,8 +165,14 @@ A source is everything that knows one kind of upstream. The core gives it a
 export interface Source {
   /** 'postgres', 'mysql', 'mongodb', 'rest', 'graphql'. */
   readonly kind: string
-  /** Whether this source handles this upstream, or this endpoint address; `env` can say so where the URL cannot. */
-  matches(url: URL, env?: Record<string, string | undefined>): boolean
+  /** What it reads, for the terminal: 'Postgres database', 'REST API'. */
+  readonly title: string
+  /** The URL schemes it reads: 'postgres:'. A `kind` given for another is an error. */
+  readonly schemes: readonly string[]
+  /** Whether this source reads this upstream, when sosie.yml gives it no kind; or serves this endpoint address. */
+  matches(url: URL): boolean
+  /** The keys of a source in sosie.yml it takes beyond every source's: 'headers', 'schema'. Any other is an error. */
+  readonly settings?: ('headers' | 'schema')[]
   /** Connect read-only and describe the upstream in neutral terms. */
   connect(upstream: URL, options: SourceOptions): Promise<Connection>
   /** MCP tools beside the core's describe: Postgres adds query. They talk to the running endpoint, never to the upstream. */
@@ -174,8 +182,10 @@ export interface Source {
 export interface SourceOptions {
   maxRows: number
   statementTimeout: number
-  /** Where a source reads its own settings, never arguments: SOSIE_UPSTREAM_HEADERS, SOSIE_OPENAPI. */
-  env?: Record<string, string | undefined>
+  /** sosie.yml's `headers` for an HTTP upstream, each ${VAR} read: credentials, sent upstream and never shown. */
+  headers?: Record<string, string>
+  /** sosie.yml's `schema`: a file, by an absolute path, or a URL. */
+  schema?: string
 }
 
 export interface Connection {
@@ -265,87 +275,140 @@ export type FieldType =
   | { kind: 'unknown' }
 ```
 
-**Choosing a source:** the CLI asks each source it knows whether it `matches`
-the upstream URL, in order: Postgres for `postgres://` and `postgresql://`, MySQL for `mysql://`, MongoDB for
-`mongodb://` and `mongodb+srv://`, then GraphQL for an http(s) URL with a `graphql` or `graphql.json` segment in its
-path (`/graphql`, `/graphql/v1`; not `/mygraphql`), or any when `SOSIE_GRAPHQL_SCHEMA` is set, then REST for any
-other. Sources from other packages, listed in `sosie.yml`, are not supported yet: they come when the interface is
+**Choosing a source:** a source in `sosie.yml` with a `kind` is that kind's; without one, the CLI asks each source it
+knows whether it `matches` the upstream URL, in order: Postgres for `postgres://` and `postgresql://`, MySQL for
+`mysql://`, MongoDB for `mongodb://` and `mongodb+srv://`, then GraphQL for an http(s) URL with a `graphql` or
+`graphql.json` segment in its path (`/graphql`, `/graphql/v1`; not `/mygraphql`), then REST for any other. A `kind`
+whose source does not read the URL's scheme (`kind: postgres` for `https://`) is an error. Sources from other packages, listed in `sosie.yml`, are not supported yet: they come when the interface is
 settled; until 1.0 it may change between minor versions.
 
 ## CLI
 
 | Command | What it does |
 | --- | --- |
-| `sosie` | Start. Reads `SOSIE_UPSTREAM`, or asks for it at a hidden prompt |
+| `sosie` | Start every source `./sosie.yml` names. Without one, in a terminal, `sosie init` first |
+| `sosie init` | Write `./sosie.yml` with the first source, asked for at a hidden prompt |
 | `sosie mcp` | MCP server over stdio, for every running `sosie` |
 | `sosie scan <path>…` | Search files and folders for real values; exit 1 if one is found |
 
-`--help` (`-h`) and `--version` (`-v`) for each. Flags for `sosie`: `--port` (7674; without it, a Sosie whose port is taken tries
-the next nine, so a second Sosie, for another upstream, just starts; `0` lets the system pick; at most 65535), `--host`
-(127.0.0.1), `--rules` (`./sosie.yml` when present), `--max-rows` (1000, at
-least 1), `--timeout` (30 s, from 1 to 3600: how long a statement, a command or a request may run upstream; the MCP
-tools still wait at most 50 s, less than MCP clients wait for a tool). A `--host` other than this
-machine is allowed, for running Sosie on a host of its own, with a warning:
-the endpoint has no password, so anyone who can reach it can query the fakes. Exit codes: 0, 1 for a failure (cannot
-connect, a problem in `sosie.yml`, a port in use, a real value found), 2 for a usage error: an unknown flag or
-scheme, a flag's number out of its range, a `--rules` file that is not there, and a `scan` with nothing to scan or no
-store to compare with. A usage error stops Sosie before it connects. The command is the first word that is no flag's
-value, so `sosie --rules x mcp` serves MCP.
+`--help` (`-h`) and `--version` (`-v`) are the only flags: everything else is in `sosie.yml`. Exit codes: 0; 1 for a
+failure (a problem in `sosie.yml`, a source that cannot connect, a port in use, a real value found); 2 for a usage
+error (an unknown command or flag, no `sosie.yml` and no terminal to write one in, a `scan` with nothing to scan or no
+store to compare with). The command is the first word that is no flag.
 
-The connection string is never an argument: arguments show in shell history and
-in the process list, where an agent can read them. Without a terminal to type
-it in, `sosie` says to set `SOSIE_UPSTREAM`.
+The connection strings are never arguments, which show in shell history and in the process list, where an agent can
+read them; nor written in `sosie.yml`, which is committed. `sosie.yml` names the variables that hold them, and Sosie
+reads them from the terminal it starts in, or asks for each at a hidden prompt. Sosie reads no variable of its own but
+`SOSIE_HOME`, where the store is, which is the machine's and not the project's. `SOSIE_UPSTREAM`,
+`SOSIE_UPSTREAM_HEADERS`, `SOSIE_OPENAPI` and `SOSIE_GRAPHQL_SCHEMA`, which earlier versions read, are not: one left
+set gets a line saying what in `sosie.yml` replaces it.
 
 ```
-  ✓ db.internal:5432/app, read-only: 42 tables, 3 views
+  ✓ shop     db.internal:5432/shop, read-only: 42 tables, 3 views
+  ✓ billing  billing.internal/v1, read-only: OpenAPI 3.1, 40 schemas, 25 GET paths
   ✓ Every value is faked; 3 fields pass (sosie.yml)
-  ! The login is a superuser or can replicate. Sosie refuses the admin functions it knows, but a read-only login is safer.
-  ! The login can write to 12 tables. Sosie's session is read-only, but a read-only login is safer.
+  ! shop: The login can write to 12 tables. Sosie's session is read-only, but a read-only login is safer.
 
-  Your agent, app and psql:  postgres://localhost:7674/app
+  shop:                      postgres://localhost:7674/shop
+  billing:                   http://localhost:7675/v1
   Claude Code:               claude plugin marketplace add monkilabs/sosie
                              claude plugin install sosie@sosie
   Any MCP client:            npx @sosie/cli mcp
 ```
 
-Each `sosie` writes `$SOSIE_HOME/running/<pid>.json` (default `~/.sosie`) for
-`sosie mcp` and the plugin's hooks, at start-up, and again, at most every 200 ms, as a source that learns its fields
-meets them: the local address, the source kind, the neutral schema, the
-fields that pass, its pid and when it started; the newest is the one a tool uses without an `address`, and an entry
-written again keeps when its Sosie started. Each is written to a draft and renamed into place, so it is read whole.
-Nothing real: no upstream, no credentials, no values. The folder is 0700 and the file 0600. It is
-removed on Ctrl+C, a kill, or the terminal closing, and `sosie mcp` skips, and
-removes, the entry of a process that is gone. A Sosie stopped by `kill -9`
-leaves its entry, and if another process takes its pid before `sosie mcp`
-looks, the entry stays until that process ends: the tools could then send an
-agent's request to whatever listens on that address. Start a Sosie again, or
-delete the file.
+A `host` other than this machine is allowed, for running Sosie on a host of its own, with a warning: the endpoints
+have no password, so anyone who can reach one can query the fakes.
+
+**`sosie init`** asks for the first source's connection string at a hidden prompt, says what it found there (`A
+Postgres database: db.internal:5432/shop`), and asks for a name for the source (the database's name, or the API's
+host, by default) and for the variable to keep the string in (the name in capitals, with `_URL`: `SHOP_URL`). It
+writes `sosie.yml` with that source, `upstream: ${SHOP_URL}`, and never the string. A `sosie.yml` that names no
+sources yet (rules only, as earlier versions wrote) gets the source added and its rules kept; one that names its
+sources already is left as it is. `sosie` without a `sosie.yml` runs it, then starts with the string typed, for this
+run only: the next start reads `SHOP_URL`, or asks again.
+
+Each `sosie` writes `$SOSIE_HOME/running/<pid>.json` (default `~/.sosie`) for `sosie mcp` and the plugin's hooks, at
+start-up, and again, at most every 200 ms, as a source that learns its fields meets them: its pid, when it started,
+and each source's name, kind, local address, neutral schema and the fields that pass. An entry written again keeps
+when its Sosie started. Each is written to a draft and renamed into place, so it is read whole. Nothing real: no
+upstream, no credentials, no values. The folder is 0700 and the file 0600. It is removed on Ctrl+C, a kill, or the
+terminal closing, and `sosie mcp` skips, and removes, the entry of a process that is gone. A Sosie stopped by
+`kill -9` leaves its entry, and if another process takes its pid before `sosie mcp` looks, the entry stays until that
+process ends: the tools could then send an agent's request to whatever listens on that address. Start a Sosie again,
+or delete the file.
 
 ## `sosie.yml`
 
-Optional, committed with the code, written in field ids from the neutral
-schema, so the same file works for every source.
+The only configuration: in the folder Sosie starts in, committed with the code. It names the project's sources and
+how their values are faked; settings at the top hold for every source, and a source may set its own.
 
 ```yaml
-# Fields whose values pass unchanged.
+# For every source.
+max-rows: 1000
+timeout: 30
 pass:
   - orders.status
-  - products.price
   - countries.*
-
-# Formats for fields Sosie cannot tell from their names.
 format:
   users.handle: username
-  accounts.iban: iban
+
+sources:
+  shop:
+    upstream: ${SHOP_DATABASE_URL}
+  crm:
+    upstream: ${CRM_DATABASE_URL}
+    port: 7700
+    pass: [contacts.region]
+  billing:
+    upstream: ${BILLING_API_URL}
+    headers:
+      Authorization: Bearer ${BILLING_TOKEN}
+      X-Tenant: production
+    schema: ./openapi/billing.yaml
+  storefront:
+    upstream: ${STOREFRONT_URL}
+    kind: graphql
+    schema: ./storefront.graphql
 ```
+
+| Key | Where | Default | What it is |
+| --- | --- | --- | --- |
+| `sources` | the top | none: at least one | Each source by its name: lowercase letters, digits, `-` and `_`, a letter first |
+| `upstream` | a source | none: required | `${NAME}`: the variable that holds the connection string or base URL, whole |
+| `kind` | a source | from the URL | `postgres`, `mysql`, `mongodb`, `rest`, `graphql`: for a URL that does not say, such as GraphQL at `/query` |
+| `schema` | a source that takes one | REST: the API's document, if it serves one; GraphQL: introspection | A file, its path from `sosie.yml`'s folder, or a URL: an OpenAPI document, or GraphQL SDL or an introspection result as JSON |
+| `headers` | a source that takes them | none | Headers Sosie sends the upstream, each `Name: value`; a value may hold `${NAME}`s among its text |
+| `port` | a source | the next free from 7674, in the order listed | 0 to 65535; 0 lets the system pick |
+| `host` | the top, or a source | `127.0.0.1` | Where the endpoints listen |
+| `max-rows` | the top, or a source | 1000 | Rows a query returns, items of each list in an API's answer; at least 1 |
+| `timeout` | the top, or a source | 30 | Seconds a statement, a command or a request may run upstream, from 1 to 3600. The MCP tools wait 50 s at most either way, less than MCP clients wait for a tool |
+| `pass` | the top, or a source | none | Fields whose values pass unchanged |
+| `format` | the top, or a source | none | Formats for fields Sosie cannot tell from their names |
+
+**Variables.** `${NAME}` (letters, digits and `_`) is read from the environment of the terminal Sosie starts in; one
+not set, or empty, is asked for at a hidden prompt, by its name, or without a terminal named in an error, every one
+at once. Only `upstream` and the values of `headers` read variables; a `${` anywhere else is an error, and `$$`
+writes a `$`. `upstream` is one whole variable, never a URL written out, not even in part: an agent can edit the file,
+and a host written there beside a password from the environment would send the password to a host it chose.
+`headers` go only to their source's own upstream, so text around a variable (`Bearer ${TOKEN}`) is safe. A value read
+is never printed; one that is not a URL is said to be none, without it.
+
+**Sources.** A key a source does not take is an error that says why: `sosie.yml: sources.shop.headers: shop is a
+postgres source, which takes no headers.` A source declares the keys it takes beyond every source's (REST and GraphQL
+take `headers` and `schema`), so a new kind of source needs no change here.
+
+**Rules.** A source's rules are the top's and its own; its own `format` for a field wins over the top's. Its own are
+checked against its schema, the top's against every source's schema: they hold where the table or collection exists,
+and only a rule that matches no source's is an error. A table that exists without the field is an error there,
+since the rule is then a typo or belongs under one source: `sosie.yml: users.nickname is not a field of shop's
+users. Did you mean users.nick_name? A rule for one source goes under it.`
 
 Formats: `email`, `phone`, `first_name`, `last_name`, `full_name`, `street`,
 `city`, `postal_code`, `country`, `company`, `username`, `url`, `iban`,
 `text`, `shape`.
 
-An unknown key, entity, field or format is an error at start-up that names it,
-so a typo never passes data silently. Every problem is listed at once:
-`sosie.yml: users.emial is not a field. Did you mean users.email?`
+An unknown key, source, entity, field or format is an error at start-up that names it, so a typo never passes data
+silently. Every problem is listed at once: `sosie.yml: users.emial is not a field. Did you mean users.email?`
 
 A field that shares another's values cannot pass alone:
 `sosie.yml: orders.user_id passes but users.id, whose values it shares, does not. List both or neither.`
@@ -354,17 +417,20 @@ Nor can what names no entity, as an API's error body (`*.error`), or Sosie's own
 words for an API's (`$path`, `$query.value`): a source that learns its fields
 keeps a rule it has not met yet, but never one of these.
 
+Field ids carry no source's name: two sources with a `users` table share its domains, so a person is one fake in
+both, and a source added to `sosie.yml` never changes another's fakes. A rule at the top holds for both.
+
 ## Start-up
 
-1. Read the upstream; pick the source that matches it. A `--rules` file that
-   is not there stops Sosie here, before it connects.
-2. `connect`: the source reads its catalog on a read-only connection and
-   returns the neutral schema.
-3. Load `sosie.yml` and check it against the schema. For a source that learns
-   its fields, a field not met yet is kept, with a warning, and `entity.*`
-   holds for every field of the entity as it is met.
-4. Open the store, creating its key on first use.
-5. `serve`; write its entry under `running/`; print the address.
+1. Read `./sosie.yml`, or write it with `sosie init`; check every setting, and list every problem at once.
+2. Read each `${NAME}`: from the environment, or at a hidden prompt.
+3. For each source in the order listed: pick the source its `kind` or URL says; `connect`, which reads its catalog
+   on a read-only connection and returns the neutral schema. One that cannot connect closes those that did, and stops
+   Sosie, named: `✗ crm: Cannot connect to crm.internal:3306/crm: …`.
+4. Check the rules against each schema. For a source that learns its fields, a field not met yet is kept, with a
+   warning, and `entity.*` holds for every field of the entity as it is met.
+5. Open the store, creating its key on first use: one store, one Faker per source over it.
+6. `serve` each on its port, the given ones taken first; write the entry under `running/`; print the addresses.
 
 ## Core: domains
 
@@ -507,20 +573,22 @@ same value name whichever the index met last.
 The core serves `describe` from the neutral schemas under `running/`, one per
 running Sosie; each source adds its own tools, which run inside `sosie mcp` and
 talk to a running endpoint of their kind, so the MCP process never holds
-credentials or real values. Each takes an optional `address`, as `describe`
-lists it, for when several Sosies of a kind run; without it, the newest.
+credentials or real values. Each takes an optional `source`, by its name as `describe` lists it; without one, the
+only source of the tool's kind. With several of that kind, the tool names them and asks for one: an agent should
+never read the wrong database without knowing.
 
 | Tool | From | Input | Returns |
 | --- | --- | --- | --- |
-| `describe` | core | `entity` (optional) | Entities, fields, types, keys, references, and which fields pass |
+| `describe` | core | `entity` (optional) | Each source by its name, kind and address, with its entities, fields, types, keys, references, and which fields pass |
 | `query` | Postgres, MySQL | `sql` | Up to 200 rows per statement as JSON, the row count, and any notice (MySQL: its warnings, Sosie's notes among them); every value a consistent fake |
 | `find` | MongoDB | `collection`; `filter`, `projection`, `sort`, `limit` as JSON or Extended JSON (optional) | Up to 200 documents as relaxed Extended JSON, a 64-bit integer past 2^53 kept whole |
 | `aggregate` | MongoDB | `collection`, `pipeline` as a JSON array | Up to 200 documents, as `find` |
 | `request` | REST | `path`: a path and query, or a link Sosie returned | The status and the JSON body of a GET through Sosie, up to 200 items of each list, within 50 s; it reaches the running Sosie only, whatever the path says |
 | `graphql` | GraphQL | `query`, `variables` (optional) | The response of a query through Sosie, up to 200 items of each list, within 50 s |
 
-Sources that share a tool's name share one tool: `query` goes to the newest Postgres or MySQL Sosie, or the one at
-`address`, and runs as that source's. When Sosie is not running, every tool says so, and how to start it. A tool for a
+Sources that share a tool's name share one tool: `query` goes to the Postgres or MySQL source named, and runs as
+that source's. Several Sosies (another project's) may run at once: their sources are listed together, the newest
+Sosie's first, and a name two of them share goes to the newest. When Sosie is not running, every tool says so, and how to start it. A tool for a
 kind that is not running says which kinds are. Every tool is marked read-only. A MongoDB Sosie, and a REST Sosie without a document, learn their fields from the
 answers, and write their entries again as they do. For REST, `describe` lists each entity a collection names that the API answered with a list,
 with the fields met in it so far. An entity named after another word a client typed (a tenant's slug in
@@ -564,14 +632,15 @@ is what moves it. Its tools are [`sosie mcp`'s](#core-sosie-mcp); Claude Code na
 **The skill** loads when the sosie tools are there, the project has a `sosie.yml`, a database or API answers on
 localhost from port 7674, or data looks like consistent fakes. It says:
 
-- Start with `describe`, and use the tool of the Sosie's kind; a REST Sosie without a document is read by its paths.
+- Start with `describe`, and use the tool of the source's kind, naming the source; a REST source without a document
+  is read by its paths.
 - Every value is a fake; a fake the agent saw finds its record again.
 - Why a result can look wrong: order and ranges follow the real values, `LIKE` finds no fake, computed values are
   faked by type, `count` passes.
 - What Sosie refuses, and that code written against it never hard-codes a fake.
 - With no Sosie running: ask the developer to start one in their own terminal. Never start it, never ask for or touch
-  the connection string, `SOSIE_UPSTREAM`, `SOSIE_UPSTREAM_HEADERS` or `.env`, and never connect to the upstream
-  directly.
+  a connection string or a variable `sosie.yml` names, nor `.env`; never change a source's `upstream` or `headers`;
+  and never connect to an upstream directly.
 
 **The hooks.** Agent Plugins 1.0 has no place for hooks, so each assistant reads its own file, in its own place,
 and runs the same scripts. Each finds the plugin's folder by the token it replaces in a command.
@@ -651,7 +720,7 @@ One `pg` connection per client, opened at its start-up. pg's Client connects
 it; Sosie then takes over the connection's messages and relays each frontend
 message with a Flush, so its own errors fall in the right place among
 upstream's replies. The session is read-only from its start-up options:
-`default_transaction_read_only=on`, `statement_timeout` at `--timeout` (30 s),
+`default_transaction_read_only=on`, `statement_timeout` at the source's `timeout` (30 s),
 `idle_in_transaction_session_timeout=5min` (a transaction an agent leaves open
 would hold locks on the database), ISO dates, hex bytea. A client may lower
 either timeout, never lift it. Two more settings are pinned because they change how Postgres reads a
@@ -664,8 +733,8 @@ settings in the connection string itself (`statement_timeout`,
 after Sosie's, are dropped.
 
 A simple query is run upstream with the extended protocol, statement by
-statement, executing at most `--max-rows` + 1 rows: a result cut at the cap
-returns `--max-rows` rows and a notice.
+statement, executing at most `max-rows` + 1 rows: a result cut at the cap
+returns `max-rows` rows and a notice.
 
 ### Schema
 
@@ -892,7 +961,7 @@ upstream as the client wrote it.
 
 ## MySQL source
 
-For MySQL 8.0 and later; 8.4 LTS and 9 are tested. MariaDB is refused at start-up, for now. `SOSIE_UPSTREAM` is
+For MySQL 8.0 and later; 8.4 LTS and 9 are tested. MariaDB is refused at start-up, for now. Its `upstream` is
 `mysql://user:password@host:3306/database`, its database named; `?ssl-mode=REQUIRED`, `VERIFY_CA` or
 `VERIFY_IDENTITY` makes the session upstream use TLS.
 
@@ -948,9 +1017,9 @@ One session per client, opened with mysql2 at the handshake, and set at its star
 | Setting | Value |
 | --- | --- |
 | `transaction_read_only` | `ON` |
-| `max_execution_time` | The statement timeout: `--timeout`, 30 s by default |
+| `max_execution_time` | The source's `timeout`, 30 s by default |
 | `sql_mode` | The server's, without `ANSI_QUOTES`, `NO_BACKSLASH_ESCAPES`, `PIPES_AS_CONCAT`, `IGNORE_SPACE`, `HIGH_NOT_PRECEDENCE` and `ANSI`: MySQL reads each statement's text as Sosie's parser does |
-| `sql_select_limit` | `--max-rows` plus one; a `SELECT` with a `LIMIT` of its own is read to its end, the rows past the cap dropped |
+| `sql_select_limit` | `max-rows` plus one; a `SELECT` with a `LIMIT` of its own is read to its end, the rows past the cap dropped |
 | Character set | `utf8mb4` |
 
 Each value comes back as the server's text bytes (mysql2's `typeCast: false`): a 64-bit id keeps its digits, a BLOB
@@ -1081,10 +1150,10 @@ result cut at the cap.
 
 ## MongoDB source
 
-For MongoDB 6.0 and later (wire version 17); 6.0, 7.0 and 8.0 are tested. `SOSIE_UPSTREAM` is
+For MongoDB 6.0 and later (wire version 17); 6.0, 7.0 and 8.0 are tested. Its `upstream` is
 `mongodb://user:password@host:27017/database` or `mongodb+srv://…`, its database named; the driver takes every option
 the string gives (TLS, `authSource`, `replicaSet`, `readPreference`). A string of several hosts does not read as a URL:
-the CLI asks for one host and the `replicaSet` option, from which the driver finds the others.
+Sosie asks for one host and the `replicaSet` option, from which the driver finds the others.
 
 ### Endpoint
 
@@ -1114,7 +1183,7 @@ taken off, so the driver sets its own, and `readConcern`'s `afterClusterTime` dr
 `find`, `aggregate`, `count` and `distinct` get `maxTimeMS`, the statement timeout or the client's own if lower. A
 cursor's id is MongoDB's, kept with the upstream session that opened it, its shape and its scope, and it is its client
 session's, as MongoDB ties a cursor to the session that opened it (or its connection's, without an `lsid`): a driver
-may send `getMore` from any connection of its pool, and another client finds no such cursor. Past `--max-rows`
+may send `getMore` from any connection of its pool, and another client finds no such cursor. Past `max-rows`
 documents, the cursor is killed upstream, its id answered as 0, and the terminal says so whenever the cap cuts a batch.
 `killCursors` kills those it names, of its own session; a connection that closes kills those it opened.
 
@@ -1213,7 +1282,7 @@ this message, which may quote a value from your documents.` An upstream that can
 ### Limits
 
 - Order and ranges follow the real values; a regular expression, `$text` and what `$expr` computes filter on them.
-- A cursor cut at `--max-rows` says so in the terminal only: MongoDB has no warnings to carry it.
+- A cursor cut at `max-rows` says so in the terminal only: MongoDB has no warnings to carry it.
 - `listIndexes` and `listCollections` show an index's `partialFilterExpression` and a view's pipeline as written,
   a value in them included.
 - A stage Sosie does not know the shape of is refused, and so is any newer one until Sosie reads it.
@@ -1225,7 +1294,7 @@ this message, which may quote a value from your documents.` An upstream that can
 ## REST source
 
 For the team's own HTTP API, where the database's people come back as JSON.
-`SOSIE_UPSTREAM` is the API's base URL: `https://api.internal/v1`.
+Its `upstream` is the API's base URL: `https://api.internal/v1`.
 
 ### Endpoint and guard
 
@@ -1256,25 +1325,23 @@ reads it through its dev server's proxy.
 
 ### Credentials
 
-The API's credentials are Sosie's, never the client's: `SOSIE_UPSTREAM_HEADERS`
-holds them, one `Name: value` per line (`Authorization: Bearer …`; a line that is no
-header stops Sosie, named by its number, never quoted), and a user
+The API's credentials are Sosie's, never the client's: the source's `headers` hold them (`Authorization: Bearer
+${TOKEN}`; a header that is no valid one stops Sosie, named, its value never quoted), and a user
 and password in the URL become a Basic header, unless those headers hold an `Authorization`; a query on it (`?api_key=…`) goes
 with every request and is never shown, links included. Headers the client sends,
 `Authorization` included, are not passed on. Redirects are followed inside
 Sosie, within the API's origin and its base path only, never to an address with
 a user name in it nor through a segment that decodes to a `/` or `..`, so
 credentials never go elsewhere and the client never sees a real URL. What the
-terminal says when the API cannot be read leaves the query credentials out. Each request has the statement timeout (`--timeout`, 30 s) and
+terminal says when the API cannot be read leaves the query credentials out. Each request has the source's `timeout` (30 s) and
 a body cap (20 MB), counted as the body arrives; at most 5 redirects are followed. A `401` or `403` from the API tells
-the terminal to check `SOSIE_UPSTREAM_HEADERS`. Sosie sends `Accept: application/json` and `User-Agent: sosie`,
-which those headers may replace. A `SOSIE_OPENAPI` URL on the API's origin is read like any request; one on another
+the terminal to check the source's `headers`. Sosie sends `Accept: application/json` and `User-Agent: sosie`,
+which those headers may replace. A `schema` URL on the API's origin is read like any request; one on another
 origin is fetched once at start-up, without the API's credentials.
 
 ### Schema
 
-From an OpenAPI document, 3.x or Swagger 2.0, JSON or YAML: the file or URL in
-`SOSIE_OPENAPI`, or the first of `openapi.json`, `openapi.yaml`,
+From an OpenAPI document, 3.x or Swagger 2.0, JSON or YAML: the source's `schema`, a file or URL, or the first of `openapi.json`, `openapi.yaml`,
 `swagger.json`, `v3/api-docs`, `api-docs` and `docs/openapi.json` the API
 serves under its base. Each object schema is an entity (`allOf` merged), each
 property a field, a nested object's properties dotted (`User.address.city`).
@@ -1283,7 +1350,7 @@ OpenAPI 3.0 writes a nullable reference) is that entity's row, so a schema that
 refers to itself is read once, and an array of arrays of itself, so deep it
 has no end, is JSON. A document the API serves but Sosie cannot read is named
 in the banner's warning; an answer that is no document (no `openapi` or `swagger` key, or text that does not parse) is
-passed over, and the banner says none was found. A `SOSIE_OPENAPI` that cannot be read stops Sosie; when it is a
+passed over, and the banner says none was found. A `schema` that cannot be read stops Sosie; when it is a
 file, Sosie does not reach the API at start-up. Without it, finding the document is how Sosie checks it can reach
 the API: when it cannot, it stops. Only named schemas (`components.schemas`, Swagger's `definitions`) are entities,
 and only `GET` operations count, their answer's schema read from `200`, or the first `2xx`, under `application/json`.
@@ -1321,7 +1388,7 @@ the user and the password in the URL. A header that carries no credential
 (`X-Tenant`) holds none, so its words stay where they are structure. An integer beyond 2^53 (a 64-bit id) is read and
 written as its digits, never rounded, so its fake leads back to its record. A
 list keeps its first
-`--max-rows` items, and the answer's `sosie-notice` header says the rest were
+`max-rows` items, and the answer's `sosie-notice` header says the rest were
 cut; a large body is faked a slice of 20 ms at a time, so other clients are
 answered meanwhile.
 
@@ -1417,7 +1484,7 @@ would turn into that field's real value, which the passing field would show.
 - A word of the API's that a client types where a path starts (`/deep`), when it is also the fake Sosie gave a
   value, is read as that value, as a client that saw the fake would mean it: a single word is faked as a word. A word
   the document declares, or the API has answered with a list, is the API's, and stays.
-- Paths are matched against the document's templates from `SOSIE_UPSTREAM`'s path, not from the document's
+- Paths are matched against the document's templates from the `upstream`'s path, not from the document's
   `servers` or `basePath`: when they differ, no path matches, every answer is no entity's, and no rule passes.
 - JSON only: images, files and HTML from the API are not passed on.
 - Ids are consistent within the API and across its links. Domains are named
@@ -1466,11 +1533,11 @@ would turn into that field's real value, which the passing field would show.
 
 ## GraphQL source
 
-For the team's own GraphQL API. `SOSIE_UPSTREAM` is its endpoint, with a
+For the team's own GraphQL API. Its `upstream` is its endpoint, with a
 `graphql` segment in its path (`https://api.internal/graphql`, Supabase's
 `/graphql/v1`, Shopify's `/graphql.json`; `/mygraphql` is not one). An endpoint at another path, such as
-gqlgen's `/query`, is GraphQL when `SOSIE_GRAPHQL_SCHEMA` gives its schema;
-without it, the URL is the REST source's. Credentials as for REST: `SOSIE_UPSTREAM_HEADERS`, a user
+gqlgen's `/query`, is GraphQL with `kind: graphql`;
+without it, the URL is the REST source's. Credentials as for REST: the source's `headers`, a user
 and password in the URL, or a query on it, never shown; the client's are never
 passed on. As for REST, a JSON key, or a value that passes, that holds a part
 of them is faked.
@@ -1478,10 +1545,9 @@ of them is faked.
 ### Schema
 
 By introspection, with Sosie's credentials, at start-up. An API with
-introspection off is read from `SOSIE_GRAPHQL_SCHEMA`: its SDL, or an
-introspection result as JSON. When it is set, it is the schema, and Sosie does not ask the API at start-up: wrong
-credentials, or an API out of reach, show at the first query. Left set in the shell, it makes any http(s) upstream,
-a REST API's too, GraphQL. Each object and interface type, except the mutation and subscription types, is an entity;
+introspection off is read from the source's `schema`: its SDL, or an
+introspection result as JSON, in a file. When it is given, it is the schema, and Sosie does not ask the API at
+start-up: wrong credentials, or an API out of reach, show at the first query. Each object and interface type, except the mutation and subscription types, is an entity;
 each field that holds a scalar or an enum is a field; one that holds another object
 is that object's row. Built-in scalars map to neutral types, and custom ones by
 name (`DateTime`, `Date`, `UUID`, `JSON`, `jsonb`, `Map`, `Any`, `BigInt`);
@@ -1520,7 +1586,7 @@ asked for under a query field (`Query.admin: Mutation`), or through an interface
 (`{ operator { deleteUser } }`, where `Mutation implements Operator`), by a fragment or not. Variables that nest
 deeper than 100 levels get `400`. A persisted query without its text is refused. POSTs are
 not redirected: the body and the credentials stay with the API. The API's answer is read up to 20 MB, within the
-statement timeout (`--timeout`, 30 s).
+source's `timeout` (30 s).
 
 Introspection is answered from the schema Sosie holds, with what the client
 sent, and never reaches the API; so clients introspect an API that has
@@ -1545,7 +1611,7 @@ its own (`sosieTypename_`) the client never sees, and an object that does not
 say, or names a type it cannot be, comes back `null`. So a `User` under
 `node(id:)` fakes its id as `User.id`, and a union member never passes by
 another type's rule. `__typename` comes back as the schema names it. A list
-keeps its first `--max-rows` items, and the response's `extensions.sosie` says
+keeps its first `max-rows` items, and the response's `extensions.sosie` says
 the rest were cut; a large answer is faked a slice at a time, a large JSON
 value in it too. An integer beyond 2^53 (a `BigInt` or `Long` scalar sent as a
 number) is read and written as its digits, so its fake leads back.
@@ -1560,7 +1626,7 @@ about, the schema's own names among them (`ACCESS_DENIED`, `ORDER_NOT_FOUND`);
 nothing else does, so a code with a digit or a word of data
 (`USER_7739182046_NOT_FOUND`, `QUILLON_FORBIDDEN`) is dropped. An answer that
 is not JSON is `502`, without its content type. A `401` or `403` from the API
-tells the terminal to check `SOSIE_UPSTREAM_HEADERS`.
+tells the terminal to check the source's `headers`.
 
 ### Query by what you saw
 
@@ -1671,8 +1737,10 @@ source learns. Format domains make a person's email the same fake from the datab
   without `data` and quotes canaries, a redirect to a recording server, and
   introspection on and off. Fakes the client saw are sent back in variables of
   the wrong type and through introspection: no canary may come back.
-- **The CLI.** The built CLI is run: start against a database and an API, MCP
-  over stdio, `scan`, Ctrl+C, and the errors a developer meets first.
+- **The CLI.** The built CLI is run: start one source, and a database, a REST API and a GraphQL API in one Sosie, from
+  a `sosie.yml` and the variables it names; MCP over stdio, each source by its name; `scan`, Ctrl+C, and the errors a
+  developer meets first, `sosie.yml`'s among them. `sosie init` is run through its prompts as a terminal would answer
+  them.
 - **The dependency rule.** A test reads the imports and manifests.
 - **The plugin.** `test/plugin.test.ts`: the plugin's version and the CLI its server runs are `@sosie/cli`'s, in its
   source and in Claude Code's files, and its hooks read the `running/` entries the core writes. Each assistant's hooks
@@ -1692,10 +1760,11 @@ source learns. Format domains make a person's email the same fake from the datab
 
 | Setting | Default |
 | --- | --- |
-| Address | 127.0.0.1:7674 (7674 spells "sosi" on a phone keypad), and ::1, where `localhost` often goes first; a port another program holds on ::1 counts as taken |
+| Address | 127.0.0.1, the first source at 7674 (7674 spells "sosi" on a phone keypad) and each next at the next free port, and ::1 too, where `localhost` often goes first; a port another program holds on ::1 counts as taken |
 | Rows per query; items per list of an API's answer | 1,000 |
 | Rows per MCP query | 200 |
-| Statement timeout upstream | 30 s, or `--timeout` |
+| Statement timeout upstream | 30 s, or `timeout` |
+| Configuration | `./sosie.yml`, the only one: no flags, no variables of Sosie's own but `SOSIE_HOME` |
 | Store | `$SOSIE_HOME/store/`, or `~/.sosie/store/` |
 
 ## Open items
@@ -1706,5 +1775,5 @@ source learns. Format domains make a person's email the same fake from the datab
   not faked bound by bound; a range compared in a query is used as written.
 - MySQL: MariaDB, refused at start-up.
 - MongoDB: a fake in a `$lookup`'s `let`, an index bound (`min`, `max`, `hint` by value), or what `$expr` computes is used as
-  written; Compass and the drivers other than Node's are not checked; a cursor cut at `--max-rows` says so only in the
+  written; Compass and the drivers other than Node's are not checked; a cursor cut at `max-rows` says so only in the
   terminal.

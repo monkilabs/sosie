@@ -1,26 +1,41 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { parseArgs, styleText } from 'node:util'
+import { parseArgs } from 'node:util'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   clearRunning,
+  ConfigError,
   createFaker,
-  loadRules,
-  NO_RULES,
+  interpolate,
+  readConfig,
   readRunning,
   RulesError,
+  rulesFor,
   scan,
   serveMcp,
+  settingsProblems,
   sosieHome,
+  sourceNames,
   Store,
   storeDir,
   storeDirs,
+  unheldRules,
+  variablesOf,
   writeRunning,
-  type Rules,
+  type Config,
+  type Connection,
+  type Endpoint,
+  type Faker,
+  type Running,
   type Schema,
+  type Source,
+  type SourceConfig,
+  type SourceRules,
 } from '@sosie/core'
+import { init, sourceFor, upstreamUrl } from './init.js'
 import { loopback } from './listen.js'
+import { columns, fail, found, ok, warn } from './print.js'
 import { hiddenPrompt } from './prompt.js'
 import { sources } from './sources.js'
 
@@ -29,31 +44,36 @@ const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', impor
 const USAGE = `Sosie: your AI agent sees a double of your data. Never the real thing.
 
 Usage:
-  sosie                 Start. Reads SOSIE_UPSTREAM, or asks for it.
+  sosie                 Start every source sosie.yml names. Without a sosie.yml, write one first.
+  sosie init            Write sosie.yml, with the first source.
   sosie mcp             MCP server over stdio, for every running sosie.
   sosie scan <path>...  Search files and folders for real values; exit 1 if one is found.
 
-Options for sosie:
-  --port <n>       Port to listen on (7674)
-  --host <host>    Address to listen on (127.0.0.1)
-  --rules <file>   Rules file (./sosie.yml when present)
-  --max-rows <n>   Rows a query returns at most (1000)
-  --timeout <s>    Seconds a statement or request may run upstream (30, at most 3600)
+sosie.yml, in the folder Sosie starts in, is all there is to set:
 
-Environment:
-  SOSIE_UPSTREAM          A database's connection string, or an API's base URL
-  SOSIE_UPSTREAM_HEADERS  For an API: headers Sosie sends it, one 'Name: value'
-                          per line, such as 'Authorization: Bearer ...'
-  SOSIE_OPENAPI           For a REST API: its OpenAPI document, a file or URL
-                          (otherwise Sosie looks for one at the usual paths)
-  SOSIE_GRAPHQL_SCHEMA    For a GraphQL API without introspection, or at a path
-                          without graphql in it: its SDL file, or a file of its
-                          introspection result as JSON
-  SOSIE_HOME              Where Sosie keeps its store (~/.sosie)
+  sources:
+    shop:
+      upstream: \${SHOP_URL}
 
-The upstream and its credentials are never arguments: arguments show in shell
-history and the process list, where an agent can read them.
+Each upstream is read from the variable it names, set in your terminal, or asked
+for at a hidden prompt: never an argument, never written in sosie.yml.
+https://monkilabs.github.io/sosie/docs/configuration/
 `
+
+/** What earlier versions read, and what in sosie.yml says it now. */
+const GONE_VARIABLES: Record<string, string> = {
+  SOSIE_UPSTREAM: "a source's upstream: upstream: ${SOSIE_UPSTREAM} reads it",
+  SOSIE_UPSTREAM_HEADERS: "a source's headers",
+  SOSIE_OPENAPI: "a source's schema",
+  SOSIE_GRAPHQL_SCHEMA: "a source's schema, with kind: graphql",
+}
+const GONE_FLAGS: Record<string, string> = {
+  port: 'port, under a source',
+  host: 'host',
+  rules: 'pass and format, in sosie.yml itself',
+  'max-rows': 'max-rows',
+  timeout: 'timeout',
+}
 
 class Exit extends Error {
   constructor(
@@ -64,26 +84,18 @@ class Exit extends Error {
   }
 }
 
-const ok = (text: string) => `  ${styleText('green', '✓', { stream: process.stdout })} ${text}`
-const warn = (text: string) => `  ${styleText('yellow', '!', { stream: process.stdout })} ${text}`
-const fail = (text: string) => `  ${styleText('red', '✗', { stream: process.stderr })} ${text}`
-const found = (text: string) => `  ${styleText('red', '✗', { stream: process.stdout })} ${text}`
-
 async function main(argv: string[]): Promise<void> {
+  // A flag of an earlier version is said to be in sosie.yml now, not refused as unknown.
+  for (const arg of argv) {
+    const flag = /^--([a-z-]+)(=|$)/.exec(arg)?.[1]
+    if (flag && GONE_FLAGS[flag]) throw new Exit(2, fail(`--${flag} is in sosie.yml now: ${GONE_FLAGS[flag]}.`))
+  }
   let parsed
   try {
     parsed = parseArgs({
       args: argv,
       allowPositionals: true,
-      options: {
-        port: { type: 'string' },
-        host: { type: 'string' },
-        rules: { type: 'string' },
-        'max-rows': { type: 'string' },
-        timeout: { type: 'string' },
-        help: { type: 'boolean', short: 'h' },
-        version: { type: 'boolean', short: 'v' },
-      },
+      options: { help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' } },
     })
   } catch (error) {
     throw new Exit(2, `${(error as Error).message}\n\n${USAGE}`)
@@ -94,113 +106,149 @@ async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = positionals
   if (command === 'mcp') return mcp()
   if (command === 'scan') return scanCommand(rest)
+  if (command === 'init') return initCommand()
   if (command !== undefined) throw new Exit(2, `Unknown command: ${command}\n\n${USAGE}`)
-  return start({
-    port: number(values.port, DEFAULT_PORT, '--port', 0, 65_535),
-    portChosen: values.port !== undefined,
-    host: values.host ?? '127.0.0.1',
-    rules: values.rules,
-    maxRows: number(values['max-rows'], 1000, '--max-rows', 1),
-    timeout: number(values.timeout, 30, '--timeout', 1, 3600),
-  })
+  return start()
 }
 
-function number(value: string | undefined, fallback: number, name: string, min = 0, max = Number.MAX_SAFE_INTEGER): number {
-  if (value === undefined) return fallback
-  const n = Number(value)
-  if (!Number.isInteger(n) || n < min || n > max) {
-    const range = max === Number.MAX_SAFE_INTEGER ? `from ${min}` : `from ${min} to ${max}`
-    throw new Exit(2, fail(`${name} takes a whole number ${range}, not ${value}.`))
+/* sosie init */
+
+const FILE = 'sosie.yml'
+
+const EXAMPLE = `  sources:
+    shop:
+      upstream: \${SHOP_URL}     # set SHOP_URL in your terminal, never here
+`
+
+/** Write sosie.yml with its first source. Starting, the string typed is kept in `typed`, for this run only. */
+async function initCommand(typed?: Record<string, string>): Promise<void> {
+  if (!process.stdin.isTTY) {
+    throw new Exit(2, `${fail('sosie init asks for the first source at a hidden prompt: run it in a terminal, or write sosie.yml yourself:')}\n\n${EXAMPLE}`)
   }
-  return n
+  try {
+    const written = await init(resolve(FILE), { input: process.stdin, output: process.stdout }, sources)
+    if (typed) typed[written.variable] = written.value
+    else process.stdout.write('    Start Sosie with npx @sosie/cli.\n')
+  } catch (error) {
+    throw new Exit(error instanceof ConfigError ? 1 : 2, fail((error as Error).message))
+  }
 }
 
 /* sosie */
 
-const DEFAULT_PORT = 7674
-/** Ports a Sosie started without --port tries, so a second one, for another upstream, just starts. */
-const PORTS_TO_TRY = 10
+/** The first port a source without one tries, then each next one; 7674 spells "sosi" on a phone keypad. */
+const FIRST_PORT = 7674
+/** Ports past a taken one a source without a port tries before it gives up. */
+const PORTS_TO_TRY = 100
 
-async function start(options: {
-  port: number
-  portChosen: boolean
-  host: string
-  rules: string | undefined
-  maxRows: number
-  /** Seconds. */
-  timeout: number
-}): Promise<void> {
-  const upstream = await readUpstream()
-  const source = sources.find((s) => s.matches(upstream, process.env))
-  if (!source) {
-    throw new Exit(2, fail(`Sosie reads postgres://, mysql:// and mongodb:// databases, and http:// or https:// APIs, for now; not ${upstream.protocol}//.`))
-  }
+/** A source of sosie.yml, its upstream read and its kind's source found. */
+interface Plan {
+  config: SourceConfig
+  source: Source
+  upstream: URL
+  headers: Record<string, string>
+}
 
-  // A rules file that is not there is a usage error, told before Sosie connects; what it says is checked after, against
-  // the schema.
-  const rulesFile = options.rules ?? (existsSync('sosie.yml') ? 'sosie.yml' : undefined)
-  if (rulesFile && !existsSync(rulesFile)) throw new Exit(2, fail(`No rules file at ${rulesFile}.`))
+async function start(): Promise<void> {
+  const notes = Object.entries(GONE_VARIABLES)
+    .filter(([name]) => process.env[name])
+    .map(([name, now]) => `${name} is not read any more: sosie.yml says it, as ${now}.`)
 
-  let connection
-  try {
-    connection = await source.connect(upstream, { maxRows: options.maxRows, statementTimeout: options.timeout * 1000, env: process.env })
-  } catch (error) {
-    throw new Exit(1, fail((error as Error).message))
-  }
-
-  let rules: Rules = NO_RULES
-  if (rulesFile) {
-    try {
-      rules = loadRules(readFileSync(rulesFile, 'utf8'), connection.schema, rulesFile, { learns: !!connection.learns })
-    } catch (error) {
-      await connection.close()
-      if (error instanceof RulesError) throw new Exit(1, error.problems.map(fail).join('\n'))
-      throw error
+  // Without a sosie.yml, or one that names no sources, its first source is asked for, then Sosie starts with it.
+  const file = resolve(FILE)
+  const typed: Record<string, string> = {}
+  if (!existsSync(file) || noSources(file)) {
+    if (!process.stdin.isTTY) {
+      const why = existsSync(file) ? 'sosie.yml names no sources.' : 'There is no sosie.yml here.'
+      const hint = process.env.SOSIE_UPSTREAM ? '\n  SOSIE_UPSTREAM is set: upstream: ${SOSIE_UPSTREAM} reads it.\n' : ''
+      throw new Exit(2, `${fail(`${why} Run sosie init in a terminal, or write it:`)}\n\n${EXAMPLE}${hint}`)
     }
+    await initCommand(typed)
+  }
+
+  let config: Config
+  try {
+    config = readConfig(readFileSync(file, 'utf8'), file, sources)
+  } catch (error) {
+    if (error instanceof ConfigError) throw new Exit(1, error.problems.map(fail).join('\n'))
+    throw error
+  }
+
+  const values = await readVariables(config, typed)
+  const plans = planSources(config, values)
+
+  const connections: Connection[] = []
+  const closeAll = async () => {
+    for (const connection of connections) await connection.close().catch(() => {})
+  }
+  for (const plan of plans) {
+    try {
+      connections.push(await plan.source.connect(plan.upstream, optionsOf(plan)))
+    } catch (error) {
+      await closeAll()
+      throw new Exit(1, fail(`${plan.config.name}: ${(error as Error).message}`))
+    }
+  }
+
+  const rules: SourceRules[] = []
+  const problems: string[] = []
+  plans.forEach((plan, i) => {
+    const connection = connections[i]!
+    try {
+      rules.push(rulesFor(connection.schema, { own: plan.config.rules, shared: config.rules, file: FILE, source: plan.config.name, learns: !!connection.learns }))
+    } catch (error) {
+      if (!(error instanceof RulesError)) throw error
+      problems.push(...error.problems)
+    }
+  })
+  if (!problems.length) problems.push(...unheldRules(config.rules, rules.map((r) => r.applied), FILE))
+  if (problems.length) {
+    await closeAll()
+    throw new Exit(1, problems.map(fail).join('\n'))
   }
 
   const home = sosieHome()
   const store = Store.open(storeDir(home))
-  const faker = createFaker({ schema: connection.schema, rules, store })
-  // What sosie mcp reads: written once the endpoint listens, and again as a source that learns its fields meets them.
+  const fakers = plans.map((_, i) => createFaker({ schema: connections[i]!.schema, rules: rules[i]!, store }))
+
+  // What sosie mcp reads: written once every endpoint listens, and again as a source that learns its fields meets them.
   const startedAt = Date.now()
+  const schemas = connections.map((c) => c.schema)
+  const addresses: string[] = []
   let stopping = false
-  let address = ''
-  let grown: Schema | undefined
   let rewrite: NodeJS.Timeout | undefined
-  const entry = (schema: Schema) => {
-    const passing = new Set([...rules.pass, ...schema.entities.flatMap((e) => e.fields.filter((f) => faker.passes(f)).map((f) => f.id))])
-    writeRunning(home, { kind: source.kind, address, schema, passing: [...passing] }, process.pid, startedAt)
+  const entry = () => {
+    const running: Running[] = plans.map((plan, i) => {
+      const passing = new Set([...rules[i]!.pass, ...schemas[i]!.entities.flatMap((e) => e.fields.filter((f) => fakers[i]!.passes(f)).map((f) => f.id))])
+      return { name: plan.config.name, kind: plan.source.kind, address: addresses[i]!, schema: schemas[i]!, passing: [...passing] }
+    })
+    writeRunning(home, running, process.pid, startedAt)
   }
-  const learned = (schema: Schema) => {
-    grown = schema
+  const learned = (i: number) => (schema: Schema) => {
+    schemas[i] = schema
     rewrite ??= setTimeout(() => {
       rewrite = undefined
-      if (!stopping && grown) entry(grown)
+      if (!stopping && addresses.length) entry()
     }, 200)
   }
-  let endpoint
-  for (let port = options.port; !endpoint; port++) {
-    try {
-      endpoint = await connection.serve({ host: options.host, port }, faker, connection.learns ? learned : undefined)
-    } catch (error) {
-      const busy = (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
-      if (busy && !options.portChosen && port < options.port + PORTS_TO_TRY - 1) continue
-      store.close()
-      await connection.close()
-      if (busy) throw new Exit(1, fail(`Port ${port} is in use. Is Sosie already running? Choose another with --port.`))
-      throw error
-    }
+
+  let endpoints: Endpoint[]
+  try {
+    endpoints = await serveAll(plans, connections, fakers, learned)
+  } catch (error) {
+    store.close()
+    await closeAll()
+    throw error
   }
   // Ctrl+C, a kill, or the terminal closing: each stops Sosie and leaves no running/ file behind, from before
-  // the file is written and the address printed, so a client that starts on the address can stop it too.
+  // the file is written and the addresses printed, so a client that starts on an address can stop it too.
   const stopped = new Promise<void>((done) => {
     const stop = async () => {
       stopping = true
       clearTimeout(rewrite)
       clearRunning(home)
-      await endpoint.close()
-      await connection.close()
+      for (const endpoint of endpoints) await endpoint.close()
+      await closeAll()
       store.close()
       done()
     }
@@ -208,22 +256,24 @@ async function start(options: {
     process.once('SIGTERM', stop)
     process.once('SIGHUP', stop)
   })
-  address = endpoint.address
-  entry(connection.schema)
+  addresses.push(...endpoints.map((e) => e.address))
+  entry()
 
-  const passing = rules.pass.size
+  const width = Math.max(...plans.map((p) => p.config.name.length))
+  // Fields each source has: a rule kept for fields a source may meet later passes none yet.
+  const passing = rules.reduce((n, r, i) => n + schemas[i]!.entities.reduce((m, e) => m + e.fields.filter((f) => r.pass.has(f.id)).length, 0), 0)
+  const hosts = [...new Set(plans.map((p) => p.config.host))].filter((host) => !loopback(host))
   const lines = [
     '',
-    ok(`${connection.label}, read-only: ${connection.summary}`),
-    ok(passing ? `Every value is faked; ${passing} ${passing === 1 ? 'field passes' : 'fields pass'} (${rulesFile})` : 'Every value is faked'),
-    ...connection.warnings.map(warn),
-    ...rules.warnings.map(warn),
-    ...(loopback(options.host)
-      ? []
-      : [warn(`Listening on ${options.host}, with no password: anyone who can reach it can query the fakes and filter on the real values.`)]),
+    ...plans.map((plan, i) => ok(`${plan.config.name.padEnd(width)}  ${connections[i]!.label}, read-only: ${connections[i]!.summary}`)),
+    ok(passing ? `Every value is faked; ${passing} ${passing === 1 ? 'field passes' : 'fields pass'} (${FILE})` : 'Every value is faked'),
+    ...plans.flatMap((plan, i) => connections[i]!.warnings.map((w) => warn(`${plan.config.name}: ${w}`))),
+    ...rules.flatMap((r) => r.warnings).map(warn),
+    ...notes.map(warn),
+    ...hosts.map((host) => warn(`Listening on ${host}, with no password: anyone who can reach it can query the fakes and filter on the real values.`)),
     '',
-    ...banner([
-      [`Your agent, app and ${connection.client ?? 'tools'}:`, endpoint.address],
+    ...columns([
+      ...plans.map((plan, i): [string, string] => [`${plan.config.name}:`, endpoints[i]!.address]),
       ['Claude Code:', 'claude plugin marketplace add monkilabs/sosie'],
       ['', 'claude plugin install sosie@sosie'],
       ['Any MCP client:', 'npx @sosie/cli mcp'],
@@ -234,38 +284,115 @@ async function start(options: {
   await stopped
 }
 
-/** Labels and what they say, in two columns: the second starts one space past the longest label, at 29 at least. */
-function banner(rows: [string, string][]): string[] {
-  const width = Math.max(27, ...rows.map(([label]) => label.length + 1))
-  return rows.map(([label, text]) => `  ${label.padEnd(width)}${text}`)
+/** Whether sosie.yml has no sources key, so that its first source is still to be written. */
+function noSources(file: string): boolean {
+  try {
+    return sourceNames(readFileSync(file, 'utf8')) === undefined
+  } catch {
+    // Told when it is read.
+    return false
+  }
 }
 
-/** SOSIE_UPSTREAM, or a hidden prompt in a terminal. Never an argument, never echoed. */
-async function readUpstream(): Promise<URL> {
-  let text = process.env.SOSIE_UPSTREAM
-  if (!text) {
-    if (!process.stdin.isTTY) {
-      throw new Exit(2, fail("Set SOSIE_UPSTREAM to your database's connection string or your API's base URL, or run sosie in a terminal to type it."))
-    }
+/** Every variable sosie.yml names: from the terminal's environment, or asked for at a hidden prompt. Never echoed. */
+async function readVariables(config: Config, typed: Record<string, string>): Promise<Record<string, string>> {
+  const values: Record<string, string> = {}
+  const missing: string[] = []
+  for (const name of variablesOf(config)) {
+    const value = typed[name] ?? process.env[name]
+    if (value) values[name] = value
+    else missing.push(name)
+  }
+  if (!missing.length) return values
+  if (!process.stdin.isTTY) {
+    const list = missing.length === 1 ? missing[0] : `${missing.slice(0, -1).join(', ')} and ${missing.at(-1)}`
+    throw new Exit(2, fail(`Set ${list}, which sosie.yml names, in the terminal Sosie starts in, or start it in a terminal to type ${missing.length === 1 ? 'it' : 'them'}.`))
+  }
+  for (const name of missing) {
     try {
-      text = await hiddenPrompt('  Connection string (hidden): ', process.stdin, process.stdout)
+      values[name] = await hiddenPrompt(`  ${name} (hidden): `, process.stdin, process.stdout)
     } catch (error) {
       throw new Exit(2, fail((error as Error).message))
     }
   }
-  // A replica set's string may list its hosts, with ports (no URL) or without (a URL whose host is h1,h2): one is
-  // enough, as the driver finds the others from it.
-  if (/^mongodb:\/\/[^/?#]*,/.test(text)) {
-    throw new Exit(2, fail('Give one host of the replica set, with its replicaSet option: mongodb://user:password@host:27017/database?replicaSet=rs0. The driver finds the others.'))
+  return values
+}
+
+/** Each source's upstream read, its kind's source found, its headers' variables filled in: every problem at once. */
+function planSources(config: Config, values: Record<string, string>): Plan[] {
+  const plans: Plan[] = []
+  const problems: string[] = []
+  for (const source of config.sources) {
+    let upstream: URL
+    let kind: Source
+    try {
+      upstream = upstreamUrl(values[source.upstream]!)
+    } catch (error) {
+      // Never the value: it may hold a credential.
+      problems.push(`${FILE}: sources.${source.name}: ${source.upstream}: ${(error as Error).message.replace(/^That is/, 'it is')}`)
+      continue
+    }
+    try {
+      kind = sourceFor(upstream, source.kind, sources)
+    } catch (error) {
+      problems.push(`${FILE}: sources.${source.name}: ${(error as Error).message}`)
+      continue
+    }
+    problems.push(...settingsProblems(source, kind, FILE))
+    const headers = Object.fromEntries(Object.entries(source.headers).map(([name, template]) => [name, interpolate(template, values)]))
+    plans.push({ config: source, source: kind, upstream, headers })
   }
-  try {
-    return new URL(text)
-  } catch {
-    throw new Exit(
-      2,
-      fail('The upstream is not a URL. It looks like postgres://user:password@host:5432/database, or https://api.example.com/v1.'),
-    )
+  if (problems.length) throw new Exit(1, problems.map(fail).join('\n'))
+  return plans
+}
+
+const optionsOf = (plan: Plan) => ({
+  maxRows: plan.config.maxRows,
+  statementTimeout: plan.config.timeout * 1000,
+  headers: plan.headers,
+  ...(plan.config.schema && { schema: plan.config.schema }),
+})
+
+/**
+ * Each source's endpoint: on its port, or the next free one from 7674, in the order listed, the given ports kept for
+ * their sources. One that cannot listen closes those that did.
+ */
+async function serveAll(plans: Plan[], connections: Connection[], fakers: Faker[], learned: (i: number) => (schema: Schema) => void): Promise<Endpoint[]> {
+  const given = new Set(plans.map((p) => p.config.port).filter((p): p is number => !!p))
+  const endpoints: Endpoint[] = []
+  const closeAll = async () => {
+    for (const endpoint of endpoints) await endpoint.close().catch(() => {})
   }
+  let next = FIRST_PORT
+  for (const [i, plan] of plans.entries()) {
+    const { name, host, port: chosen } = plan.config
+    const connection = connections[i]!
+    const listen = (port: number) => connection.serve({ host, port }, fakers[i]!, connection.learns ? learned(i) : undefined)
+    if (chosen !== undefined) {
+      try {
+        endpoints.push(await listen(chosen))
+        continue
+      } catch (error) {
+        await closeAll()
+        if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new Exit(1, fail(`${name}: port ${chosen} is in use. Is Sosie already running? Give it another in sosie.yml.`))
+        throw new Exit(1, fail(`${name}: ${(error as Error).message}`))
+      }
+    }
+    for (let port = next, tries = 0; ; port++) {
+      if (given.has(port)) continue
+      try {
+        endpoints.push(await listen(port))
+        next = port + 1
+        break
+      } catch (error) {
+        const busy = (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
+        if (busy && ++tries < PORTS_TO_TRY) continue
+        await closeAll()
+        throw new Exit(1, fail(`${name}: ${busy ? `no port is free from ${next} to ${port}. Give it one in sosie.yml.` : (error as Error).message}`))
+      }
+    }
+  }
+  return endpoints
 }
 
 /* sosie mcp */
@@ -308,17 +435,27 @@ async function scanCommand(paths: string[]): Promise<void> {
   process.stdout.write(`${ok(`No real values found in ${files}.`)}\n`)
 }
 
+/**
+ * End with this exit code by letting the event loop run dry, never by process.exit() alone: that joins V8's worker
+ * threads while one may be waiting on the main thread, and can hang there for good (nodejs/node#54918). A command
+ * that left a handle open would keep running, so after a second process.exit() ends it all the same.
+ */
+function end(code: number): void {
+  process.exitCode = code
+  setTimeout(() => process.exit(code), 1000).unref()
+}
+
 main(process.argv.slice(2)).then(
   () => {
-    // By the command parsed, not by the first argument: `sosie --rules x mcp` serves MCP too.
-    if (!serving) process.exit(0)
+    // By the command parsed, not by the first argument: `sosie -v mcp` is the version, `sosie mcp` serves.
+    if (!serving) end(0)
   },
   (error) => {
     if (error instanceof Exit) {
       if (error.message) process.stderr.write(`${error.message}\n`)
-      process.exit(error.code)
+      return end(error.code)
     }
     process.stderr.write(`${fail((error as Error).stack ?? String(error))}\n`)
-    process.exit(1)
+    end(1)
   },
 )

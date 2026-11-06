@@ -1,8 +1,8 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Getting started
-description: Start Sosie in front of your Postgres or MySQL database or your API, connect your agent, and check that nothing real reached a transcript.
-lead: From nothing installed to your agent's first faked query in under a minute, with no config file.
+description: Start Sosie in front of your databases and APIs, connect your agent, and check that nothing real reached a transcript.
+lead: From nothing installed to your agent's first faked query in under a minute. Sosie writes its sosie.yml as it starts.
 ---
 
 ## What you need
@@ -15,41 +15,66 @@ lead: From nothing installed to your agent's first faked query in under a minute
 
 ## 1. Start Sosie, in your own terminal
 
-Run it in a terminal of yours, not the agent's: the connection string is for Sosie only.
+Run it in your project's folder, in a terminal of yours, not the agent's: the connection string is for Sosie only.
 
 ```sh
-export SOSIE_UPSTREAM='postgres://readonly:…@db.internal:5432/app'
 npx @sosie/cli
 ```
 
+The first time, there is no `sosie.yml` yet: Sosie asks for your first source at a hidden prompt, and writes one.
+
 ```
-  ✓ db.internal:5432/app, read-only: 42 tables, 3 views
+  No sosie.yml here yet: one, with the first database or API Sosie reads.
+
+  Its connection string, or the API's URL (hidden):
+  ✓ A Postgres database: db.internal:5432/app
+  A name for it (app):
+  The variable to keep it in (APP_URL):
+  ✓ Wrote sosie.yml: app, its upstream read from ${APP_URL}, never written there. Commit it.
+    Set APP_URL in your terminal, and Sosie starts without asking for it.
+
+  ✓ app  db.internal:5432/app, read-only: 42 tables, 3 views
   ✓ Every value is faked
 
-  Your agent, app and psql:  postgres://localhost:7674/app
+  app:                       postgres://localhost:7674/app
   Claude Code:               claude plugin marketplace add monkilabs/sosie
                              claude plugin install sosie@sosie
   Any MCP client:            npx @sosie/cli mcp
 ```
 
-Without `SOSIE_UPSTREAM`, Sosie asks for the connection string at a hidden prompt. It is never an argument:
-arguments show in shell history and the process list, where an agent can read them.
+`sosie.yml` names the variable, never the string:
 
-For an API, `SOSIE_UPSTREAM` is its address, and its credentials go in `SOSIE_UPSTREAM_HEADERS`, read from a file or a
-secret manager so they stay out of your shell's history:
-
-```sh
-export SOSIE_UPSTREAM='https://api.internal/v1'
-export SOSIE_UPSTREAM_HEADERS="$(cat ~/.config/api.headers)"   # Authorization: Bearer …
-npx @sosie/cli
+```yaml
+sources:
+  app:
+    upstream: ${APP_URL}
 ```
 
-A URL with a `graphql` segment in its path (`/graphql`, `/graphql/v1`) starts the [GraphQL source](./graphql/), and so
-does any URL when `SOSIE_GRAPHQL_SCHEMA` is set; any other `http(s)` URL, the [REST source](./rest/).
+Commit it. Next time, set `APP_URL` in your terminal, or type the string at the prompt again. It is never an argument:
+arguments show in shell history and the process list, where an agent can read them.
+
+### Every source of the project
+
+Two databases, a REST API, a GraphQL API: list each under `sources:`, and one Sosie serves them all, each at an address
+of its own, from 7674 up. An API's credentials go in `headers`, read from a variable too:
+
+```yaml
+sources:
+  app:
+    upstream: ${APP_URL}
+  billing:
+    upstream: ${BILLING_API_URL}
+    headers:
+      Authorization: Bearer ${BILLING_TOKEN}
+```
+
+A URL with a `graphql` segment in its path (`/graphql`, `/graphql/v1`) is the [GraphQL source](./graphql/); any other
+`http(s)` URL the [REST source](./rest/); `kind: graphql` says a GraphQL API elsewhere is one.
+[Configuration](./configuration/) has every key.
 
 ## 2. Point your agent at it
 
-Everything that speaks the upstream's protocol uses the address Sosie printed, unchanged: the agent, your app, its
+Everything that speaks the upstream's protocol uses the address Sosie printed for its source, unchanged: the agent, your app, its
 tests, `psql`, `curl`, any Postgres MCP server.
 
 ```
@@ -95,14 +120,18 @@ same goes for ids in API paths (`/users/87`) and GraphQL arguments (`user(id: "8
 
 ## 4. Let through what must be real
 
-If a fake breaks your app's logic, a status that must be a real one, list that field in `sosie.yml` next to your code:
+If a fake breaks your app's logic, a status that must be a real one, list that field in `sosie.yml`:
 
 ```yaml
 pass:
   - orders.status
+sources:
+  app:
+    upstream: ${APP_URL}
 ```
 
-Sosie reads `./sosie.yml` when it starts. [Configuration](./configuration/) has every rule.
+At the top, a rule holds for every source that has the table; under a source, for that one.
+[Configuration](./configuration/) has every rule.
 
 ## 5. Check the transcripts
 
@@ -124,7 +153,7 @@ It exits 1 when it finds a real value, so CI can run it.
 npm i -g @sosie/cli
 ```
 
-Then the command is just `sosie`: `sosie`, `sosie mcp` and `sosie scan`.
+Then the command is just `sosie`: `sosie`, `sosie init`, `sosie mcp` and `sosie scan`.
 
 ## Good to know
 
@@ -134,4 +163,4 @@ Then the command is just `sosie`: `sosie`, `sosie mcp` and `sosie scan`.
   fakes. `count(…)` passes unchanged.
 - **Partial matches do not find fakes.** `LIKE '%van%'` filters the real values, so a piece of a fake finds nothing.
 - **Binary results** (asyncpg, pgx, JDBC) are the fakes written as Postgres would send them. A type Sosie cannot write
-  that way (`regclass`, composites, ranges) is refused in binary, with an error that names it.
+  that way (`regclass`, `money`, composites, ranges) is refused in binary, with an error that names it.

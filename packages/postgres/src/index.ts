@@ -8,6 +8,8 @@ import { Upstream } from './upstream.js'
 /** The Postgres source: a local Postgres endpoint in front of a real database, read-only, every value faked. */
 export const postgres: Source = {
   kind: 'postgres',
+  title: 'Postgres database',
+  schemes: ['postgres:', 'postgresql:'],
   matches: (url) => url.protocol === 'postgres:' || url.protocol === 'postgresql:',
   async connect(upstream, options): Promise<Connection> {
     await loadModule()

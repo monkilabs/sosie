@@ -20,8 +20,8 @@ behind the same interface. A
   which decides every fake, does not change.
 - **Code written against the fakes works on the real data.** Same types, same
   formats, same relationships.
-- **No setup to start.** One command; configuration only when the defaults are
-  not enough.
+- **Little setup, in one place.** `sosie.yml` says which sources a project has, and the first run writes it with
+  the first; one command then starts them all. Nothing else configures Sosie: no flags, no variables of its own.
 - **Runs where the data lives.** On the developer's machine or a host the team
   chooses. Never a hosted service.
 
@@ -35,16 +35,50 @@ that deliberately hunts for secrets on the machine Sosie runs on (see
 
 ## How a developer uses it
 
-1. In their own terminal, with the real connection string in `SOSIE_UPSTREAM`
-   (or typed at a hidden prompt), they run `npx @sosie/cli`.
-2. Sosie prints one local address. The agent, the app and `psql` use it.
+1. In their own terminal, in the project's folder, they run `npx @sosie/cli`. The first time, it asks for the first
+   source's connection string at a hidden prompt, names the source, and writes a `sosie.yml` that says where to find
+   the string next time, `${SHOP_URL}`, never the string itself. The team commits it, and adds any other source, a
+   database or an API, under `sources:`.
+2. One Sosie serves every source of the project, each at a local address of its own, which it prints. The agent, the
+   app and `psql` use them.
 3. Agents that prefer MCP get `npx @sosie/cli mcp`, which talks to the same
-   endpoint. The plugin installs it in the assistant, with a skill that says how to read through Sosie, and, in
+   endpoints. The plugin installs it in the assistant, with a skill that says how to read through Sosie, and, in
    Claude Code, Copilot CLI and VS Code, tells each session which Sosies run.
 4. When it matters, `npx @sosie/cli scan` checks transcripts and logs for any real
    value that passed through.
 5. If a fake breaks the app's logic (a status that must be a real one), the
    team lists that column in `sosie.yml` and commits it.
+
+## One Sosie, every source
+
+A project often reads more than one upstream: two databases, a REST API, a GraphQL one. One Sosie serves all of
+them, and every source is set up the same way, in one file: `sosie.yml`, in the folder Sosie starts in, is the only
+configuration there is. A setting has one place, so there is never a question of which of two wins.
+
+```yaml
+max-rows: 1000           # for every source; a source may set its own
+pass: [orders.status]    # for every source that has the table
+
+sources:
+  shop:
+    upstream: ${SHOP_DATABASE_URL}
+  billing:
+    upstream: ${BILLING_API_URL}
+    headers:
+      Authorization: Bearer ${BILLING_TOKEN}
+    schema: ./openapi/billing.yaml
+```
+
+- **A source is a name and the same few keys,** whatever it reads: `upstream`, and where needed `kind` (when its URL
+  does not say), `schema` (a file or URL describing an upstream that cannot describe itself), `headers`, `port`, and
+  its own rules. A key a source cannot use is an error that says so. A new kind of source takes the same keys.
+- **Credentials only through the environment.** A `${NAME}` is read from the terminal Sosie starts in, or asked for
+  at a hidden prompt; the names are the team's own. `upstream` is always one whole variable, so a file the agent can
+  edit never sends the developer's credentials to a host it chose; Sosie refuses one written out.
+- **One process.** Every source connects before any serves; one that cannot stops Sosie, naming it. Each listens on
+  its `port`, or the next free from 7674 in the order listed, and Ctrl+C stops them all.
+- **Rules at the top hold for every source that has the table.** Fields keep their names, so a person is one fake in
+  every source, and adding a source never changes another's fakes.
 
 ## Architecture
 
@@ -169,8 +203,8 @@ VS Code, Cursor, Codex, Kiro and Devin. The repository is its marketplace.
   run the proof; what a shell prints is still not filtered. Agent Plugins has no place for hooks, so each assistant
   reads its own file, and all of them run the same scripts.
 
-The plugin is a client of Sosie like any other. It starts no Sosie and holds no credentials: the connection string is
-typed in the developer's terminal, where the agent cannot read it.
+The plugin is a client of Sosie like any other. It starts no Sosie and holds no credentials: the connection strings
+are in the developer's terminal, where the agent cannot read them.
 
 ## A query, end to end
 
@@ -229,7 +263,7 @@ substituted, links an API returns, and transcripts kept afterwards.
 - **Who can reach the endpoint.** It has no password. On 127.0.0.1, only this
   machine can, and an HTTP endpoint answers only requests addressed to
   localhost, and from no page of another site, so a web page can neither
-  rebind its name to it nor make it send a request; on another `--host`,
+  rebind its name to it nor make it send a request; on another `host`,
   anyone who reaches that address can query the fakes and filter on the real
   values.
 - **An API's own structure and behaviour.** Its paths, its base path (in
@@ -242,6 +276,10 @@ substituted, links an API returns, and transcripts kept afterwards.
   request turned back and its own credentials. Without an API's document, a
   map keyed by lowercase words (`{ "jdoe": … }`) keeps its keys, as a json
   column's or a JSON scalar's do. The LLD's limits list each such case.
+- **An edited `sosie.yml`.** The file is committed, and an agent can edit it: a field it adds under `pass` shows
+  real values once the developer starts Sosie again. Sosie never lets the file hold a credential, nor send one to a
+  host it names, and each start prints every source's host and the fields that pass; the team reviews the file as it
+  reviews code.
 - **Fakes crossing sources.** One store serves every source, so a fake from
   the database typed into an API request turns back into its real value, which
   goes to that API. It never reaches the client.
@@ -272,6 +310,9 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
 | A local mapping store | Consistent fakes across sessions, and queries by a fake | Format-preserving encryption needs no store but cannot give realistic emails or names |
 | One plugin in the open Agent Plugins format, from this repository's own marketplace | One install gives the agent the tools and how to use them, in every assistant that reads the format; the CLI stays the one thing to run | `claude mcp add` alone: the tools without the skill, one assistant at a time. A plugin per assistant: the same files, kept in step by hand |
 | The plugin starts no Sosie | The connection string stays in the developer's terminal, out of the agent's reach | An MCP server that starts Sosie when asked: the agent's own process would hold the credentials |
+| One Sosie serves every source of a project | One command, one terminal, one list of addresses; rules and fakes shared by every source | A Sosie per upstream: a terminal each, and a `sosie.yml` that every one of them must read as its own |
+| `sosie.yml` is the only configuration | One place for every setting: nothing to decide between a flag, a variable and the file | Flags and variables beside the file: each setting in two places, and a rule for which wins |
+| Credentials only as `${VAR}`, `upstream` one whole variable | The file is committed, and an agent can edit it: no secret is written in it, and no edit sends one elsewhere | Strings in the file: secrets in git. A host written out beside a password from the environment: an edit sends the password to another host |
 
 ## Risks
 

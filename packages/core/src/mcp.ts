@@ -8,7 +8,7 @@ export interface McpOptions {
   version: string
   /** Tools of every source this CLI knows, by source kind. */
   tools: { kind: string; tool: McpTool }[]
-  /** Every running Sosie, the newest first; it throws a message for the agent when none runs. */
+  /** Every source of every running Sosie, the newest Sosie's first; it throws a message for the agent when none runs. */
   running: () => Promise<Running[]>
   transport: Transport
 }
@@ -23,17 +23,15 @@ export async function serveMcp({ version, tools, running, transport }: McpOption
     'describe',
     {
       description:
-        'The tables (or other entities) Sosie serves, with each field, its type, keys and references; with several upstreams, each one. ' +
-        NOTE,
+        'Each source Sosie serves, by its name, with its tables (or other entities), each field, its type, keys and references. ' + NOTE,
       inputSchema: { entity: z.string().optional().describe('One entity, such as users; all when left out.') },
       annotations: { readOnlyHint: true },
     },
     async ({ entity }) =>
       respond(async () => {
         const all = await running()
-        if (all.length === 1) return describe(all[0]!.schema, all[0]!.passing, entity)
         const sources = all
-          .map((r) => ({ kind: r.kind, address: r.address, ...describe(r.schema, r.passing, entity, false) }))
+          .map((r) => ({ source: r.name, kind: r.kind, address: r.address, ...describe(r.schema, r.passing, entity, false) }))
           // A Sosie whose schema is learned as values come has no entities yet: still listed, unless one is asked for.
           .filter((s) => !entity || s.entities.length)
         if (entity && !sources.length) throw new Error(`${entity} is not an entity of any upstream Sosie serves.`)
@@ -54,14 +52,14 @@ export async function serveMcp({ version, tools, running, transport }: McpOption
         return [key, input.optional ? field.optional() : field]
       }),
     )
-    shape.address = z
+    shape.source = z
       .string()
       .optional()
-      .describe(`With several ${kind} Sosies running, the address of the one to use, as describe lists it; the newest when left out.`)
+      .describe(`The ${kind} source to use, by its name as describe lists it: needed only when several run.`)
     server.registerTool(
       name,
       { description: group[0]!.tool.description, inputSchema: shape, annotations: { readOnlyHint: true } },
-      async ({ address, ...input }: Record<string, string | undefined>) =>
+      async ({ source, ...input }: Record<string, string | undefined>) =>
         respond(async () => {
           const all = await running()
           const ofKind = all.filter((r) => kinds.includes(r.kind))
@@ -69,8 +67,8 @@ export async function serveMcp({ version, tools, running, transport }: McpOption
             const serving = [...new Set(all.map((r) => r.kind))].join(' and ')
             throw new Error(`Sosie serves ${serving} here, not ${kind}: ${name} is for ${kind}.`)
           }
-          const target = address ? ofKind.find((r) => r.address === address) : ofKind[0]
-          if (!target) throw new Error(`No ${kind} Sosie runs at ${address}. Running: ${ofKind.map((r) => r.address).join(', ')}.`)
+          const names = [...new Set(ofKind.map((r) => r.name))].join(', ')
+          const target = pick(all, ofKind, source, name, kind)
           return group.find((g) => g.kind === target.kind)!.tool.run(input, target)
         }),
     )
@@ -78,6 +76,20 @@ export async function serveMcp({ version, tools, running, transport }: McpOption
 
   await server.connect(transport)
   return server
+}
+
+/** The source a tool goes to: the one named, or the only one of its kind. Never the wrong database without knowing. */
+function pick(all: Running[], ofKind: Running[], source: string | undefined, tool: string, kind: string): Running {
+  const names = [...new Set(ofKind.map((r) => r.name))].join(', ')
+  if (source) {
+    // The newest Sosie's, should two share the name.
+    const named = ofKind.find((r) => r.name === source)
+    if (named) return named
+    const other = all.find((r) => r.name === source)
+    throw new Error(other ? `${source} is a ${other.kind} source: ${tool} is for ${kind} (${names}).` : `No ${kind} source is named ${source}: ${names}.`)
+  }
+  if (new Set(ofKind.map((r) => r.name)).size === 1) return ofKind[0]!
+  throw new Error(`Several ${kind} sources run: ${names}. Name the one to use in source.`)
 }
 
 async function respond(work: () => Promise<unknown>) {

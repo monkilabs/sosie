@@ -15,14 +15,14 @@ const user = []
 const sosies = running()
 if (sosies.length) {
   context.push(
-    `Sosie is running on this machine: ${sosies.map((s) => `${s.kind} at ${s.address}`).join('; ')}. ` +
+    `Sosie is running on this machine: ${sosies.map((s) => `${s.name} (${s.kind}) at ${s.address}`).join('; ')}. ` +
       'Every value it returns is a fake of a real one: read the sosie skill before you query. ' +
       'Read this data through these addresses or the sosie MCP tools, never from the real database or API.',
   )
 } else if (existsSync(join(cwd, 'sosie.yml'))) {
   context.push(
     'This project uses Sosie (it has a sosie.yml), and no Sosie is running. Before you read its database or API, ' +
-      'ask the developer to start Sosie in their own terminal with `npx @sosie/cli`. Never ask for the connection string or the credentials.',
+      "ask the developer to start Sosie in their own terminal, in the project's folder, with `npx @sosie/cli`. Never ask for a connection string or the credentials.",
   )
 }
 

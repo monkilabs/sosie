@@ -10,12 +10,13 @@ import { GraphqlUpstream } from './upstream.js'
 export const graphql: Source = {
   kind: 'graphql',
   // An http(s) URL with graphql in its path: /graphql, /v1/graphql, /graphql/v1 (Supabase), /graphql.json
-  // (Shopify). At another path (gqlgen's /query), a schema in SOSIE_GRAPHQL_SCHEMA says it is GraphQL. Any other is REST's.
-  matches: (url, env) =>
-    (url.protocol === 'http:' || url.protocol === 'https:') && (/\/graphql(\.json)?(\/|$)/i.test(url.pathname) || !!env?.SOSIE_GRAPHQL_SCHEMA),
+  // (Shopify). At another path (gqlgen's /query), kind: graphql in sosie.yml says it is GraphQL. Any other is REST's.
+  title: 'GraphQL API',
+  schemes: ['http:', 'https:'],
+  matches: (url) => (url.protocol === 'http:' || url.protocol === 'https:') && /\/graphql(\.json)?(\/|$)/i.test(url.pathname),
+  settings: ['headers', 'schema'],
   async connect(upstream, options): Promise<Connection> {
-    const env = options.env ?? {}
-    const headers = upstreamHeaders(env.SOSIE_UPSTREAM_HEADERS)
+    const headers = upstreamHeaders(options.headers)
     const user = decodeURIComponent(upstream.username)
     const password = decodeURIComponent(upstream.password)
     if (user) headers.authorization ??= `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
@@ -27,11 +28,11 @@ export const graphql: Source = {
     const label = `${url.host}${url.pathname}`
 
     let schema: GraphQLSchema
-    if (env.SOSIE_GRAPHQL_SCHEMA) {
+    if (options.schema) {
       try {
-        schema = fromFile(readFileSync(env.SOSIE_GRAPHQL_SCHEMA, 'utf8'))
+        schema = fromFile(readFileSync(options.schema, 'utf8'))
       } catch (error) {
-        throw new Error(`SOSIE_GRAPHQL_SCHEMA: ${(error as Error).message}`)
+        throw new Error(`Cannot read its schema: ${(error as Error).message}`)
       }
     } else {
       let answer
@@ -48,7 +49,7 @@ export const graphql: Source = {
       }
       if (!result.data?.__schema) {
         const why = result.errors?.[0]?.message ?? `it answered ${answer.status}`
-        throw new Error(`Cannot read the schema of ${label} by introspection (${why}). Set SOSIE_GRAPHQL_SCHEMA to its SDL file.`)
+        throw new Error(`Cannot read the schema of ${label} by introspection (${why}). Give the source a schema: its SDL file.`)
       }
       schema = buildClientSchema(result.data)
     }

@@ -22,7 +22,7 @@ async function startRest(
   {
     home = mkdtempSync(join(tmpdir(), 'sosie-rest-')),
     rules = '',
-    env = {} as Record<string, string>,
+    headers = { Authorization: `Bearer ${TOKEN}` } as Record<string, string>,
     maxRows = 1000,
     query = '',
     userinfo = '',
@@ -32,7 +32,7 @@ async function startRest(
   const connection = await rest.connect(new URL(`${api.url.replace('//', `//${userinfo}`)}${query}`), {
     maxRows,
     statementTimeout: 5000,
-    env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}`, ...env },
+    headers,
   })
   // The same key on every run, so the same fakes. With a key of its own each run, a value's fake could by chance be
   // one of the API's own words: a single word is faked as a word, and a value Sosie gave, typed where a path starts
@@ -364,7 +364,7 @@ describe('the guard and the credentials', () => {
   })
 
   it('passes a refusal on, with its body faked', async () => {
-    const without = await startRest(api, { env: { SOSIE_UPSTREAM_HEADERS: '' } })
+    const without = await startRest(api, { headers: {} })
     const refused = await without.get('/users')
     expect(refused.status).toBe(401)
     expect(Object.keys(refused.body)).toEqual(['error'])
@@ -401,7 +401,7 @@ describe('the guard and the credentials', () => {
     expect(one.status).toBe(200)
     expect(await one.text()).toMatch(new RegExp(`"id":\\s*${id}\\b`))
     // So does the MCP tool's answer.
-    const running: Running = { kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
+    const running: Running = { name: 'api', kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
     const result = await rest.tools![0]!.run({ path: `/big-ids/${id}` }, running)
     expect(JSON.stringify(result)).toMatch(new RegExp(`"id":${id}\\b`))
   })
@@ -412,7 +412,7 @@ describe('the guard and the credentials', () => {
       userinfo: 'robot:sunshine99@',
       rules: 'pass:\n  - echo-credential.note\n',
       // A Rails-style header writes its token in quotes; a header that is no credential (X-Tenant) holds none.
-      env: { SOSIE_UPSTREAM_HEADERS: `Authorization: Bearer ${TOKEN}\nX-Api-Key: Token token="sesamesecretword"\nX-Tenant: production` },
+      headers: { Authorization: `Bearer ${TOKEN}`, 'X-Api-Key': 'Token token="sesamesecretword"', 'X-Tenant': 'production' },
     })
     const { body } = await s.get('/echo-credentials')
     expect(api.requests.at(-1)!.path).toBe('/v1/echo-credentials?api_key=opensesame')
@@ -701,7 +701,7 @@ describe('one store for every source', () => {
 
 describe('the MCP tool', () => {
   it('sends a GET through the running endpoint', async () => {
-    const running: Running = { kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
+    const running: Running = { name: 'api', kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
     const result = (await rest.tools![0]!.run({ path: '/users' }, running)) as Json
     expect(result.status).toBe(200)
     expect(result.body.data).toHaveLength(3)
@@ -709,7 +709,7 @@ describe('the MCP tool', () => {
   })
 
   it('follows a link Sosie returned', async () => {
-    const running: Running = { kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
+    const running: Running = { name: 'api', kind: 'rest', address: sosie.address, schema: { entities: [] }, passing: [] }
     const { href } = (await sosie.get('/self')).body
     expect(href.startsWith(`${new URL(sosie.address).origin}/v1/`)).toBe(true)
     const result = (await rest.tools![0]!.run({ path: href }, running)) as Json
@@ -721,7 +721,7 @@ describe('the MCP tool', () => {
 
   it('reaches Sosie only, whatever the path says', async () => {
     const root = await startApi()
-    const running: Running = { kind: 'rest', address: `http://localhost:${new URL(sosie.address).port}`, schema: { entities: [] }, passing: [] }
+    const running: Running = { name: 'api', kind: 'rest', address: `http://localhost:${new URL(sosie.address).port}`, schema: { entities: [] }, passing: [] }
     const before = root.requests.length
     for (const path of [`//${new URL(root.url).host}/v1/users`, `/\\${new URL(root.url).host}/v1/users`]) {
       await expect(rest.tools![0]!.run({ path }, running)).rejects.toThrow('The path must be a path of the API, such as /users?limit=10.')

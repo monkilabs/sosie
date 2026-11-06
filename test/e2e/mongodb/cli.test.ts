@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,8 +17,12 @@ const text = (result: unknown) => (result as { content: { text: string }[] }).co
 it('starts in front of MongoDB from the command, says where clients connect, and serves them fakes, over MCP too', async () => {
   const home = mkdtempSync(join(tmpdir(), 'sosie-cli-mongodb-'))
   const upstream = inject('mongodbUpstream')
-  const child = spawn(process.execPath, [CLI, '--port', '0'], {
-    env: { ...process.env, NO_COLOR: '1', SOSIE_UPSTREAM: upstream, SOSIE_HOME: home },
+  // The project: one source, its upstream in the variable sosie.yml names.
+  const project = mkdtempSync(join(tmpdir(), 'sosie-project-'))
+  writeFileSync(join(project, 'sosie.yml'), 'sources:\n  app:\n    upstream: ${APP_URL}\n    port: 0\n')
+  const child = spawn(process.execPath, [CLI], {
+    cwd: project,
+    env: { ...process.env, NO_COLOR: '1', APP_URL: upstream, SOSIE_HOME: home },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let out = ''
@@ -27,11 +31,11 @@ it('starts in front of MongoDB from the command, says where clients connect, and
   try {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`no banner: ${out}`)), 30_000)
-      child.stdout.on('data', () => out.includes('Claude Code:') && (clearTimeout(timer), resolve()))
+      child.stdout.on('data', () => out.includes('Any MCP client:') && (clearTimeout(timer), resolve()))
       child.on('exit', () => (clearTimeout(timer), reject(new Error(`exited: ${out}`))))
     })
-    expect(out).toMatch(/✓ 127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 3 collections, 1 view/)
-    const address = /Your agent, app and mongosh:\s+(mongodb:\/\/127\.0\.0\.1:\d+\/\S+)/.exec(out)![1]!
+    expect(out).toMatch(/✓ app  127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 3 collections, 1 view/)
+    const address = /\n  app:\s+(mongodb:\/\/127\.0\.0\.1:\d+\/\S+)/.exec(out)![1]!
     expect(address).toContain('directConnection=true')
     expect(out).not.toContain(new URL(upstream).password)
     const client = new MongoClient(address, { serverMonitoringMode: 'poll' })
@@ -40,7 +44,7 @@ it('starts in front of MongoDB from the command, says where clients connect, and
     expect(users).toHaveLength(40)
     expect(canariesIn(JSON.stringify(users))).toEqual([])
     const entry = readFileSync(join(home, 'running', `${child.pid}.json`), 'utf8')
-    expect(JSON.parse(entry)).toMatchObject({ kind: 'mongodb', address })
+    expect(JSON.parse(entry).sources[0]).toMatchObject({ kind: 'mongodb', address })
     expect(entry).not.toContain(new URL(upstream).password)
 
     const mcp = new Client({ name: 'test', version: '0.0.0' })
@@ -51,7 +55,7 @@ it('starts in front of MongoDB from the command, says where clients connect, and
       // The fields met so far are in describe, written to the running entry as documents came.
       for (let i = 0; i < 40 && !readFileSync(join(home, 'running', `${child.pid}.json`), 'utf8').includes('users.email'); i++) await new Promise((r) => setTimeout(r, 50))
       const described = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: { entity: 'users' } })))
-      expect(described.entities[0].fields).toContainEqual({ field: 'email', type: 'string' })
+      expect(described.sources[0].entities[0].fields).toContainEqual({ field: 'email', type: 'string' })
       const found = await mcp.callTool({ name: 'find', arguments: { collection: 'users', filter: '{"active": true}', projection: '{"email": 1}', limit: '3' } })
       expect(found.isError).toBeFalsy()
       expect(canariesIn(text(found))).toEqual([])
