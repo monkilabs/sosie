@@ -31,6 +31,19 @@ Fixes a review of 0.4.0 found, each marked with the release it came in.
   `sosie init` wrote a second one beside it. Only a file whose one problem is
   that it names no sources is written by `sosie init`; any other is told. A
   `sources:` with none under it says to add one there, as `sosie init` does.
+- (0.4) `sosie.yml`: a header is sent as it is written. `X-Version: 1.0` was
+  sent as `1`, and `0x1F` as `31`; `X-Debug: true` was refused.
+- (0.4) MongoDB: a fake under `$expr`'s `$and`, `$or` or `$not` written with
+  one argument and no array, `{ $not: { $ne: … } }`, turns back.
+- (0.4) `sosie init`: an empty `sosie.yml` is written as a new one, with its
+  header; a CRLF pasted in two pieces ends one line, so the next question no
+  longer takes an empty answer as its default.
+- (0.1) A string with no `//` after its scheme, `kim:secret@db` or
+  `localhost:5432/shop`, is said to be no URL. Sosie said it read no `kim://`
+  upstreams, quoting the user name, or the host.
+- (0.1) A YAML error in `sosie.yml` ends as a sentence, not with a colon.
+- (0.4) The plugin's session start names the newest Sosie's sources first, as
+  `describe` does; it named them in the order their files were read.
 - The docs say what an edited `sosie.yml` can still do: it names no host, but
   it can point a source at another variable of the terminal's, or put one in a
   header sent to that source's upstream.
