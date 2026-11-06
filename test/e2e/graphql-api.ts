@@ -158,6 +158,12 @@ export async function startGraphql({ introspection = true, elsewhere = 'http://2
         res.end(JSON.stringify(body).replace(/"@@(\d+)@@"/g, '$1'))
       }
       if (req.headers.authorization !== `Bearer ${TOKEN}`) return json(401, { errors: [{ message: 'unauthorized' }] })
+      // Its SDL, as teams publish it beside the API, behind the same credentials.
+      if (req.method === 'GET') {
+        if (req.url !== '/api/schema.graphql') return json(404, { errors: [{ message: 'not found' }] })
+        res.writeHead(200, { 'content-type': 'text/plain' })
+        return res.end(SDL)
+      }
       const request = JSON.parse(text || '{}')
       received.push({ query: request.query, ...(request.variables && { variables: request.variables }), body: text })
       if (/\bmoved\b/.test(request.query)) {

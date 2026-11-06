@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { createFaker, loadRules, Store, storeDir, type Running } from '@sosie/core'
 import { graphql } from '@sosie/graphql'
+import { getIntrospectionQuery } from 'graphql'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Checker } from '../../packages/graphql/src/check.js'
 import { startRecorder, TOKEN } from './api.js'
@@ -597,6 +598,46 @@ describe('without introspection', () => {
     // Clients introspect Sosie, which answers from the file.
     expect((await s.ask('{ __type(name: "User") { name } }')).body.data).toEqual({ __type: { name: 'User' } })
     await s.close()
+    await closed.close()
+  })
+
+  it('reads a schema file of introspection JSON, as a result or bare', async () => {
+    const closed = await startGraphql({ introspection: false })
+    const open = await startGraphql()
+    const introspected: Json = await (await fetch(open.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ query: getIntrospectionQuery() }) })).json()
+    const dir = mkdtempSync(join(tmpdir(), 'sosie-introspection-'))
+    for (const [name, json] of [['result.json', introspected], ['bare.json', introspected.data]] as const) {
+      writeFileSync(join(dir, name), JSON.stringify(json))
+      const s = await startGraphqlSosie(closed, { schema: join(dir, name) })
+      expect((await s.ask('{ users { email } }')).body.data.users, name).toHaveLength(3)
+      await s.close()
+    }
+    await expect(startGraphqlSosie(closed, { schema: join(dir, 'none.graphql') })).rejects.toThrow(/^Cannot read its schema: ENOENT/)
+    await open.close()
+    await closed.close()
+  })
+
+  it('reads a schema at a URL: with the API’s credentials at its own origin, with none elsewhere', async () => {
+    const closed = await startGraphql({ introspection: false })
+    const origin = new URL(closed.url).origin
+    const own = await startGraphqlSosie(closed, { schema: `${origin}/api/schema.graphql` })
+    expect((await own.ask('{ users { email } }')).body.data.users).toHaveLength(3)
+    await own.close()
+    await expect(startGraphqlSosie(closed, { schema: `${origin}/api/nothing.graphql` })).rejects.toThrow(`Cannot read its schema: ${new URL(origin).host}/api/nothing.graphql answered 404.`)
+
+    const asked: (string | undefined)[] = []
+    const cdn = createServer((req, res) => {
+      asked.push(req.headers.authorization)
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.end(SDL)
+    })
+    await new Promise<void>((resolve) => cdn.listen(0, '127.0.0.1', resolve))
+    const port = (cdn.address() as { port: number }).port
+    const elsewhere = await startGraphqlSosie(closed, { schema: `http://localhost:${port}/storefront.graphql` })
+    expect((await elsewhere.ask('{ users { email } }')).body.data.users).toHaveLength(3)
+    expect(asked).toEqual([undefined])
+    await elsewhere.close()
+    await new Promise<void>((resolve) => cdn.close(() => resolve()))
     await closed.close()
   })
 })

@@ -1546,7 +1546,9 @@ of them is faked.
 
 By introspection, with Sosie's credentials, at start-up. An API with
 introspection off is read from the source's `schema`: its SDL, or an
-introspection result as JSON, in a file. When it is given, it is the schema, and Sosie does not ask the API at
+introspection result as JSON, in a file or at a URL. A URL at the API's origin is fetched with the source's headers
+and no redirect followed, as they would go along; one elsewhere without them, and anything but a 200 is refused.
+When it is given, it is the schema, and Sosie does not ask the API at
 start-up: wrong credentials, or an API out of reach, show at the first query. Each object and interface type, except the mutation and subscription types, is an entity;
 each field that holds a scalar or an enum is a field; one that holds another object
 is that object's row. Built-in scalars map to neutral types, and custom ones by
