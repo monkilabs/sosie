@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { createFaker, loadRules, Store, storeDir, type Running } from '@sosie/core'
 import { graphql } from '@sosie/graphql'
-import { getIntrospectionQuery } from 'graphql'
+import { buildSchema, getIntrospectionQuery, introspectionFromSchema } from 'graphql'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Checker } from '../../packages/graphql/src/check.js'
 import { startRecorder, TOKEN } from './api.js'
@@ -20,7 +20,7 @@ type Json = any
 const seen: unknown[] = []
 
 async function startGraphqlSosie(
-  api: FakeGraphql,
+  api: { url: string },
   {
     home = mkdtempSync(join(tmpdir(), 'sosie-gql-')),
     headers = { Authorization: `Bearer ${TOKEN}` } as Record<string, string>,
@@ -243,6 +243,36 @@ describe('a GraphQL API', () => {
     await s.close()
     // Not the client's query that asked too much: Sosie's own state, said as such.
     expect(await asked).toMatchObject({ status: 503, body: { errors: [{ message: 'Sosie is stopping.', extensions: { code: 'SOSIE_STOPPING' } }] } })
+  })
+
+  it('answers a query its checking threads refused by why: one that asks too much, Sosie stopping, or graphql-js failing', async () => {
+    const before = api.received.length
+    const refusals = [
+      [{ refused: 'Too much.', reason: 'costly' }, 400, 'Too much.', 'SOSIE_TOO_COSTLY'],
+      [{ refused: 'Sosie is stopping.', reason: 'stopping' }, 503, 'Sosie is stopping.', 'SOSIE_STOPPING'],
+      [{ refused: 'Maximum call stack size exceeded', reason: 'failed' }, 500, 'Sosie could not check the query: Maximum call stack size exceeded', 'INTERNAL_SERVER_ERROR'],
+    ] as const
+    for (const [method, query] of [['validate', '{ motd }'], ['introspect', '{ __typename }']] as const) {
+      for (const [answer, status, message, code] of refusals) {
+        const refuse = vi.spyOn(Checker.prototype, method).mockResolvedValueOnce({ id: 1, ...answer })
+        try {
+          expect(await sosie.ask(query), `${method} ${answer.reason}`).toEqual({ status, body: { errors: [{ message, extensions: { code } }] } })
+        } finally {
+          refuse.mockRestore()
+        }
+      }
+    }
+    expect(api.received.length).toBe(before)
+  })
+
+  it('refuses a job graphql-js throws on as failed, with graphql-js’s message', async () => {
+    const checker = new Checker(buildSchema(SDL), 10_000)
+    try {
+      expect(await checker.validate('{ motd')).toEqual({ id: 1, refused: 'Syntax Error: Expected Name, found <EOF>.', reason: 'failed' })
+      expect(await checker.introspect('{ __typename', undefined, {})).toEqual({ id: 2, refused: 'Syntax Error: Expected Name, found <EOF>.', reason: 'failed' })
+    } finally {
+      await checker.close()
+    }
   })
 
   it('fakes a large JSON value a slice at a time, and answers other clients meanwhile', async () => {
@@ -639,6 +669,75 @@ describe('without introspection', () => {
     await elsewhere.close()
     await new Promise<void>((resolve) => cdn.close(() => resolve()))
     await closed.close()
+  })
+})
+
+describe('reaching the API', () => {
+  /** A server on a port of its own, answering each request with `answer`'s status and body. */
+  async function startServer(answer: (body: string, authorization: string | undefined) => [number, string]) {
+    const server = createServer((req, res) => {
+      let text = ''
+      req.on('data', (c) => (text += c))
+      req.on('end', () => {
+        const [status, body] = answer(text, req.headers.authorization)
+        res.writeHead(status, { 'content-type': 'application/json' })
+        res.end(body)
+      })
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    return { port: (server.address() as { port: number }).port, close: () => new Promise<void>((resolve) => server.close(() => resolve())) }
+  }
+
+  it('sends the URL’s user and password as Basic auth, unless the headers give an Authorization, and names neither', async () => {
+    const authorizations: (string | undefined)[] = []
+    const introspection = JSON.stringify({ data: introspectionFromSchema(buildSchema(SDL)) })
+    const server = await startServer((body, authorization) => {
+      authorizations.push(authorization)
+      return [200, /__schema/.test(body) ? introspection : '{"data":{"motd":"Hello"}}']
+    })
+    // Percent-encoded, as a password with : or @ in it is written in a URL.
+    const url = `http://robot:sun%3Ashine%4099@127.0.0.1:${server.port}/graphql`
+    const s = await startGraphqlSosie({ url }, { headers: {} })
+    expect(s.connection.label).toBe(`127.0.0.1:${server.port}/graphql`)
+    expect((await s.ask('{ motd }')).status).toBe(200)
+    await s.close()
+    const basic = `Basic ${Buffer.from('robot:sun:shine@99').toString('base64')}`
+    expect(authorizations).toEqual([basic, basic])
+    const given = await startGraphqlSosie({ url })
+    await given.close()
+    expect(authorizations.slice(2)).toEqual([`Bearer ${TOKEN}`])
+    await server.close()
+  })
+
+  it('says it cannot reach an API that does not answer', async () => {
+    const server = await startServer(() => [200, '{}'])
+    await server.close()
+    await expect(startGraphqlSosie({ url: `http://127.0.0.1:${server.port}/graphql` })).rejects.toHaveProperty(
+      'message',
+      `Cannot reach 127.0.0.1:${server.port}/graphql: fetch failed: connect ECONNREFUSED 127.0.0.1:${server.port}`,
+    )
+  })
+
+  it('says in the terminal to check the source’s headers when the API answers 401 or 403', async () => {
+    const statuses = [401, 403, 500]
+    const server = await startServer(() => [statuses.shift()!, '{"errors":[{"message":"no access for quill.vantablack@canary-mail.test"}]}'])
+    const file = join(mkdtempSync(join(tmpdir(), 'sosie-sdl-')), 'schema.graphql')
+    writeFileSync(file, SDL)
+    const s = await startGraphqlSosie({ url: `http://127.0.0.1:${server.port}/api/graphql` }, { headers: { Authorization: 'Bearer expired' }, schema: file })
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    try {
+      for (const status of [401, 403, 500]) {
+        expect(await s.ask('{ motd }')).toEqual({ status, body: { errors: [{ message: 'The API refused the query; Sosie hides its message, which may quote a value from your data.' }] } })
+      }
+      expect(write.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith('  ! '))).toEqual([
+        "  ! The API answered 401: check the source's headers.\n",
+        "  ! The API answered 403: check the source's headers.\n",
+      ])
+    } finally {
+      write.mockRestore()
+      await s.close()
+      await server.close()
+    }
   })
 })
 
