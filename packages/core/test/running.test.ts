@@ -21,6 +21,16 @@ describe('the running Sosies', () => {
     expect(readRunning(home)).toHaveLength(1)
   })
 
+  it('lists the newest Sosie first, whichever entry is read first', () => {
+    // Entries are read in the order of their files, named by pid: each order once.
+    for (const [older, newer] of [[process.pid, process.ppid], [process.ppid, process.pid]]) {
+      const home = mkdtempSync(join(tmpdir(), 'sosie-running-'))
+      writeRunning(home, entry('postgres://localhost:7674/older'), older, 1000)
+      writeRunning(home, entry('postgres://localhost:7675/newer'), newer, 2000)
+      expect(readRunning(home).map((r) => r.address)).toEqual(['postgres://localhost:7675/newer', 'postgres://localhost:7674/older'])
+    }
+  })
+
   it('holds nothing real, readable by the owner only', () => {
     const home = mkdtempSync(join(tmpdir(), 'sosie-running-'))
     writeRunning(home, entry('postgres://localhost:7674/a'))

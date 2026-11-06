@@ -34,6 +34,20 @@ describe('sosie mcp', () => {
     expect(Object.keys(tools[1]!.inputSchema.properties!)).toEqual(['text', 'extra', 'source'])
   })
 
+  it('marks every tool read-only: describe, one two kinds share, and one of a single kind', async () => {
+    const tools = [
+      { kind: 'memory', tool: echo },
+      { kind: 'other', tool: echo },
+      { kind: 'memory', tool: { ...echo, name: 'count' } },
+    ]
+    const mcp = await connect(running, tools)
+    expect((await mcp.listTools()).tools.map((t) => [t.name, t.annotations])).toEqual([
+      ['describe', { readOnlyHint: true }],
+      ['echo', { readOnlyHint: true }],
+      ['count', { readOnlyHint: true }],
+    ])
+  })
+
   it('describes entities, fields, keys, references and what passes', async () => {
     const mcp = await connect(running)
     const all = JSON.parse(text(await mcp.callTool({ name: 'describe', arguments: {} })))
