@@ -1,5 +1,7 @@
 # Sosie MVP (v0.1)
 
+The scope of the first release, as it was set. What came after is in the [CHANGELOG](../CHANGELOG.md).
+
 One problem, solved well: **an AI agent works against a real Postgres database,
 and the model never sees a real value.**
 
@@ -40,7 +42,7 @@ a developer has to learn before the first query.
 | REST and GraphQL APIs | Built next, as source packages faked consistently with the database ([HLD](hld.md#how-sosie-grows)), and released with it in v0.1 |
 | Filtering the agent's shell output | `sosie scan` proves the result; a hook per assistant comes later |
 | Mappings shared across a team | Each developer's fakes are their own; nothing leaves the machine |
-| TLS and passwords on the local endpoint | It listens on 127.0.0.1 by default; another `--host` gets a warning |
+| TLS and passwords on the local endpoint | It listens on 127.0.0.1 by default; another host gets a warning |
 | Automatic detection deciding what is safe | Detection only ever suggests; the schema and `sosie.yml` decide |
 
 ## Done means
