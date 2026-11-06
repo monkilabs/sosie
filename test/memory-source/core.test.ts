@@ -321,6 +321,20 @@ describe('fakes by type', async () => {
     expect(faker.request().lookup('0', flag)).toBe('1')
   })
 
+  it('one bit: flipped or not once per field, as a boolean is, and turned back by the same flip', async () => {
+    const { faker } = await serve()
+    const bits = Array.from({ length: 20 }, (_, i): Field => ({ id: `users.bit${i}`, name: `bit${i}`, type: { kind: 'bits', length: 1 } }))
+    // Kept in some fields and flipped in others: a bit always inverted would give the real one away.
+    const flipped = bits.map((f) => faker.value('1', f) === '0')
+    expect(new Set(flipped)).toEqual(new Set([true, false]))
+    for (const [i, f] of bits.entries()) {
+      expect(faker.value('0', f)).toBe(flipped[i] ? '1' : '0')
+      // A WHERE on the fake a client was shown finds the real rows it stands for, never the opposite ones.
+      expect(faker.request().lookup(flipped[i] ? '0' : '1', f)).toBe('1')
+      expect(faker.request().lookup(flipped[i] ? '1' : '0', f)).toBe('0')
+    }
+  })
+
   it('checks a field that passes for every value the request turned back at once, not one by one', async () => {
     const { faker } = await serve('pass:\n  - users.city\n')
     const email = { id: 'users.email', name: 'email', type: { kind: 'string' } } as const
