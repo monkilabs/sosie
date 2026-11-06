@@ -10,10 +10,15 @@ export function prompt(question: string, input: Input, output: NodeJS.WritableSt
   return ask(question, input, output, false)
 }
 
+/** Inputs whose last line ended on a CR at the end of a chunk: an LF that comes first next is the same line end's. */
+const endedOnCr = new WeakSet<Input>()
+
 function ask(question: string, input: Input, output: NodeJS.WritableStream, hidden: boolean): Promise<string> {
   output.write(question)
   return new Promise((resolve, reject) => {
     let value = ''
+    let lf = endedOnCr.has(input)
+    endedOnCr.delete(input)
     // Raw, a terminal echoes nothing, and each key comes as it is typed; without it, a line comes once it is whole.
     const raw = hidden && !!input.isTTY && typeof input.setRawMode === 'function'
     if (raw) input.setRawMode!(true)
@@ -31,9 +36,14 @@ function ask(question: string, input: Input, output: NodeJS.WritableStream, hidd
     }
     const onEnd = () => finish(value ? undefined : new Error('No input.'))
     const onData = (chunk: string | Buffer) => {
-      const text = String(chunk)
+      let text = String(chunk)
+      if (lf && text) {
+        lf = false
+        if (text.startsWith('\n')) text = text.slice(1)
+      }
       for (let i = 0; i < text.length; i++) {
         const ch = text[i]!
+        if (ch === '\r' && i === text.length - 1) endedOnCr.add(input)
         if (ch === '\r' || ch === '\n') return finish(undefined, text.slice(i + (ch === '\r' && text[i + 1] === '\n' ? 2 : 1)))
         if (ch === '\u0003') return finish(new Error('Cancelled.'))
         if (ch === '\u007f' || ch === '\b') value = value.slice(0, -1)

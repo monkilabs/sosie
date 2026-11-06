@@ -96,6 +96,21 @@ describe('the prompt', () => {
     expect(await prompt('? ', input, output)).toBe('CRM_URL')
   })
 
+  it('reads a CRLF split between two chunks as one line end too', async () => {
+    const input = new PassThrough()
+    const output = new PassThrough()
+    const first = prompt('? ', input, output)
+    input.write('crm\r')
+    expect(await first).toBe('crm')
+    const second = prompt('? ', input, output)
+    input.write('\nCRM_URL\r')
+    expect(await second).toBe('CRM_URL')
+    // A CR alone ends a line, as a terminal in raw mode sends one: the next line is not lost.
+    const third = prompt('? ', input, output)
+    input.write('SHOP_URL\n')
+    expect(await third).toBe('SHOP_URL')
+  })
+
   it('takes what came before input ends without a newline, and fails on an end with nothing', async () => {
     const input = new PassThrough()
     const answer = prompt('? ', input, new PassThrough())
