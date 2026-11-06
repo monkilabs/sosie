@@ -231,6 +231,36 @@ describe('the plugin', () => {
       rmSync(own, { recursive: true, force: true })
     })
 
+    it('tell the agent each source running by its name, kind and address; else that a project with a sosie.yml has none running; else nothing', () => {
+      const own = mkdtempSync(join(tmpdir(), 'sosie-plugin-'))
+      const project = join(own, 'project')
+      const elsewhere = join(own, 'elsewhere')
+      for (const dir of ['home', 'data', 'project', 'elsewhere']) mkdirSync(join(own, dir))
+      writeFileSync(join(project, 'sosie.yml'), '')
+      const start = (cwd: string) =>
+        hook('session-start.mjs', { hook_event_name: 'SessionStart', cwd }, { ...bare(), SOSIE_HOME: join(own, 'home'), CLAUDE_PLUGIN_DATA: join(own, 'data') }).stdout
+      expect(start(elsewhere)).toBe('')
+      expect(JSON.parse(start(project))).toEqual({
+        hookSpecificOutput: {
+          hookEventName: 'SessionStart',
+          additionalContext:
+            'This project uses Sosie (it has a sosie.yml), and no Sosie is running. Before you read its database or API, ' +
+            "ask the developer to start Sosie in their own terminal, in the project's folder, with `npx @sosie/cli`. Never ask for a connection string or the credentials.",
+        },
+      })
+      writeRunning(join(own, 'home'), [
+        { name: 'shop', kind: 'postgres', address: 'postgres://localhost:7674/shop', schema: { entities: [] }, passing: [] },
+        { name: 'billing', kind: 'rest', address: 'http://localhost:7675/v1', schema: { entities: [] }, passing: [] },
+      ])
+      const said =
+        'Sosie is running on this machine: shop (postgres) at postgres://localhost:7674/shop; billing (rest) at http://localhost:7675/v1. ' +
+        'Every value it returns is a fake of a real one: read the sosie skill before you query. ' +
+        'Read this data through these addresses or the sosie MCP tools, never from the real database or API.'
+      // A project with a sosie.yml whose Sosie runs is told what runs, not that none does.
+      for (const cwd of [project, elsewhere]) expect(JSON.parse(start(cwd))).toEqual({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: said } })
+      rmSync(own, { recursive: true, force: true })
+    })
+
     // A stub npx on PATH stands for `npx @sosie/cli scan`: each run says what the files `<run>.out`, `.err` and
     // `.status` hold, and waits while `hold` is there.
     describe.skipIf(process.platform === 'win32')('scan a session in the background', () => {
