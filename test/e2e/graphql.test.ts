@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { createFaker, loadRules, Store, storeDir, type Running } from '@sosie/core'
-import { graphql } from '@sosie/graphql'
+import { graphql, readSchema } from '@sosie/graphql'
 import { buildSchema, getIntrospectionQuery, introspectionFromSchema } from 'graphql'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Checker } from '../../packages/graphql/src/check.js'
+import { startEndpoint } from '../../packages/graphql/src/endpoint.js'
+import { GraphqlUpstream } from '../../packages/graphql/src/upstream.js'
 import { startRecorder, TOKEN } from './api.js'
 import { canariesIn } from './canaries.js'
 import { SDL, startGraphql, type FakeGraphql } from './graphql-api.js'
@@ -224,16 +226,45 @@ describe('a GraphQL API', () => {
   })
 
   it('answers a batch’s introspection no larger, together, than one answer may be', async () => {
-    const t = Array.from({ length: 60 }, (_, i) => `t${i}: types { ...A }`).join(' ')
-    const f = Array.from({ length: 40 }, (_, i) => `f${i}: fields { name type { name } }`).join(' ')
-    // About 9 MB each: two fit in the 20 MB one answer may take, the third does not.
+    const t = Array.from({ length: 6 }, (_, i) => `t${i}: types { ...A }`).join(' ')
+    const f = Array.from({ length: 4 }, (_, i) => `f${i}: fields { name type { name } }`).join(' ')
     const fan = { query: `{ __schema { ${t} } } fragment A on __Type { name ${f} }` }
-    const response = await fetch(sosie.address, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify([fan, fan, fan]) })
-    expect(response.status).toBe(200)
-    const body = (await response.json()) as Json[]
-    expect(body[0].data.__schema.t0.length).toBeGreaterThan(0)
-    expect(body[1].data.__schema.t0.length).toBeGreaterThan(0)
-    expect(body[2]).toMatchObject({ errors: [{ extensions: { code: 'SOSIE_TOO_COSTLY' } }] })
+    // Against 20 MB, three answers of 9 MB each: on a busy machine, one could take longer to build than a thread may.
+    // The same sum, made small: answers of about 100 KB, and a cap two of them fit in and three do not.
+    const schema = buildSchema(SDL)
+    const neutral = readSchema(schema)
+    const store = Store.open(storeDir(mkdtempSync(join(tmpdir(), 'sosie-gql-cap-'))))
+    const serve = (maxAnswer?: number) =>
+      startEndpoint(
+        { host: '127.0.0.1', port: 0 },
+        {
+          upstream: new GraphqlUpstream(new URL(api.url), { Authorization: `Bearer ${TOKEN}` }, 5000),
+          schema,
+          fields: new Map(neutral.entities.flatMap((e) => e.fields.map((field) => [field.id, field] as const))),
+          faker: createFaker({ schema: neutral, rules: loadRules('', neutral), store }),
+          maxItems: 1000,
+          secrets: [TOKEN],
+          log: () => {},
+          ...(maxAnswer && { maxAnswer }),
+        },
+      )
+    const post = (address: string, body: unknown) => fetch(address, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    const measure = await serve()
+    const one = await (await post(measure.address, fan)).text()
+    await measure.close()
+    const capped = await serve(Math.floor(one.length * 2.5))
+    try {
+      const response = await post(capped.address, [fan, fan, fan])
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as Json[]
+      expect(body[0]).toEqual(JSON.parse(one))
+      expect(body[1]).toEqual(JSON.parse(one))
+      expect(body[2]).toMatchObject({ errors: [{ extensions: { code: 'SOSIE_TOO_COSTLY' } }] })
+      expect(body[2].errors[0].message).toMatch(/^A batch's introspection answers, together, are larger than Sosie sends at once \(/)
+    } finally {
+      await capped.close()
+      store.close()
+    }
   })
 
   it('answers a query it is checking when it stops, instead of leaving it waiting', async () => {

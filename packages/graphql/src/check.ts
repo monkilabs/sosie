@@ -28,8 +28,8 @@ export class Checker {
   #next = 0
   #closed = false
 
-  constructor(schema: GraphQLSchema, maxTokens: number) {
-    this.#data = { introspection: introspectionFromSchema(schema), maxTokens, maxAnswer: MAX_ANSWER }
+  constructor(schema: GraphQLSchema, maxTokens: number, maxAnswer = MAX_ANSWER) {
+    this.#data = { introspection: introspectionFromSchema(schema), maxTokens, maxAnswer }
     for (let i = 0; i < THREADS; i++) this.#slots.push({ worker: this.#start() })
   }
 
