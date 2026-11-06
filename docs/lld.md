@@ -147,6 +147,7 @@ packages/
     sources.ts       the sources this CLI knows
     prompt.ts        the prompts, hidden or not
     print.ts         the ✓, ! and ✗ lines, and the two columns of addresses
+    serve.ts         each source on its port: the one given, or the next free from 7674 that no source was given
     listen.ts        whether an address is this machine's only, for the warning on host
   */test/            each package's unit tests
 plugins/sosie/       the plugin: the MCP server, the skill, the hooks for Claude Code, Copilot CLI and VS Code
@@ -1761,8 +1762,11 @@ source learns. Format domains make a person's email the same fake from the datab
   the wrong type and through introspection: no canary may come back.
 - **The CLI.** The built CLI is run: start one source, and a database, a REST API and a GraphQL API in one Sosie, from
   a `sosie.yml` and the variables it names; MCP over stdio, each source by its name; `scan`, Ctrl+C, and the errors a
-  developer meets first, `sosie.yml`'s among them. `sosie init` is run through its prompts as a terminal would answer
-  them.
+  developer meets first, `sosie.yml`'s among them; each flag, and each that an earlier version took; SIGTERM. It is run
+  as in a terminal too, its input a TTY: the first run writes `sosie.yml` and starts with the string typed, and a
+  variable not set is asked for. `sosie init` and the prompts are run with what a terminal sends: a CRLF, whole or in
+  two pieces, Ctrl+C, a backspace, raw mode on and off. Ports are tested on real sockets: a given one kept for its
+  source, the next free taken, and one that cannot listen closing those that did.
 - **The dependency rule.** A test reads the imports and manifests.
 - **The plugin.** `test/plugin.test.ts`: the plugin's version and the CLI its server runs are `@sosie/cli`'s, in its
   source and in Claude Code's files, and its hooks read the `running/` entries the core writes. Each assistant's hooks
