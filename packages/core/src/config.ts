@@ -244,9 +244,14 @@ export function variablesOf(config: Config): string[] {
   const names = new Set<string>()
   for (const source of config.sources) {
     if (source.upstream) names.add(source.upstream)
-    for (const template of Object.values(source.headers)) for (const [, name] of template.matchAll(TEMPLATE)) if (name) names.add(name)
+    for (const template of Object.values(source.headers)) for (const name of headerVariables(template)) names.add(name)
   }
   return [...names]
+}
+
+/** The variables a header's value names, each once, in order; a $$ is text. */
+export function headerVariables(template: string): string[] {
+  return [...new Set([...template.matchAll(TEMPLATE)].flatMap(([, name]) => (name ? [name] : [])))]
 }
 
 /** A header's value, its ${NAME}s read from `values` and each $$ a $. */

@@ -106,7 +106,8 @@ sources:
 ```
 
 A connection string or a token is never written in it: each `${NAME}` is read from the terminal Sosie starts in, or
-asked for at a hidden prompt. It is all there is to configure: there are no flags, and no variable of Sosie's own but
+asked for at a hidden prompt. The first time a source is to send one, a token in a header, Sosie says where and asks,
+so an edit an agent makes cannot send one elsewhere unasked. It is all there is to configure: there are no flags, and no variable of Sosie's own but
 `SOSIE_HOME`, where its store is.
 Installed once with `npm i -g @sosie/cli`, the command is just `sosie`.
 [Configuration](https://monkilabs.github.io/sosie/docs/configuration/) has every key.

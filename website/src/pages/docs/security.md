@@ -38,9 +38,10 @@ only `GET`, `HEAD` and GraphQL queries reach an API.
 - **What the team lets pass.** A field listed under `pass` shows its own values.
 - **An edited `sosie.yml`.** It is committed, and an agent can edit it: a field it adds under `pass` shows real values
   once you start Sosie again. Sosie never lets the file hold a credential, nor send one to a host the file writes out:
-  each `upstream` is a variable of yours. An edit can still choose among your variables: point a source at another, or
-  put one in a header, which goes to that source's upstream as it connects. Each start prints every source's host and
-  how many fields pass; review the file as you review code.
+  each `upstream` is a variable of yours. An edit that has a source send a variable it never sent, or send one to an
+  upstream another variable names, is asked about in your terminal before anything is sent, and your answer is kept
+  on your machine, not in the file. Each start prints every source's host and how many fields pass; review the file
+  as you review code.
 - **Fakes crossing sources.** One store serves every source, so a fake from the database typed into an API request turns
   back into its real value, which goes to that API. It never reaches the client.
 - **A `GET`, or a GraphQL query field, that writes.** That is the API's to guard; Sosie sends every `GET` and every query

@@ -50,9 +50,12 @@ Fixes a review of 0.4.0 found, each marked with the release it came in.
   exit 1, and never says to run `sosie init`.
 - (0.4) The plugin's session start names the newest Sosie's sources first, as
   `describe` does; it named them in the order their files were read.
-- The docs say what an edited `sosie.yml` can still do: it names no host, but
-  it can point a source at another variable of the terminal's, or put one in a
-  header sent to that source's upstream.
+- An edited `sosie.yml` could have a header carry another of the terminal's
+  variables, or have a source send one to a host another variable holds. A
+  source that is to send a variable it has not sent before is asked about at
+  start, with where it goes, and nothing is sent until the developer says yes;
+  the answer is kept in `$SOSIE_HOME/allowed.json`, never in `sosie.yml`.
+  Without a terminal to ask in, Sosie stops and says so.
 
 ## 0.4.0, 6 November 2026
 

@@ -75,8 +75,9 @@ sources:
   its own rules. A key a source cannot use is an error that says so. A new kind of source takes the same keys.
 - **Credentials only through the environment.** A `${NAME}` is read from the terminal Sosie starts in, or asked for
   at a hidden prompt; the names are the team's own. `upstream` is always one whole variable, so no host can be
-  written in a file the agent can edit; Sosie refuses one written out. An edit can still point a source at another
-  variable the terminal holds, or put one in a header sent to that source's upstream.
+  written in a file the agent can edit; Sosie refuses one written out. A source that is to send a variable it has not
+  sent before (a header that carries another, or the same sent to a host another variable holds) is asked about at
+  start, before anything is sent; the developer's yes is kept on the machine, out of the agent's file.
 - **One process.** Every source connects before any serves; one that cannot stops Sosie, naming it. Each listens on
   its `port`, or the next free from 7674 in the order listed, and Ctrl+C stops them all.
 - **Rules at the top hold for every source that has the table.** Fields keep their names, so a person is one fake in
@@ -279,10 +280,10 @@ substituted, links an API returns, and transcripts kept afterwards.
   map keyed by lowercase words (`{ "jdoe": … }`) keeps its keys, as a json
   column's or a JSON scalar's do. The LLD's limits list each such case.
 - **An edited `sosie.yml`.** The file is committed, and an agent can edit it: a field it adds under `pass` shows
-  real values once the developer starts Sosie again. Sosie never lets the file hold a credential or name a host. An
-  edit can still point a source at another variable the terminal holds, or send one, in a header, to that source's
-  upstream, which an HTTP source asks as it connects. Each start prints every source's host, and how many fields
-  pass; the team reviews the file as it reviews code.
+  real values once the developer starts Sosie again. Sosie never lets the file hold a credential or name a host,
+  and an edit that has a source send a variable it never sent, or send one to an upstream another variable names, is
+  asked about before anything is sent. Each start prints every source's host, and how many fields pass; the team
+  reviews the file as it reviews code.
 - **Fakes crossing sources.** One store serves every source, so a fake from
   the database typed into an API request turns back into its real value, which
   goes to that API. It never reaches the client.
@@ -315,7 +316,7 @@ substituted; catalogs that store real values (such as `pg_stats`) are refused.
 | The plugin starts no Sosie | The connection string stays in the developer's terminal, out of the agent's reach | An MCP server that starts Sosie when asked: the agent's own process would hold the credentials |
 | One Sosie serves every source of a project | One command, one terminal, one list of addresses; rules and fakes shared by every source | A Sosie per upstream: a terminal each, and a `sosie.yml` that every one of them must read as its own |
 | `sosie.yml` is the only configuration | One place for every setting: nothing to decide between a flag, a variable and the file | Flags and variables beside the file: each setting in two places, and a rule for which wins |
-| Credentials only as `${VAR}`, `upstream` one whole variable | The file is committed, and an agent can edit it: no secret is written in it, and no edit names a host. It can only choose among the variables the terminal holds | Strings in the file: secrets in git. A host written out beside a password from the environment: an edit sends the password to another host |
+| Credentials only as `${VAR}`, `upstream` one whole variable | The file is committed, and an agent can edit it: no secret is written in it, and no edit names a host. One that has a source send another variable, or send it elsewhere, waits for the developer's yes | Strings in the file: secrets in git. A host written out beside a password from the environment: an edit sends the password to another host |
 
 ## Risks
 
