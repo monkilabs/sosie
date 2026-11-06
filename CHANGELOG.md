@@ -1,8 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.1, 6 November 2026
 
-Fixes a review of 0.4.0 found, each marked with the release it came in.
+The fixes a review of 0.4.0 found, two of them queries that found the wrong rows
+and one a tool that read the wrong database; and Sosie asks before a source
+sends a variable it never sent, so an edited `sosie.yml` cannot send a token
+elsewhere unasked. All seven packages move to 0.4.1 together. Each fix is
+marked with the release it came in.
 
 - (0.4) A single bit a client was shown did not turn back: `WHERE flag = '0'`
   ran on the real `0`s, which showed as `1`, so it found the opposite rows. It
