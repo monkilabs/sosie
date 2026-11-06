@@ -399,6 +399,19 @@ describe('sosie, in front of a GraphQL API', () => {
   })
 })
 
+describe('sosie, beyond this machine', () => {
+  it('warns once that anyone who can reach a host other than this machine can query the fakes', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-host-'))
+    const dir = project(`host: 0.0.0.0\nsources:\n  a:\n    upstream: \${APP_URL}\n    port: 0\n  b:\n    upstream: \${APP_URL}\n    port: 0\n  c:\n    upstream: \${APP_URL}\n    port: 0\n    host: 127.0.0.1\n`)
+    const sosie = await start({ APP_URL: inject('upstream'), SOSIE_HOME: home }, dir)
+    try {
+      expect(sosie.stdout().match(/^ {2}! Listening on .*$/gm)).toEqual(['  ! Listening on 0.0.0.0, with no password: anyone who can reach it can query the fakes and filter on the real values.'])
+    } finally {
+      expect(await stop(sosie.child)).toBe(0)
+    }
+  })
+})
+
 describe('sosie, in a terminal', () => {
   const home = mkdtempSync(join(tmpdir(), 'sosie-cli-tty-'))
   const empty = () => mkdtempSync(join(tmpdir(), 'sosie-empty-project-'))
