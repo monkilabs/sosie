@@ -42,6 +42,12 @@ Fixes a review of 0.4.0 found, each marked with the release it came in.
   `localhost:5432/shop`, is said to be no URL. Sosie said it read no `kim://`
   upstreams, quoting the user name, or the host.
 - (0.1) A YAML error in `sosie.yml` ends as a sentence, not with a colon.
+- (0.4) Upgrading said to keep `SOSIE_UPSTREAM` set and write
+  `upstream: ${SOSIE_UPSTREAM}`; done, Sosie still said `SOSIE_UPSTREAM` was not
+  read any more. A variable an earlier version read is told only when
+  `sosie.yml` does not name it.
+- (0.4) `sosie init` tells a problem in `sosie.yml` as starting does, with
+  exit 1, and never says to run `sosie init`.
 - (0.4) The plugin's session start names the newest Sosie's sources first, as
   `describe` does; it named them in the order their files were read.
 - The docs say what an edited `sosie.yml` can still do: it names no host, but
