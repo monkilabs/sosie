@@ -412,6 +412,49 @@ describe('sosie, beyond this machine', () => {
   })
 })
 
+describe('sosie, upgraded from 0.3', () => {
+  const home = mkdtempSync(join(tmpdir(), 'sosie-cli-upgraded-'))
+  const gone = { SOSIE_UPSTREAM: 'postgres://kim:secret@db/app', SOSIE_UPSTREAM_HEADERS: 'Authorization: Bearer secret', SOSIE_OPENAPI: './openapi.json', SOSIE_GRAPHQL_SCHEMA: './schema.graphql' }
+
+  it('says each variable of an earlier version left set is not read any more, and what in sosie.yml says it, never its value', async () => {
+    const sosie = await start({ ...gone, APP_URL: inject('upstream'), SOSIE_HOME: home }, project(ONE()))
+    try {
+      expect(sosie.stdout().match(/^ {2}! SOSIE_.*$/gm)).toEqual([
+        "  ! SOSIE_UPSTREAM is not read any more: sosie.yml says it, as a source's upstream: upstream: ${SOSIE_UPSTREAM} reads it.",
+        "  ! SOSIE_UPSTREAM_HEADERS is not read any more: sosie.yml says it, as a source's headers.",
+        "  ! SOSIE_OPENAPI is not read any more: sosie.yml says it, as a source's schema.",
+        "  ! SOSIE_GRAPHQL_SCHEMA is not read any more: sosie.yml says it, as a source's schema, with kind: graphql.",
+      ])
+      expect(sosie.stdout() + sosie.stderr()).not.toContain('secret')
+    } finally {
+      expect(await stop(sosie.child)).toBe(0)
+    }
+  })
+
+  it('says how to add the first source to a sosie.yml of rules only, with no terminal to write it in', () => {
+    const text = 'pass: [orders.status]\n'
+    const dir = project(text)
+    const result = run([], { SOSIE_UPSTREAM: gone.SOSIE_UPSTREAM, SOSIE_HOME: home }, dir)
+    expect(result.status).toBe(2)
+    expect(result.stderr).toBe(
+      '  ✗ sosie.yml names no sources. Run sosie init in a terminal, or write it:\n\n  sources:\n    shop:\n      upstream: ${SHOP_URL}     # set SHOP_URL in your terminal, never here\n\n  SOSIE_UPSTREAM is set: upstream: ${SOSIE_UPSTREAM} reads it.\n\n',
+    )
+    expect(readFileSync(join(dir, 'sosie.yml'), 'utf8')).toBe(text)
+  })
+
+  it('adds the first source to a sosie.yml of rules only in a terminal, its rules kept, and starts with them', async () => {
+    const dir = project('pass: [orders.status]\n')
+    const sosie = await start({ APP_URL: undefined, SOSIE_HOME: home }, dir, `${inject('upstream')}\napp\n\n`)
+    try {
+      expect(sosie.stdout()).toContain('  sosie.yml names no sources yet: the first, a database or an API.')
+      expect(sosie.stdout()).toContain('✓ Every value is faked; 1 field passes (sosie.yml)')
+      expect(readFileSync(join(dir, 'sosie.yml'), 'utf8')).toBe('pass: [orders.status]\n\nsources:\n  app:\n    upstream: ${APP_URL}\n')
+    } finally {
+      expect(await stop(sosie.child)).toBe(0)
+    }
+  })
+})
+
 describe('sosie, in a terminal', () => {
   const home = mkdtempSync(join(tmpdir(), 'sosie-cli-tty-'))
   const empty = () => mkdtempSync(join(tmpdir(), 'sosie-empty-project-'))
