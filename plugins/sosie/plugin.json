@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "sosie",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Your AI agent sees a double of your data. Never the real thing. Sosie's MCP server, and a skill that tells the agent how to read your database or API through it.",
   "author": {
     "name": "MonkiLabs",
