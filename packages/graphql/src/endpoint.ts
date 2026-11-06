@@ -40,6 +40,8 @@ export interface GraphqlContext {
   /** Sosie's own credentials for the API, as `secretParts` gives them. */
   secrets: readonly string[]
   log: (line: string) => void
+  /** The largest introspection answer, and a batch's together: MAX_ANSWER, or less for a test, which then needs no large one. */
+  maxAnswer?: number
 }
 
 interface Request {
@@ -97,7 +99,7 @@ const MAX_TOKENS = 10_000
 /** How deeply variables may nest: deeper than any input a schema declares, shallower than a stack overflows. */
 const MAX_DEPTH = 100
 
-const TOO_MUCH = `A batch's introspection answers, together, are larger than Sosie sends at once (${MAX_ANSWER / 1024 / 1024} MB). Ask for less.`
+const tooMuch = (max: number) => `A batch's introspection answers, together, are larger than Sosie sends at once (${+(max / 1024 / 1024).toFixed(2)} MB). Ask for less.`
 
 /** A job the check threads refused, tagged by why: a query that asks too much is the client's to change; the rest is not. */
 function refusal(answer: { refused: string; reason: 'costly' | 'stopping' | 'failed' }): { status: number; body: unknown } {
@@ -122,7 +124,8 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
   const byWord = new Map([...new Set([...ctx.fields.keys()].map((id) => id.slice(0, id.indexOf('.'))))].map((name) => [singular(name.toLowerCase()), name]))
   const names = { fields: ctx.fields, entityFor: (word: string) => byWord.get(singular(word.toLowerCase())), passes: (field: Field) => ctx.faker.passes(field) }
   const codeWords = schemaWords(ctx.schema)
-  const checker = new Checker(ctx.schema, MAX_TOKENS)
+  const maxAnswer = ctx.maxAnswer ?? MAX_ANSWER
+  const checker = new Checker(ctx.schema, MAX_TOKENS, maxAnswer)
 
   const one = async (request: unknown): Promise<{ status: number; body: unknown }> => {
     if (!request || typeof request !== 'object' || Array.isArray(request)) return failed(400, 'A request is a JSON object with a query.')
@@ -292,7 +295,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       for (const r of request) {
         let { body } = await one(r)
         if (body instanceof Written) {
-          if (size + body.text.length > MAX_ANSWER) body = { errors: [{ message: TOO_MUCH, extensions: { code: 'SOSIE_TOO_COSTLY' } }] }
+          if (size + body.text.length > maxAnswer) body = { errors: [{ message: tooMuch(maxAnswer), extensions: { code: 'SOSIE_TOO_COSTLY' } }] }
           else size += body.text.length
         }
         answers.push(body)
