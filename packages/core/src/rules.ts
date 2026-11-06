@@ -44,8 +44,12 @@ export interface RulesFor {
   learns?: boolean
 }
 
-/** The rules one source holds to, and which of the top's it holds (`applied`), so that one no source holds is told. */
-export type SourceRules = Rules & { applied: Set<string> }
+/**
+ * The rules one source holds to; which of the top's it holds (`applied`), so that one no source holds is told; and which
+ * of those it holds without knowing them (`kept`), as a source that learns its fields does, so that one no source knows
+ * is told too.
+ */
+export type SourceRules = Rules & { applied: Set<string>; kept: Set<string> }
 
 /**
  * A source's rules, checked against its schema; every problem at once, each naming what is wrong. Its own rules must
@@ -57,7 +61,7 @@ export function rulesFor(schema: Schema, { own, shared, file = 'sosie.yml', sour
   const fields = new Map<string, Field>()
   for (const entity of schema.entities) for (const field of entity.fields) fields.set(field.id, field)
   const entities = new Map(schema.entities.map((e) => [e.id, e]))
-  const rules: SourceRules = { pass: new Set(), format: new Map(), warnings: [], applied: new Set() }
+  const rules: SourceRules = { pass: new Set(), format: new Map(), warnings: [], applied: new Set(), kept: new Set() }
 
   /** Why an id names nothing here, without the file's name. */
   const unknownField = (id: string, shared: boolean) => {
@@ -73,7 +77,7 @@ export function rulesFor(schema: Schema, { own, shared, file = 'sosie.yml', sour
   const where = (shared: boolean) => (shared || !source ? `${file}:` : `${file}: sources.${source}:`)
 
   /** A rule that names nothing here: an error, kept for a source that learns, or for the top's, another source's. */
-  const unknown = (id: string, shared: boolean, keep: () => void) => {
+  const unknown = (id: string, shared: boolean, keep: () => void, held = id) => {
     // Values that name no entity, and Sosie's own words for the API's ($path, $query), are no rule's to pass.
     if (id.startsWith('*.') || id.startsWith('$')) {
       return problems.push(`${where(shared)} ${id} names no entity; a rule names an entity's field, such as orders.status.`)
@@ -82,7 +86,10 @@ export function rulesFor(schema: Schema, { own, shared, file = 'sosie.yml', sour
     if (shared && !learns && (!id.includes('.') || !entities.has(entityId))) return // Another source's.
     if (!learns) return problems.push(`${where(shared)} ${unknownField(id, shared)}`)
     keep()
-    if (!shared) rules.warnings.push(`${where(false)} ${unknownField(id, false).replace(/ is not a (table|field)\./, ' is not known yet:')} it applies once Sosie meets it.`)
+    if (shared) {
+      rules.applied.add(held)
+      rules.kept.add(held)
+    } else rules.warnings.push(`${where(false)} ${unknownField(id, false).replace(/ is not a (table|field)\./, ' is not known yet:')} it applies once Sosie meets it.`)
     return true
   }
 
@@ -96,7 +103,7 @@ export function rulesFor(schema: Schema, { own, shared, file = 'sosie.yml', sour
           if (pattern.endsWith('.*')) {
             const entity = entities.get(pattern.slice(0, -2))
             if (!entity) {
-              if (unknown(`${pattern.slice(0, -2)}.*`, shared, () => rules.pass.add(pattern)) === true && shared) rules.applied.add(pattern)
+              unknown(pattern, shared, () => rules.pass.add(pattern))
             } else {
               for (const field of entity.fields) rules.pass.add(field.id)
               // A source that learns its fields (MongoDB) knows few or none of them yet: the pattern holds for those to come.
@@ -106,7 +113,7 @@ export function rulesFor(schema: Schema, { own, shared, file = 'sosie.yml', sour
           } else if (fields.has(pattern)) {
             rules.pass.add(pattern)
             if (shared) rules.applied.add(pattern)
-          } else if (unknown(pattern, shared, () => rules.pass.add(pattern)) === true && shared) rules.applied.add(pattern)
+          } else unknown(pattern, shared, () => rules.pass.add(pattern))
         }
       }
     }
@@ -122,7 +129,7 @@ export function rulesFor(schema: Schema, { own, shared, file = 'sosie.yml', sour
         } else if (fields.has(id)) {
           rules.format.set(id, format as Format)
           if (shared) rules.applied.add(`format:${id}`)
-        } else if (unknown(id, shared, () => rules.format.set(id, format as Format)) === true && shared) rules.applied.add(`format:${id}`)
+        } else unknown(id, shared, () => rules.format.set(id, format as Format), `format:${id}`)
       }
     }
   }
@@ -141,6 +148,20 @@ export function rulesFor(schema: Schema, { own, shared, file = 'sosie.yml', sour
 
   if (problems.length) throw new RulesError(problems, rules.applied)
   return rules
+}
+
+/**
+ * The top's rules that only a source that learns its fields kept, and no source knows: kept, as they may name a field
+ * not met yet, and told, as they may be a typo.
+ */
+export function unmetRules(sources: SourceRules[], file = 'sosie.yml'): string[] {
+  const known = new Set<string>()
+  const kept = new Set<string>()
+  for (const rules of sources) {
+    for (const id of rules.applied) if (!rules.kept.has(id)) known.add(id)
+    for (const id of rules.kept) kept.add(id)
+  }
+  return [...kept].filter((id) => !known.has(id)).map((id) => `${file}: ${id.replace(/^format:/, '')} is not known yet: it applies once Sosie meets it.`)
 }
 
 /** The top's rules no source held: a typo, or a source missing from sosie.yml. Every one of them, at once. */

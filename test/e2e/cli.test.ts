@@ -237,6 +237,9 @@ describe('sosie, every source of a project in one', () => {
     const home = mkdtempSync(join(tmpdir(), 'sosie-cli-all-'))
     const dir = project(`# A rule at the top holds for every source that has the table.
 pass: [countries.*]
+# Only members learns its fields, and has met none yet: kept, and told, as it may be a typo.
+format:
+  member.nick: username
 sources:
   shop:
     upstream: \${SHOP_URL}
@@ -261,6 +264,8 @@ sources:
       expect(out).toMatch(/✓ directory {2}127\.0\.0\.1:\d+\/api\/graphql, read-only: 10 types, 19 queries/)
       expect(out).toContain('✓ Every value is faked; 2 fields pass (sosie.yml)')
       expect(out).toContain('! members: No OpenAPI document found')
+      // countries.* is the shop's: known, and not told.
+      expect(out.match(/^ {2}! sosie\.yml: .*$/gm)).toEqual(['  ! sosie.yml: member.nick is not known yet: it applies once Sosie meets it.'])
       expect(out).not.toContain(TOKEN)
       for (const name of ['shop', 'members', 'directory']) expect(sosie.address(name)).toMatch(/^(postgres|http):\/\/localhost:\d+\//)
 

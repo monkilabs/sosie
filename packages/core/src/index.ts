@@ -1,5 +1,5 @@
 export type * from './source.js'
-export { loadRules, rulesFor, unheldRules, suggest, RulesError, NO_RULES, type Rules, type RuleSet, type SourceRules } from './rules.js'
+export { loadRules, rulesFor, unheldRules, unmetRules, suggest, RulesError, NO_RULES, type Rules, type RuleSet, type SourceRules } from './rules.js'
 export { planFields, planner, type FieldPlan } from './domains.js'
 export { createFaker, structuralKey } from './fake/index.js'
 export { FORMATS, PERSONAL, formatByName, type Format } from './fake/formats.js'

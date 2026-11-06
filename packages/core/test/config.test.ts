@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ConfigError, interpolate, readConfig, settingsProblems, variableFor, variablesOf } from '../src/config.js'
-import { rulesFor, RulesError, unheldRules } from '../src/rules.js'
+import { rulesFor, RulesError, unheldRules, unmetRules } from '../src/rules.js'
 import type { Schema } from '../src/source.js'
 
 const KINDS = [{ kind: 'postgres' }, { kind: 'mysql' }, { kind: 'rest', settings: ['headers', 'schema'] }, { kind: 'graphql', settings: ['headers', 'schema'] }]
@@ -186,6 +186,19 @@ describe('rules for each source', () => {
     expect([...learned.pass]).toEqual(['orders.status'])
     expect(learned.warnings).toEqual([])
     expect(unheldRules({ pass: ['orders.status'] }, [learned.applied])).toEqual([])
+  })
+
+  it('warns of a top rule only a source that learns its fields kept: no source knows it, and it may be a typo', () => {
+    const shared = { pass: ['user.emial', 'contacts.region', 'invoice.*'], format: { 'user.handle': 'username' } }
+    const learned = rulesFor({ entities: [] }, { shared, source: 'api', learns: true })
+    const forCrm = rulesFor(crm, { shared, source: 'crm' })
+    expect(unheldRules(shared, [learned.applied, forCrm.applied])).toEqual([])
+    // contacts.region is crm's: known, so no word of it.
+    expect(unmetRules([learned, forCrm])).toEqual([
+      'sosie.yml: user.emial is not known yet: it applies once Sosie meets it.',
+      'sosie.yml: invoice.* is not known yet: it applies once Sosie meets it.',
+      'sosie.yml: user.handle is not known yet: it applies once Sosie meets it.',
+    ])
   })
 
   it('tells a field that passes without the one it shares values with where its rule is: the top, or the source', () => {
