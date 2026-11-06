@@ -26,7 +26,6 @@ import {
   type Config,
   type Connection,
   type Endpoint,
-  type Faker,
   type Running,
   type Schema,
   type Source,
@@ -37,6 +36,7 @@ import { init, sourceFor, upstreamUrl } from './init.js'
 import { loopback } from './listen.js'
 import { columns, fail, found, ok, warn } from './print.js'
 import { hiddenPrompt } from './prompt.js'
+import { serveAll } from './serve.js'
 import { sources } from './sources.js'
 
 const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
@@ -137,11 +137,6 @@ async function initCommand(typed?: Record<string, string>): Promise<void> {
 
 /* sosie */
 
-/** The first port a source without one tries, then each next one; 7674 spells "sosi" on a phone keypad. */
-const FIRST_PORT = 7674
-/** Ports past a taken one a source without a port tries before it gives up. */
-const PORTS_TO_TRY = 100
-
 /** A source of sosie.yml, its upstream read and its kind's source found. */
 interface Plan {
   config: SourceConfig
@@ -239,11 +234,17 @@ async function start(): Promise<void> {
 
   let endpoints: Endpoint[]
   try {
-    endpoints = await serveAll(plans, connections, fakers, learned)
+    endpoints = await serveAll(
+      plans.map((plan, i) => ({
+        name: plan.config.name,
+        port: plan.config.port,
+        listen: (port: number) => connections[i]!.serve({ host: plan.config.host, port }, fakers[i]!, connections[i]!.learns ? learned(i) : undefined),
+      })),
+    )
   } catch (error) {
     store.close()
     await closeAll()
-    throw error
+    throw new Exit(1, fail((error as Error).message))
   }
   // Ctrl+C, a kill, or the terminal closing: each stops Sosie and leaves no running/ file behind, from before
   // the file is written and the addresses printed, so a client that starts on an address can stop it too.
@@ -361,48 +362,6 @@ const optionsOf = (plan: Plan) => ({
   headers: plan.headers,
   ...(plan.config.schema && { schema: plan.config.schema }),
 })
-
-/**
- * Each source's endpoint: on its port, or the next free one from 7674, in the order listed, the given ports kept for
- * their sources. One that cannot listen closes those that did.
- */
-async function serveAll(plans: Plan[], connections: Connection[], fakers: Faker[], learned: (i: number) => (schema: Schema) => void): Promise<Endpoint[]> {
-  const given = new Set(plans.map((p) => p.config.port).filter((p): p is number => !!p))
-  const endpoints: Endpoint[] = []
-  const closeAll = async () => {
-    for (const endpoint of endpoints) await endpoint.close().catch(() => {})
-  }
-  let next = FIRST_PORT
-  for (const [i, plan] of plans.entries()) {
-    const { name, host, port: chosen } = plan.config
-    const connection = connections[i]!
-    const listen = (port: number) => connection.serve({ host, port }, fakers[i]!, connection.learns ? learned(i) : undefined)
-    if (chosen !== undefined) {
-      try {
-        endpoints.push(await listen(chosen))
-        continue
-      } catch (error) {
-        await closeAll()
-        if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new Exit(1, fail(`${name}: port ${chosen} is in use. Is Sosie already running? Give it another in sosie.yml.`))
-        throw new Exit(1, fail(`${name}: ${(error as Error).message}`))
-      }
-    }
-    for (let port = next, tries = 0; ; port++) {
-      if (given.has(port)) continue
-      try {
-        endpoints.push(await listen(port))
-        next = port + 1
-        break
-      } catch (error) {
-        const busy = (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
-        if (busy && ++tries < PORTS_TO_TRY) continue
-        await closeAll()
-        throw new Exit(1, fail(`${name}: ${busy ? `no port is free from ${next} to ${port}. Give it one in sosie.yml.` : (error as Error).message}`))
-      }
-    }
-  }
-  return endpoints
-}
 
 /* sosie mcp */
 
