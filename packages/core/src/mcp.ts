@@ -67,7 +67,6 @@ export async function serveMcp({ version, tools, running, transport }: McpOption
             const serving = [...new Set(all.map((r) => r.kind))].join(' and ')
             throw new Error(`Sosie serves ${serving} here, not ${kind}: ${name} is for ${kind}.`)
           }
-          const names = [...new Set(ofKind.map((r) => r.name))].join(', ')
           const target = pick(all, ofKind, source, name, kind)
           return group.find((g) => g.kind === target.kind)!.tool.run(input, target)
         }),
@@ -81,14 +80,20 @@ export async function serveMcp({ version, tools, running, transport }: McpOption
 /** The source a tool goes to: the one named, or the only one of its kind. Never the wrong database without knowing. */
 function pick(all: Running[], ofKind: Running[], source: string | undefined, tool: string, kind: string): Running {
   const names = [...new Set(ofKind.map((r) => r.name))].join(', ')
+  // Sosies of two projects may each have a source of one name: neither is the one meant, without knowing which.
+  const only = (found: Running[]) => {
+    if (found.length === 1) return found[0]!
+    const count = found.length === 2 ? 'Two' : String(found.length)
+    const at = `${found.slice(0, -1).map((r) => r.address).join(', ')} and ${found.at(-1)!.address}`
+    throw new Error(`${count} running Sosies have a source named ${found[0]!.name}, at ${at}. Stop one, or rename its source in sosie.yml.`)
+  }
   if (source) {
-    // The newest Sosie's, should two share the name.
-    const named = ofKind.find((r) => r.name === source)
-    if (named) return named
+    const named = ofKind.filter((r) => r.name === source)
+    if (named.length) return only(named)
     const other = all.find((r) => r.name === source)
     throw new Error(other ? `${source} is a ${other.kind} source: ${tool} is for ${kind} (${names}).` : `No ${kind} source is named ${source}: ${names}.`)
   }
-  if (new Set(ofKind.map((r) => r.name)).size === 1) return ofKind[0]!
+  if (new Set(ofKind.map((r) => r.name)).size === 1) return only(ofKind)
   throw new Error(`Several ${kind} sources run: ${names}. Name the one to use in source.`)
 }
 

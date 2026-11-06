@@ -16,17 +16,16 @@ import {
   serveMcp,
   settingsProblems,
   sosieHome,
-  sourceNames,
   Store,
   storeDir,
   storeDirs,
   unheldRules,
+  unmetRules,
   variablesOf,
   writeRunning,
   type Config,
   type Connection,
   type Endpoint,
-  type Faker,
   type Running,
   type Schema,
   type Source,
@@ -37,6 +36,7 @@ import { init, sourceFor, upstreamUrl } from './init.js'
 import { loopback } from './listen.js'
 import { columns, fail, found, ok, warn } from './print.js'
 import { hiddenPrompt } from './prompt.js'
+import { serveAll } from './serve.js'
 import { sources } from './sources.js'
 
 const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
@@ -130,16 +130,12 @@ async function initCommand(typed?: Record<string, string>): Promise<void> {
     if (typed) typed[written.variable] = written.value
     else process.stdout.write('    Start Sosie with npx @sosie/cli.\n')
   } catch (error) {
-    throw new Exit(error instanceof ConfigError ? 1 : 2, fail((error as Error).message))
+    if (error instanceof ConfigError) throw new Exit(1, error.problems.map(fail).join('\n'))
+    throw new Exit(2, fail((error as Error).message))
   }
 }
 
 /* sosie */
-
-/** The first port a source without one tries, then each next one; 7674 spells "sosi" on a phone keypad. */
-const FIRST_PORT = 7674
-/** Ports past a taken one a source without a port tries before it gives up. */
-const PORTS_TO_TRY = 100
 
 /** A source of sosie.yml, its upstream read and its kind's source found. */
 interface Plan {
@@ -150,10 +146,6 @@ interface Plan {
 }
 
 async function start(): Promise<void> {
-  const notes = Object.entries(GONE_VARIABLES)
-    .filter(([name]) => process.env[name])
-    .map(([name, now]) => `${name} is not read any more: sosie.yml says it, as ${now}.`)
-
   // Without a sosie.yml, or one that names no sources, its first source is asked for, then Sosie starts with it.
   const file = resolve(FILE)
   const typed: Record<string, string> = {}
@@ -173,6 +165,11 @@ async function start(): Promise<void> {
     if (error instanceof ConfigError) throw new Exit(1, error.problems.map(fail).join('\n'))
     throw error
   }
+  // A variable an earlier version read, left set, is told; not one sosie.yml reads, as upgrading says to.
+  const read = variablesOf(config)
+  const notes = Object.entries(GONE_VARIABLES)
+    .filter(([name]) => process.env[name] && !read.includes(name))
+    .map(([name, now]) => `${name} is not read any more: sosie.yml says it, as ${now}.`)
 
   const values = await readVariables(config, typed)
   const plans = planSources(config, values)
@@ -192,16 +189,20 @@ async function start(): Promise<void> {
 
   const rules: SourceRules[] = []
   const problems: string[] = []
+  // The top's rules each source holds, its own rules right or wrong: one that no source holds is told with the rest.
+  const held: Set<string>[] = []
   plans.forEach((plan, i) => {
     const connection = connections[i]!
     try {
       rules.push(rulesFor(connection.schema, { own: plan.config.rules, shared: config.rules, file: FILE, source: plan.config.name, learns: !!connection.learns }))
+      held.push(rules.at(-1)!.applied)
     } catch (error) {
       if (!(error instanceof RulesError)) throw error
       problems.push(...error.problems)
+      if (error.applied) held.push(error.applied)
     }
   })
-  if (!problems.length) problems.push(...unheldRules(config.rules, rules.map((r) => r.applied), FILE))
+  problems.push(...unheldRules(config.rules, held, FILE))
   if (problems.length) {
     await closeAll()
     throw new Exit(1, problems.map(fail).join('\n'))
@@ -234,11 +235,17 @@ async function start(): Promise<void> {
 
   let endpoints: Endpoint[]
   try {
-    endpoints = await serveAll(plans, connections, fakers, learned)
+    endpoints = await serveAll(
+      plans.map((plan, i) => ({
+        name: plan.config.name,
+        port: plan.config.port,
+        listen: (port: number) => connections[i]!.serve({ host: plan.config.host, port }, fakers[i]!, connections[i]!.learns ? learned(i) : undefined),
+      })),
+    )
   } catch (error) {
     store.close()
     await closeAll()
-    throw error
+    throw new Exit(1, fail((error as Error).message))
   }
   // Ctrl+C, a kill, or the terminal closing: each stops Sosie and leaves no running/ file behind, from before
   // the file is written and the addresses printed, so a client that starts on an address can stop it too.
@@ -269,6 +276,7 @@ async function start(): Promise<void> {
     ok(passing ? `Every value is faked; ${passing} ${passing === 1 ? 'field passes' : 'fields pass'} (${FILE})` : 'Every value is faked'),
     ...plans.flatMap((plan, i) => connections[i]!.warnings.map((w) => warn(`${plan.config.name}: ${w}`))),
     ...rules.flatMap((r) => r.warnings).map(warn),
+    ...unmetRules(rules, FILE).map(warn),
     ...notes.map(warn),
     ...hosts.map((host) => warn(`Listening on ${host}, with no password: anyone who can reach it can query the fakes and filter on the real values.`)),
     '',
@@ -284,13 +292,16 @@ async function start(): Promise<void> {
   await stopped
 }
 
-/** Whether sosie.yml has no sources key, so that its first source is still to be written. */
+/**
+ * Whether sosie.yml has no sources key and nothing else wrong, so that its first source is still to be written. One
+ * with something else wrong (a sources key misspelt) is told when it is read, never written a second.
+ */
 function noSources(file: string): boolean {
   try {
-    return sourceNames(readFileSync(file, 'utf8')) === undefined
-  } catch {
-    // Told when it is read.
+    readConfig(readFileSync(file, 'utf8'), file, sources)
     return false
+  } catch (error) {
+    return error instanceof ConfigError && error.unwritten
   }
 }
 
@@ -352,48 +363,6 @@ const optionsOf = (plan: Plan) => ({
   headers: plan.headers,
   ...(plan.config.schema && { schema: plan.config.schema }),
 })
-
-/**
- * Each source's endpoint: on its port, or the next free one from 7674, in the order listed, the given ports kept for
- * their sources. One that cannot listen closes those that did.
- */
-async function serveAll(plans: Plan[], connections: Connection[], fakers: Faker[], learned: (i: number) => (schema: Schema) => void): Promise<Endpoint[]> {
-  const given = new Set(plans.map((p) => p.config.port).filter((p): p is number => !!p))
-  const endpoints: Endpoint[] = []
-  const closeAll = async () => {
-    for (const endpoint of endpoints) await endpoint.close().catch(() => {})
-  }
-  let next = FIRST_PORT
-  for (const [i, plan] of plans.entries()) {
-    const { name, host, port: chosen } = plan.config
-    const connection = connections[i]!
-    const listen = (port: number) => connection.serve({ host, port }, fakers[i]!, connection.learns ? learned(i) : undefined)
-    if (chosen !== undefined) {
-      try {
-        endpoints.push(await listen(chosen))
-        continue
-      } catch (error) {
-        await closeAll()
-        if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new Exit(1, fail(`${name}: port ${chosen} is in use. Is Sosie already running? Give it another in sosie.yml.`))
-        throw new Exit(1, fail(`${name}: ${(error as Error).message}`))
-      }
-    }
-    for (let port = next, tries = 0; ; port++) {
-      if (given.has(port)) continue
-      try {
-        endpoints.push(await listen(port))
-        next = port + 1
-        break
-      } catch (error) {
-        const busy = (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
-        if (busy && ++tries < PORTS_TO_TRY) continue
-        await closeAll()
-        throw new Exit(1, fail(`${name}: ${busy ? `no port is free from ${next} to ${port}. Give it one in sosie.yml.` : (error as Error).message}`))
-      }
-    }
-  }
-  return endpoints
-}
 
 /* sosie mcp */
 

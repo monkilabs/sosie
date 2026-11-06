@@ -66,8 +66,8 @@ This is how Sosie works, not a bug, and not a reason to work around it.
   ones. Write `active = true`, which is turned back.
 - **A value Sosie never showed** is used as written, and matches whatever real value it happens to be.
 - **Composite values** (`SELECT u FROM users u`) and types Sosie does not know come back as `NULL`. A driver that asks
-  for binary results gets them, except for such types, `regclass` and `money`, which are refused in binary: ask for the column
-  in text, or cast it. An older Sosie refuses binary results altogether: ask the developer to update it.
+  for binary results gets them, except for such types, `regclass`, `money` and ranges, which are refused in binary: ask
+  for the column in text, or cast it. An older Sosie refuses binary results altogether: ask the developer to update it.
 - **An error raised while rows are read** comes back as its code only. Sosie hides the rest, which could quote a value.
 
 ## What Sosie refuses

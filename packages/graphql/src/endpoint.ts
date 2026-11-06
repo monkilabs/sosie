@@ -35,7 +35,7 @@ export interface GraphqlContext {
   /** Fields of the neutral schema, by id. */
   fields: Map<string, Field>
   faker: Faker
-  /** Items of a list at most, as --max-rows. */
+  /** Items of a list at most: the source's max-rows. */
   maxItems: number
   /** Sosie's own credentials for the API, as `secretParts` gives them. */
   secrets: readonly string[]
@@ -239,7 +239,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
         }),
         ...(faked.cut && {
           extensions: {
-            sosie: `Sosie returned the first ${ctx.maxItems} items of a list; the rest were cut. Narrow the query, or start Sosie with a higher --max-rows.`,
+            sosie: `Sosie returned the first ${ctx.maxItems} items of a list; the rest were cut. Narrow the query, or raise max-rows in sosie.yml.`,
           },
         }),
       },

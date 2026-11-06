@@ -18,7 +18,7 @@ export interface FakeContext {
   entityFor: (word: string) => string
   /** A URL into the upstream API, rewritten to Sosie's address with its values faked; undefined for any other text. */
   url: (text: string) => string | undefined
-  /** Items of a list at most; the rest are cut, as rows are by --max-rows. */
+  /** Items of a list at most; the rest are cut, as rows are by max-rows. */
   maxItems: number
   /** Resolves now and then, to let other clients in while a large body is faked. */
   pace: () => Promise<void> | undefined

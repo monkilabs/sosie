@@ -333,7 +333,7 @@ export class Session {
       await this.ctx.upstream.kill([Long.fromString(id)])
       ;(reply.cursor as Document).id = Long.fromNumber(0)
     }
-    if (cut) this.ctx.log(`A cursor on ${cursor.collection} was cut at --max-rows (${this.ctx.maxRows}).`)
+    if (cut) this.ctx.log(`A cursor on ${cursor.collection} was cut at max-rows (${this.ctx.maxRows}).`)
     return reply
   }
 

@@ -26,7 +26,7 @@ export interface FakeContext {
   sent?: string
   fields: Map<string, Field>
   fragments: Record<string, FragmentDefinitionNode>
-  /** Items of a list at most; the rest are cut, as rows are by --max-rows. */
+  /** Items of a list at most; the rest are cut, as rows are by max-rows. */
   maxItems: number
   /** Resolves now and then, to let other clients in while a large answer is faked. */
   pace: () => Promise<void> | undefined

@@ -1,6 +1,6 @@
 import { basename, dirname, isAbsolute, resolve } from 'node:path'
 import { parse } from 'yaml'
-import { suggest, type RuleSet } from './rules.js'
+import { suggest, yamlProblem, type RuleSet } from './rules.js'
 
 /**
  * sosie.yml: the project's sources, and how their values are faked. The only configuration there is. Settings at the
@@ -39,7 +39,11 @@ export interface Kind {
 }
 
 export class ConfigError extends Error {
-  constructor(readonly problems: string[]) {
+  /** `unwritten`: sosie.yml has no sources key and nothing else wrong, so its first source is still to be written. */
+  constructor(
+    readonly problems: string[],
+    readonly unwritten = false,
+  ) {
     super(problems.join('\n'))
     this.name = 'ConfigError'
   }
@@ -47,10 +51,15 @@ export class ConfigError extends Error {
 
 export const DEFAULTS = { host: '127.0.0.1', maxRows: 1000, timeout: 30 } as const
 
+/** What a sosie.yml with no sources key is told: the one problem sosie init mends. */
+export const noSourcesProblem = (file = 'sosie.yml') => `${file} names no sources. Add one under sources:, or run sosie init.`
+
 const TOP = ['sources', 'pass', 'format', 'host', 'max-rows', 'timeout']
 const SOURCE = ['upstream', 'kind', 'schema', 'headers', 'port', 'host', 'max-rows', 'timeout', 'pass', 'format']
 const NAME = /^[a-z][a-z0-9_-]{0,39}$/
 const VARIABLE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g
+/** A header's $$, a $ of its text, or a ${NAME}: read from the left, so $${NAME} is text and asks for nothing. */
+const TEMPLATE = /\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g
 const WHOLE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/
 
 /** The variable a source's upstream would be kept in, by its name: shop, SHOP_URL. */
@@ -65,7 +74,7 @@ export function sourceNames(text: string, file = 'sosie.yml'): string[] | undefi
   try {
     doc = parse(text)
   } catch (error) {
-    throw new ConfigError([`${file}: ${(error as Error).message.split('\n')[0]}`])
+    throw new ConfigError([yamlProblem(file, error)])
   }
   if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !('sources' in doc)) return undefined
   const sources = (doc as { sources: unknown }).sources
@@ -78,14 +87,19 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
   const problems: string[] = []
   const at = (path: string, what: string) => problems.push(`${file}: ${path}${what}`)
   let doc: unknown
+  // Every value as its text, for headers: 1.0, 0x1F and true are sent as written, never as YAML reads them.
+  let written: unknown
   try {
     doc = parse(text)
+    written = parse(text, { schema: 'failsafe' })
   } catch (error) {
-    throw new ConfigError([`${file}: ${(error as Error).message.split('\n')[0]}`])
+    throw new ConfigError([yamlProblem(file, error)])
   }
   if (doc == null) doc = {}
   if (typeof doc !== 'object' || Array.isArray(doc)) throw new ConfigError([`${file}: expected keys such as sources, pass and format.`])
   const top = doc as Record<string, unknown>
+  const textOf = (name: string, header: string): unknown =>
+    (written as { sources?: Record<string, { headers?: Record<string, unknown> }> } | null)?.sources?.[name]?.headers?.[header]
 
   for (const key of Object.keys(top)) {
     if (TOP.includes(key)) continue
@@ -97,12 +111,13 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
 
   const sources: SourceConfig[] = []
   const given = top.sources
-  if (given === undefined || given === null) {
-    problems.push(`${file} names no sources. Add one under sources:, or run sosie init.`)
+  if (!('sources' in top)) {
+    problems.push(noSourcesProblem(file))
+  } else if (given === null || (typeof given === 'object' && !Array.isArray(given) && !Object.keys(given).length)) {
+    // As sosie init says: it writes no second sources key.
+    problems.push(`${file} has a sources: key with none under it. Add one there, such as shop: { upstream: \${SHOP_URL} }.`)
   } else if (typeof given !== 'object' || Array.isArray(given)) {
     at('sources', ' maps each source by its name to its settings, such as shop: { upstream: ${SHOP_URL} }.')
-  } else if (!Object.keys(given).length) {
-    problems.push(`${file} names no sources. Add one under sources:, or run sosie init.`)
   } else {
     const ports = new Map<number, string>()
     for (const [name, value] of Object.entries(given as Record<string, unknown>)) {
@@ -158,11 +173,13 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
         if (!source.headers || typeof source.headers !== 'object' || Array.isArray(source.headers)) {
           at(`${path}.headers`, ' maps each header to its value, such as Authorization: Bearer ${TOKEN}.')
         } else {
-          for (const [header, v] of Object.entries(source.headers as Record<string, unknown>)) {
+          for (const header of Object.keys(source.headers as Record<string, unknown>)) {
+            const v = textOf(name, header)
             if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(header)) at(`${path}.headers`, ': a header is named in letters, digits and dashes.')
-            else if (typeof v !== 'string' && typeof v !== 'number') at(`${path}.headers.${header}`, ' is a value on one line.')
+            else if (typeof v !== 'string') at(`${path}.headers.${header}`, ' is a value on one line.')
+            else if (!v) at(`${path}.headers.${header}`, ' has no value.')
             else {
-              const template = String(v)
+              const template = v
               const unclosed = template.replace(/\$\$/g, '').replace(VARIABLE, '').includes('${')
               if (unclosed) at(`${path}.headers.${header}`, ' names a variable as ${NAME}: letters, digits and _.')
               else headers[header] = template
@@ -201,7 +218,7 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
     }
   }
 
-  if (problems.length) throw new ConfigError(problems)
+  if (problems.length) throw new ConfigError(problems, !('sources' in top) && problems.length === 1)
   return {
     file,
     rules: { ...(top.pass !== undefined && { pass: top.pass }), ...(top.format !== undefined && { format: top.format }) },
@@ -227,14 +244,14 @@ export function variablesOf(config: Config): string[] {
   const names = new Set<string>()
   for (const source of config.sources) {
     if (source.upstream) names.add(source.upstream)
-    for (const template of Object.values(source.headers)) for (const [, name] of template.matchAll(VARIABLE)) names.add(name!)
+    for (const template of Object.values(source.headers)) for (const [, name] of template.matchAll(TEMPLATE)) if (name) names.add(name)
   }
   return [...names]
 }
 
 /** A header's value, its ${NAME}s read from `values` and each $$ a $. */
 export function interpolate(template: string, values: Record<string, string | undefined>): string {
-  return template.replace(/\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, name: string | undefined) => (name ? (values[name] ?? '') : '$'))
+  return template.replace(TEMPLATE, (match, name: string | undefined) => (name ? (values[name] ?? '') : '$'))
 }
 
 /** host, max-rows and timeout, at the top or in a source, each checked. */

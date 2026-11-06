@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { secretParts, upstreamHeaders, why, type Connection, type Field, type Source } from '@sosie/core'
+import { readCapped, secretParts, upstreamHeaders, why, type Connection, type Field, type Source } from '@sosie/core'
 import { buildClientSchema, buildSchema, getIntrospectionQuery, validateSchema, type GraphQLSchema, type IntrospectionQuery } from 'graphql'
 import { startEndpoint } from './endpoint.js'
 import { graphqlTool } from './mcp.js'
@@ -30,7 +30,7 @@ export const graphql: Source = {
     let schema: GraphQLSchema
     if (options.schema) {
       try {
-        schema = fromFile(readFileSync(options.schema, 'utf8'))
+        schema = fromFile(await readSchemaText(options.schema, api))
       } catch (error) {
         throw new Error(`Cannot read its schema: ${(error as Error).message}`)
       }
@@ -65,13 +65,35 @@ export const graphql: Source = {
       label,
       summary: `${neutral.entities.length} types, ${queries} ${queries === 1 ? 'query' : 'queries'}`,
       warnings: [],
-      client: 'curl',
       serve: (listen, faker) => startEndpoint(listen, { upstream: api, schema, fields, faker, maxItems: options.maxRows, secrets, log: (line) => process.stderr.write(`  ! ${line}\n`) }),
       async close() {},
     }
   },
   tools: [graphqlTool],
 }
+
+/**
+ * A schema from a file, or a URL: at the API's own origin with its credentials, and no redirect followed, as they would
+ * go along; elsewhere with none.
+ */
+async function readSchemaText(location: string, api: GraphqlUpstream): Promise<string> {
+  if (!/^https?:\/\//i.test(location)) return readFileSync(location, 'utf8')
+  const url = new URL(location)
+  const own = url.origin === api.url.origin
+  const response = await fetch(url, {
+    headers: { 'user-agent': 'sosie', ...(own && api.headers) },
+    redirect: own ? 'manual' : 'follow',
+    signal: AbortSignal.timeout(api.timeout),
+  })
+  if (response.status !== 200) {
+    await response.body?.cancel()
+    throw new Error(`${url.host}${url.pathname} answered ${response.status}.`)
+  }
+  return readCapped(response, MAX_SCHEMA)
+}
+
+/** A schema's size at most: the largest public ones are a few MB. */
+const MAX_SCHEMA = 20 * 1024 * 1024
 
 /** A schema file: SDL, or an introspection result as JSON. */
 function fromFile(text: string): GraphQLSchema {

@@ -67,7 +67,7 @@ const loopback = (name: string) => name === 'localhost' || name === '::1' || /^1
 /**
  * Whether a request's Host header names this machine, for an endpoint
  * listening on it: a web page that rebinds its own name to 127.0.0.1 sends
- * its name, and is refused. On another --host, any name is answered.
+ * its name, and is refused. On another host, any name is answered.
  */
 export function localRequest(host: string | undefined, listening: string): boolean {
   if (!loopback(listening)) return true

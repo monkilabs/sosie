@@ -133,6 +133,54 @@ describe('turning fakes back in a filter', () => {
     expect(near).toEqual(expect.arrayContaining(['users.email', 'users.address.city', 'users.phone', 'users.tags', 'users.contacts.value']))
   })
 
+  it('in $expr, turns back a value compared with a field by $eq, $ne or $in, inside $or and $not too', () => {
+    near.length = 0
+    const out = rewriteFilter(
+      { $expr: { $or: [{ $eq: ['$email', 'fake@x'] }, { $not: [{ $ne: ['fakecity', '$$CURRENT.address.city'] }] }, { $in: ['$phone', ['fake1', 'other']] }] } },
+      collection('users'),
+      scope,
+    )
+    expect(out).toEqual({
+      $expr: { $or: [{ $eq: ['$email', 'FAKE@X'] }, { $not: [{ $ne: ['FAKECITY', '$$CURRENT.address.city'] }] }, { $in: ['$phone', ['FAKE1', 'other']] }] },
+    })
+    expect(near).toEqual(['users.email', 'users.address.city', 'users.phone', 'users.phone'])
+  })
+
+  it('in $expr, turns back a value under $and, $or and $not written without their array, as MongoDB takes one argument', () => {
+    near.length = 0
+    const out = rewriteFilter({ $expr: { $and: { $or: { $not: { $ne: ['$email', 'fake@x'] } } } } }, collection('users'), scope)
+    expect(out).toEqual({ $expr: { $and: { $or: { $not: { $ne: ['$email', 'FAKE@X'] } } } } })
+    expect(near).toEqual(['users.email'])
+  })
+
+  it('in $expr, leaves as written what compares no field with a value', () => {
+    near.length = 0
+    const asWritten: unknown[] = [
+      // Another operator than equality.
+      { $gt: ['$email', 'fake@x'] },
+      // A field with a field, or with a variable.
+      { $eq: ['$email', '$backupEmail'] },
+      { $eq: ['$$who', '$email'] },
+      // What an operator computes, on either side.
+      { $eq: [{ $toLower: '$email' }, 'fake@x'] },
+      { $eq: ['$email', { $toLower: 'fake@x' }] },
+      // Not one operator with two arguments.
+      { $eq: ['$email', 'fake@x'], $ne: ['$email', 'fake@y'] },
+      { $eq: ['$email'] },
+      { $eq: ['$email', 'fake@x', 'fake@y'] },
+      { $eq: 'fake@x' },
+      // $in without an array of values.
+      { $in: ['$email', '$aliases'] },
+      { $in: ['$email', 'fake@x'] },
+      // Not a document.
+      'fake@x',
+      true,
+      ['$email', 'fake@x'],
+    ]
+    for (const expr of asWritten) expect(rewriteFilter({ $expr: expr }, collection('users'), scope), JSON.stringify(expr)).toEqual({ $expr: expr })
+    expect(near).toEqual([])
+  })
+
   it('keeps a value’s type: an ObjectId turned back is an ObjectId', () => {
     const idScope = { lookup: () => '64b7f0c2a1b2c3d4e5f60001' } as unknown as RequestScope
     const out = rewriteFilter({ _id: new ObjectId('0123456789abcdef01234567') }, collection('users'), idScope) as Document

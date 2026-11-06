@@ -1,11 +1,11 @@
-import type { RequestScope } from '@sosie/core'
+import type { Faker, FieldType, RequestScope, Value } from '@sosie/core'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { scrubbed, type Sent } from '../src/errors.js'
 import { analyze, loadParser, parseStatements, type Analysis } from '../src/guard.js'
 import type { Column } from '../src/protocol.js'
-import { planColumns } from '../src/results.js'
+import { fakeRow, planColumns } from '../src/results.js'
 import { rewriteConsts } from '../src/rewrite.js'
-import { buildCatalog } from '../src/schema.js'
+import { buildCatalog, typeOfColumn } from '../src/schema.js'
 
 beforeAll(() => loadParser())
 
@@ -64,6 +64,38 @@ describe('what each result column becomes', () => {
   it('SHOW, DESCRIBE and MySQL’s catalog: unchanged', () => {
     expect(plans('SHOW TABLES', [column()])).toEqual(['pass'])
     expect(plans('SELECT TABLE_NAME FROM information_schema.TABLES', [of('TABLES', 'TABLE_NAME', 'information_schema')])).toEqual(['pass'])
+  })
+})
+
+describe('a BIT Sosie holds no field for', () => {
+  // A faker that flips every bit, and says what it was asked.
+  const asked: unknown[][] = []
+  const faker = {
+    computed: (value: Value, type: FieldType, sent: string) => (asked.push([value, type, sent]), String(value).replace(/[01]/g, (b) => (b === '1' ? '0' : '1'))),
+  } as unknown as Faker
+  const bit = (over: Partial<Column> = {}) => column({ type: 16, characterSet: 63, ...over })
+
+  it('is faked as its number of bits, computed or of a table made since Sosie started, MySQL’s padding above them kept', () => {
+    asked.length = 0
+    const sql = 'SELECT IFNULL(marks, 0), marks FROM gifts'
+    const plan = planColumns([bit({ length: 12 }), { ...of('gifts', 'marks'), type: 16, characterSet: 63, length: 12 }], check(sql), catalog)
+    expect(plan).toEqual([{ type: { kind: 'bits', length: 12 } }, { type: { kind: 'bits', length: 12 } }])
+    // BIT(12) in two bytes, the first the highest: its top four bits are padding, and stay zero.
+    expect(fakeRow([Buffer.from([0x0a, 0xbc]), Buffer.from([0x0f, 0xff])], plan, faker, sql)).toEqual([Buffer.from([0x05, 0x43]), Buffer.from([0x00, 0x00])])
+    expect(asked).toEqual([
+      ['101010111100', { kind: 'bits', length: 12 }, sql],
+      ['111111111111', { kind: 'bits', length: 12 }, sql],
+    ])
+  })
+
+  it('without a length, is faked as every bit MySQL sends; empty, it stays empty', () => {
+    asked.length = 0
+    expect(typeOfColumn(16, 63, 0)).toEqual({ kind: 'bits' })
+    expect(fakeRow([Buffer.from([0x0a, 0xbc]), Buffer.alloc(0)], [{ type: typeOfColumn(16, 63, 0) }, { type: typeOfColumn(16, 63, 0, 12) }], faker)).toEqual([
+      Buffer.from([0xf5, 0x43]),
+      Buffer.alloc(0),
+    ])
+    expect(asked).toEqual([['0000101010111100', { kind: 'bits' }, '']])
   })
 })
 

@@ -38,7 +38,10 @@ export async function input() {
   }
 }
 
-/** Every source of every Sosie running on this machine, from $SOSIE_HOME/running/: its name, kind and address. */
+/**
+ * Every source of every Sosie running on this machine, from $SOSIE_HOME/running/: its name, kind and address, the
+ * newest Sosie's first, as `sosie mcp` lists them.
+ */
 export function running() {
   const dir = join(home, 'running')
   if (!existsSync(dir)) return []
@@ -48,12 +51,12 @@ export function running() {
       const entry = JSON.parse(readFileSync(join(dir, file), 'utf8'))
       // An earlier version's entry is one source, named by its kind.
       const sources = entry.sources ?? [{ name: entry.kind, kind: entry.kind, address: entry.address }]
-      if (alive(entry.pid)) for (const { name, kind, address } of sources) found.push({ name, kind, address })
+      if (alive(entry.pid)) found.push({ startedAt: entry.startedAt ?? 0, sources: sources.map(({ name, kind, address }) => ({ name, kind, address })) })
     } catch {
       // Being written, or not Sosie's.
     }
   }
-  return found
+  return found.sort((a, b) => b.startedAt - a.startedAt).flatMap((e) => e.sources)
 }
 
 export function alive(pid) {

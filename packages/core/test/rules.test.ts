@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loadRules, RulesError, suggest } from '../src/rules.js'
+import { loadRules, rulesFor, RulesError, suggest, unheldRules } from '../src/rules.js'
 import { schema } from '../../../test/memory-source/fixtures.js'
 
 const problems = (text: string) => {
@@ -23,6 +23,10 @@ describe('sosie.yml', () => {
     const rules = loadRules('pass:\n  - orders.status\n  - countries.*\nformat:\n  users.account: iban\n', schema)
     expect([...rules.pass].sort()).toEqual(['countries.code', 'countries.name', 'orders.status'])
     expect(rules.format.get('users.account')).toBe('iban')
+  })
+
+  it('tells a YAML error by its first line, ended as a sentence', () => {
+    expect(problems('pass: [\n')).toEqual(['sosie.yml: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1.'])
   })
 
   it('names a typo and suggests the field meant', () => {
@@ -68,5 +72,45 @@ describe('sosie.yml', () => {
   it('suggests only near misses', () => {
     expect(suggest('emial', ['email', 'name'])).toBe('email')
     expect(suggest('zzzzzz', ['email', 'name'])).toBeUndefined()
+  })
+})
+
+/** The problems rulesFor told, by the RulesError it threw. */
+const refused = (work: () => unknown): string[] => {
+  try {
+    work()
+  } catch (error) {
+    expect(error).toBeInstanceOf(RulesError)
+    return (error as RulesError).problems
+  }
+  throw new Error('expected problems')
+}
+
+describe('the top’s formats', () => {
+  it('tells a format no source holds, and none that one holds', () => {
+    const shared = { format: { 'users.account': 'iban', 'invoices.number': 'iban' } }
+    const forShop = rulesFor(schema, { shared, source: 'shop' })
+    expect(forShop.format.get('users.account')).toBe('iban')
+    expect(unheldRules(shared, [forShop.applied])).toEqual(['sosie.yml: invoices.number is not a field of any source.'])
+  })
+
+  it('says how format is written when it is no mapping, at the top or under a source, and says it once', () => {
+    for (const format of [['users.account'], 'iban', null]) {
+      expect(refused(() => rulesFor(schema, { shared: { format }, source: 'shop' })), String(format)).toEqual(['sosie.yml: format maps fields to formats, such as users.handle: username'])
+      expect(refused(() => rulesFor(schema, { own: { format }, source: 'shop' })), String(format)).toEqual(['sosie.yml: sources.shop: format maps fields to formats, such as users.handle: username'])
+      expect(unheldRules({ format }, [])).toEqual([])
+    }
+  })
+
+  it('keeps a top format for a source that learns its fields, quietly, and holds it there', () => {
+    const shared = { format: { 'user.handle': 'username' } }
+    const learned = rulesFor({ entities: [] }, { shared, source: 'api', learns: true })
+    expect(learned.format.get('user.handle')).toBe('username')
+    expect(learned.warnings).toEqual([])
+    expect(unheldRules(shared, [learned.applied])).toEqual([])
+    // A source that knows its fields holds no format for one it does not have.
+    const known = rulesFor({ entities: [] }, { shared, source: 'shop' })
+    expect(known.format.size).toBe(0)
+    expect(unheldRules(shared, [known.applied])).toEqual(['sosie.yml: user.handle is not a field of any source.'])
   })
 })

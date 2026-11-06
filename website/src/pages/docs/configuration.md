@@ -7,9 +7,9 @@ lead: One file, sosie.yml, says everything Sosie reads and how it fakes it. sosi
 
 ## sosie.yml
 
-The only configuration there is: no flags, no variables of Sosie's own. It lives in the folder you start Sosie in,
-is committed with the code and reviewed like code. It names every source of the project, a database or an API, each
-by a name of your own.
+The only configuration there is: no flags, and no variable of Sosie's own but `SOSIE_HOME`, where its store is. It
+lives in the folder you start Sosie in, is committed with the code and reviewed like code. It names every source of
+the project, a database or an API, each by a name of your own.
 
 ```yaml
 # For every source; a source may set its own.
@@ -54,7 +54,7 @@ your first source and writes one, as `npx @sosie/cli init` does.
 | `port` | a source | the next free from 7674, in the order listed | `0` lets the system pick |
 | `host` | the top, or a source | `127.0.0.1` | Another address is allowed, with a warning: the endpoints have no password |
 | `max-rows` | the top, or a source | `1000` | Rows a query returns, and items of each list in an API's answer |
-| `timeout` | the top, or a source | `30` | Seconds a statement, a command or a request may run upstream, from 1 to 3600. The MCP tools wait 50 s at most either way |
+| `timeout` | the top, or a source | `30` | Seconds a statement, a command or a request may run upstream, from 1 to 3600. The MCP tools `request` and `graphql` wait 50 s at most either way; `query`, `find` and `aggregate` wait this long |
 | `pass` | the top, or a source | none | Fields whose values come back unchanged |
 | `format` | the top, or a source | none | Formats for fields Sosie cannot tell from their names |
 
@@ -74,9 +74,10 @@ npx @sosie/cli
 ```
 
 Only `upstream` and the values of `headers` read variables. `upstream` is always one whole variable, never a URL
-written out, not even in part: Sosie refuses one, so a file an agent can edit never sends your credentials to a host
-it chose. A header may hold text around its variable (`Bearer ${TOKEN}`): headers go only to their own source's
-upstream. Write `$$` for a `$`.
+written out, not even in part: Sosie refuses one, so a file an agent can edit never names a host. A header may hold
+text around its variable (`Bearer ${TOKEN}`): headers go only to their own source's upstream. An edit can still choose
+among your variables: point a source at another, or put one in a header. Review `sosie.yml` as you review code. Write
+`$$` for a `$`.
 
 ### Field ids
 
@@ -126,8 +127,9 @@ sosie.yml: users.nick is not a field of shop's users. A rule for one source goes
 ```
 
 A rule at the top that no source has the table for is an error too. A source that learns its fields as answers come,
-REST without a document and MongoDB, keeps a rule for a field it has not met, and applies it once it does: its own with
-a warning, so read the warnings Sosie starts with. `entity.*` holds for the fields such a source meets later too.
+REST without a document and MongoDB, keeps a rule for a field it has not met, and applies it once it does, with a
+warning: one of its own, or one at the top that no source knows yet. Read the warnings Sosie starts with, as one may be
+a typo. `entity.*` holds for the fields such a source meets later too.
 
 ## The commands
 
@@ -151,7 +153,7 @@ not the project's.
 ## Upgrading from 0.3 and earlier
 
 `SOSIE_UPSTREAM`, `SOSIE_UPSTREAM_HEADERS`, `SOSIE_OPENAPI`, `SOSIE_GRAPHQL_SCHEMA` and the flags `--port`, `--host`,
-`--rules`, `--max-rows` and `--timeout` are gone: each is a key of `sosie.yml`. With `SOSIE_UPSTREAM` still set, this
+`--rules` and `--max-rows` are gone: each is a key of `sosie.yml`. With `SOSIE_UPSTREAM` still set, this
 reads it:
 
 ```yaml
@@ -160,7 +162,7 @@ sources:
     upstream: ${SOSIE_UPSTREAM}
 ```
 
-Sosie says so when one of them is still set, and a flag given says where it went.
+Sosie says so when one of them is still set and `sosie.yml` does not name it, and a flag given says where it went.
 
 ## Several projects
 

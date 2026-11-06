@@ -465,7 +465,7 @@ export class Session {
     this.#header(columns, sent)
     for (const values of result.rows ?? []) this.#write(row(fakeRow(values, plans, this.ctx.faker, sent.text, sent.scope)))
     if (result.capped) {
-      this.#notes.push(`Sosie returned the first ${this.ctx.maxRows} rows; the rest were cut. Narrow the query, or start Sosie with a higher --max-rows.`)
+      this.#notes.push(`Sosie returned the first ${this.ctx.maxRows} rows; the rest were cut. Narrow the query, or raise max-rows in sosie.yml.`)
     }
     this.#write(eof(status, this.#notes.length))
   }

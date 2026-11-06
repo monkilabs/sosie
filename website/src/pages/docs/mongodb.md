@@ -25,7 +25,7 @@ npx @sosie/cli
   ✓ app  db.internal:27017/app, read-only: 12 collections, 1 view
   ✓ Every value is faked
 
-  app:                      mongodb://127.0.0.1:7674/app?directConnection=true
+  app:                       mongodb://127.0.0.1:7674/app?directConnection=true
 ```
 
 The address takes no user and no password: a client that sends a login is told so. It listens on `127.0.0.1` and

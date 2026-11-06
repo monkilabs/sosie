@@ -54,7 +54,6 @@ export const mongodb: Source = {
       schema: catalog.schema,
       label,
       summary: counts.join(', '),
-      client: 'mongosh',
       learns: true,
       warnings,
       serve: (listen, faker, learned) => {

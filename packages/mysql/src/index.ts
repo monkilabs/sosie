@@ -42,7 +42,6 @@ export const mysql: Source = {
       schema: catalog.schema,
       label,
       summary: counts.join(', '),
-      client: 'mysql',
       warnings: [
         ...(catalog.admin
           ? ['The login is an administrator, or may read files (FILE). Sosie refuses what it knows of that, but a read-only login is safer.']

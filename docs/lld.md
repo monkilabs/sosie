@@ -92,6 +92,7 @@ packages/
     schema.ts        pg_catalog to the neutral schema
     results.ts       which field each result column came from
     arrays.ts        Postgres array text
+    ranges.ts        range and multirange text: read, written, bounds in order
     binary.ts        Postgres's binary format, for the types Sosie writes from their text
     mcp.ts           the query tool
   mysql/src/
@@ -145,6 +146,8 @@ packages/
     init.ts          sosie init: the first source, asked for at a hidden prompt, and the sosie.yml that names it
     sources.ts       the sources this CLI knows
     prompt.ts        the prompts, hidden or not
+    print.ts         the ✓, ! and ✗ lines, and the two columns of addresses
+    serve.ts         each source on its port: the one given, or the next free from 7674 that no source was given
     listen.ts        whether an address is this machine's only, for the warning on host
   */test/            each package's unit tests
 plugins/sosie/       the plugin: the MCP server, the skill, the hooks for Claude Code, Copilot CLI and VS Code
@@ -172,7 +175,7 @@ export interface Source {
   /** Whether this source reads this upstream, when sosie.yml gives it no kind; or serves this endpoint address. */
   matches(url: URL): boolean
   /** The keys of a source in sosie.yml it takes beyond every source's: 'headers', 'schema'. Any other is an error. */
-  readonly settings?: ('headers' | 'schema')[]
+  readonly settings?: readonly ('headers' | 'schema')[]
   /** Connect read-only and describe the upstream in neutral terms. */
   connect(upstream: URL, options: SourceOptions): Promise<Connection>
   /** MCP tools beside the core's describe: Postgres adds query. They talk to the running endpoint, never to the upstream. */
@@ -198,8 +201,6 @@ export interface Connection {
   readonly warnings: string[]
   /** The schema grows as values come (an API without a document, MongoDB): sosie.yml may name fields not met yet. */
   readonly learns?: boolean
-  /** The tool a developer would point at the address, for the terminal: 'psql', 'curl'. */
-  readonly client?: string
   /** Start the endpoint clients use. Every value it returns goes through the Faker. One that `learns` tells `learned` its schema as it grows. */
   serve(listen: { host: string; port: number }, faker: Faker, learned?: (schema: Schema) => void): Promise<Endpoint>
   close(): Promise<void>
@@ -267,7 +268,7 @@ export type FieldType =
   | { kind: 'enum'; labels: string[] }
   | { kind: 'date' | 'datetime' | 'time' }
   | { kind: 'interval' }                             // a duration: Postgres's interval
-  | { kind: 'bits' }                                 // 0s and 1s: Postgres's bit and varbit
+  | { kind: 'bits'; length?: number }               // 0s and 1s: Postgres's bit and varbit, MySQL's BIT; length, where the type fixes it
   | { kind: 'uuid' | 'bytes' | 'ip' | 'objectid' }  // objectid: MongoDB's, as 24 hex digits
   | { kind: 'json' }
   | { kind: 'array'; of: FieldType }
@@ -293,15 +294,17 @@ settled; until 1.0 it may change between minor versions.
 
 `--help` (`-h`) and `--version` (`-v`) are the only flags: everything else is in `sosie.yml`. Exit codes: 0; 1 for a
 failure (a problem in `sosie.yml`, a source that cannot connect, a port in use, a real value found); 2 for a usage
-error (an unknown command or flag, no `sosie.yml` and no terminal to write one in, a `scan` with nothing to scan or no
-store to compare with). The command is the first word that is no flag.
+error (an unknown command or flag; a flag an earlier version took, which says where in `sosie.yml` it went; no
+`sosie.yml` and no terminal to write one in; a variable `sosie.yml` names, not set, and no terminal to type it;
+`sosie init` where `sosie.yml` names its sources already; a prompt cancelled or ended; a `scan` with nothing to scan
+or no store to compare with). The command is the first word that is no flag.
 
 The connection strings are never arguments, which show in shell history and in the process list, where an agent can
 read them; nor written in `sosie.yml`, which is committed. `sosie.yml` names the variables that hold them, and Sosie
 reads them from the terminal it starts in, or asks for each at a hidden prompt. Sosie reads no variable of its own but
 `SOSIE_HOME`, where the store is, which is the machine's and not the project's. `SOSIE_UPSTREAM`,
 `SOSIE_UPSTREAM_HEADERS`, `SOSIE_OPENAPI` and `SOSIE_GRAPHQL_SCHEMA`, which earlier versions read, are not: one left
-set gets a line saying what in `sosie.yml` replaces it.
+set that `sosie.yml` does not name gets a line saying what in `sosie.yml` replaces it.
 
 ```
   ✓ shop     db.internal:5432/shop, read-only: 42 tables, 3 views
@@ -318,6 +321,11 @@ set gets a line saying what in `sosie.yml` replaces it.
 
 A `host` other than this machine is allowed, for running Sosie on a host of its own, with a warning: the endpoints
 have no password, so anyone who can reach one can query the fakes.
+
+A command ends by setting its exit code and letting Node's event loop run dry, never by `process.exit()`: that joins
+V8's own threads while one may be waiting on the main thread, and can hang for good (nodejs/node#54918). A command
+that left a handle open is ended by `process.exit()` a second later all the same, on a timer that keeps nothing
+waiting.
 
 **`sosie init`** asks for the first source's connection string at a hidden prompt, says what it found there (`A
 Postgres database: db.internal:5432/shop`), and asks for a name for the source (the database's name, or the API's
@@ -376,12 +384,12 @@ sources:
 | `sources` | the top | none: at least one | Each source by its name: lowercase letters, digits, `-` and `_`, a letter first |
 | `upstream` | a source | none: required | `${NAME}`: the variable that holds the connection string or base URL, whole |
 | `kind` | a source | from the URL | `postgres`, `mysql`, `mongodb`, `rest`, `graphql`: for a URL that does not say, such as GraphQL at `/query` |
-| `schema` | a source that takes one | REST: the API's document, if it serves one; GraphQL: introspection | A file, its path from `sosie.yml`'s folder, or a URL: an OpenAPI document, or GraphQL SDL or an introspection result as JSON |
+| `schema` | a source that takes one | REST: the API's document, if it serves one; GraphQL: introspection | A file, its path from `sosie.yml`'s folder, or a URL: an OpenAPI document, or GraphQL SDL or an introspection result as JSON. A URL at the upstream's origin is read with its `headers`; one elsewhere without them |
 | `headers` | a source that takes them | none | Headers Sosie sends the upstream, each `Name: value`; a value may hold `${NAME}`s among its text |
 | `port` | a source | the next free from 7674, in the order listed | 0 to 65535; 0 lets the system pick |
 | `host` | the top, or a source | `127.0.0.1` | Where the endpoints listen |
 | `max-rows` | the top, or a source | 1000 | Rows a query returns, items of each list in an API's answer; at least 1 |
-| `timeout` | the top, or a source | 30 | Seconds a statement, a command or a request may run upstream, from 1 to 3600. The MCP tools wait 50 s at most either way, less than MCP clients wait for a tool |
+| `timeout` | the top, or a source | 30 | Seconds a statement, a command or a request may run upstream, from 1 to 3600. `request` and `graphql` wait 50 s at most either way, less than MCP clients wait for a tool; `query`, `find` and `aggregate` wait the source's `timeout` |
 | `pass` | the top, or a source | none | Fields whose values pass unchanged |
 | `format` | the top, or a source | none | Formats for fields Sosie cannot tell from their names |
 
@@ -390,16 +398,21 @@ not set, or empty, is asked for at a hidden prompt, by its name, or without a te
 at once. Only `upstream` and the values of `headers` read variables; a `${` anywhere else is an error, and `$$`
 writes a `$`. `upstream` is one whole variable, never a URL written out, not even in part: an agent can edit the file,
 and a host written there beside a password from the environment would send the password to a host it chose.
-`headers` go only to their source's own upstream, so text around a variable (`Bearer ${TOKEN}`) is safe. A value read
-is never printed; one that is not a URL is said to be none, without it.
+`headers` go only to their source's own upstream, so text around a variable (`Bearer ${TOKEN}`) is safe. An edit can
+still choose among the terminal's variables: point a source at another, or put one in a header, which an HTTP source
+sends as it connects, before the banner names its host. A value read is never printed; one that is not a URL is said
+to be none, without it.
 
-**Sources.** A key a source does not take is an error that says why: `sosie.yml: sources.shop.headers: shop is a
-postgres source, which takes no headers.` A source declares the keys it takes beyond every source's (REST and GraphQL
+**Sources.** A name is at most 40 characters, and two sources may not share a `port`. A key a source does not take
+is an error that says why: `sosie.yml: sources.shop.headers: shop is a postgres source, which takes no headers.` A
+source declares the keys it takes beyond every source's (REST and GraphQL
 take `headers` and `schema`), so a new kind of source needs no change here.
 
 **Rules.** A source's rules are the top's and its own; its own `format` for a field wins over the top's. Its own are
 checked against its schema, the top's against every source's schema: they hold where the table or collection exists,
-and only a rule that matches no source's is an error. A table that exists without the field is an error there,
+and only a rule that matches no source's is an error. A source that learns its fields keeps a top rule it cannot
+place, as it may name a field not met yet; one that no source knows is said at start, with a warning, as it may be a
+typo: `sosie.yml: user.emial is not known yet: it applies once Sosie meets it.` A table that exists without the field is an error there,
 since the rule is then a typo or belongs under one source: `sosie.yml: users.nickname is not a field of shop's
 users. Did you mean users.nick_name? A rule for one source goes under it.`
 
@@ -408,9 +421,11 @@ Formats: `email`, `phone`, `first_name`, `last_name`, `full_name`, `street`,
 `text`, `shape`.
 
 An unknown key, source, entity, field or format is an error at start-up that names it, so a typo never passes data
-silently. Every problem is listed at once: `sosie.yml: users.emial is not a field. Did you mean users.email?`
+silently. Every problem is listed at once, each where it is: `sosie.yml: sources.shop: users.emial is not a field. Did
+you mean users.email?` A sosie.yml that names no sources, and has nothing else wrong, is written by `sosie init`;
+one with anything else wrong, a misspelt `sources` among it, is told instead.
 
-A field that shares another's values cannot pass alone:
+A field that shares another's values cannot pass alone, told where its rule is, at the top or under its source:
 `sosie.yml: orders.user_id passes but users.id, whose values it shares, does not. List both or neither.`
 
 Nor can what names no entity, as an API's error body (`*.error`), or Sosie's own
@@ -424,13 +439,17 @@ both, and a source added to `sosie.yml` never changes another's fakes. A rule at
 
 1. Read `./sosie.yml`, or write it with `sosie init`; check every setting, and list every problem at once.
 2. Read each `${NAME}`: from the environment, or at a hidden prompt.
-3. For each source in the order listed: pick the source its `kind` or URL says; `connect`, which reads its catalog
-   on a read-only connection and returns the neutral schema. One that cannot connect closes those that did, and stops
-   Sosie, named: `✗ crm: Cannot connect to crm.internal:3306/crm: …`.
-4. Check the rules against each schema. For a source that learns its fields, a field not met yet is kept, with a
-   warning, and `entity.*` holds for every field of the entity as it is met.
-5. Open the store, creating its key on first use: one store, one Faker per source over it.
-6. `serve` each on its port, the given ones taken first; write the entry under `running/`; print the addresses.
+3. Pick each source's kind, by its `kind` or its URL, and check the keys it takes: every problem, of every source, at
+   once.
+4. `connect` each, in the order listed: it reads its catalog on a read-only connection and returns the neutral
+   schema. One that cannot connect closes those that did, and stops Sosie, named:
+   `✗ crm: Cannot connect to crm.internal:3306/crm: …`.
+5. Check the rules against each schema, every problem at once, a top rule no source holds among them. For a source
+   that learns its fields, a field not met yet is kept, with a warning, and `entity.*` holds for every field of the
+   entity as it is met.
+6. Open the store, creating its key on first use: one store, one Faker per source over it.
+7. `serve` each, in the order listed, on its port, or on the next free from 7674 that no source was given; 100 are
+   tried before Sosie gives up. Write the entry under `running/`; print the addresses.
 
 ## Core: domains
 
@@ -529,7 +548,8 @@ CREATE INDEX value_scan ON value (mac_ci) WHERE scannable = 1;
   one more digit for every 16 draws that were taken. After 64 taken draws the next is kept, taken or not, so a domain with few
   fakes to draw from (first names, in a large table) can give two real values one fake; a lookup by it, naming
   two, leaves it as written. Other numbers only need to be consistent, so two real values may share a fake.
-- **Booleans, enums and bytes** are not stored; their fakes come from the key.
+- **Booleans, single bits, enums and bytes** are not stored; their fakes come from the key, and a boolean's or a
+  bit's is turned back by the same flip.
 - **Lookup.** A fake compared with a field is looked up in that field's domain.
   A fake compared with something Sosie cannot place is used when it names
   exactly one real value across all domains, and otherwise left as written.
@@ -570,8 +590,8 @@ same value name whichever the index met last.
 
 ## Core: `sosie mcp`
 
-The core serves `describe` from the neutral schemas under `running/`, one per
-running Sosie; each source adds its own tools, which run inside `sosie mcp` and
+The core serves `describe` from the neutral schemas under `running/`: an entry
+per running Sosie, a schema per source in it; each source adds its own tools, which run inside `sosie mcp` and
 talk to a running endpoint of their kind, so the MCP process never holds
 credentials or real values. Each takes an optional `source`, by its name as `describe` lists it; without one, the
 only source of the tool's kind. With several of that kind, the tool names them and asks for one: an agent should
@@ -588,9 +608,10 @@ never read the wrong database without knowing.
 
 Sources that share a tool's name share one tool: `query` goes to the Postgres or MySQL source named, and runs as
 that source's. Several Sosies (another project's) may run at once: their sources are listed together, the newest
-Sosie's first, and a name two of them share goes to the newest. When Sosie is not running, every tool says so, and how to start it. A tool for a
-kind that is not running says which kinds are. Every tool is marked read-only. A MongoDB Sosie, and a REST Sosie without a document, learn their fields from the
-answers, and write their entries again as they do. For REST, `describe` lists each entity a collection names that the API answered with a list,
+Sosie's first. A name two of them share goes to neither: the tool says where each is, and to stop one or rename
+its source. When Sosie is not running, every tool says so, and how to start it. A tool for a
+kind that is not running says which kinds are. Every tool is marked read-only. A MongoDB source, and a REST source without a document, learn their fields from the
+answers, and their Sosie writes its entry again as they do. For REST, `describe` lists each entity a collection names that the API answered with a list,
 with the fields met in it so far. An entity named after another word a client typed (a tenant's slug in
 `/jones/profile`) is not listed: such a word is never shown to another request. Until the agent has listed a
 collection, such an API is read by its paths.
@@ -656,7 +677,7 @@ file in its namespace, for an Agent Plugin, and Copilot CLI only `hooks/hooks.js
 
 | Hook | Reads | Does |
 | --- | --- | --- |
-| Session start, within 10 s | `$SOSIE_HOME/running/`, keeping the entries whose process is alive; `sosie.yml` in the session's folder; `scans/` in the plugin's data | Tells the agent each running Sosie's kind and address, or, with a `sosie.yml` and none running, to ask the developer to start one. Reports what scans of this project's sessions found that no session has reported yet: a scan keeps its session's folder, and one that has none (an older one, or a session without a `cwd`) is reported in any. Says nothing when there is nothing to say. For a subagent, only which Sosies run: the report is the developer's |
+| Session start, within 10 s | `$SOSIE_HOME/running/`, keeping the entries whose process is alive; `sosie.yml` in the session's folder; `scans/` in the plugin's data | Tells the agent each running source, by its name, kind and address (`shop (postgres) at postgres://localhost:7674/shop`), or, with a `sosie.yml` and none running, to ask the developer to start one. Reports what scans of this project's sessions found that no session has reported yet: a scan keeps its session's folder, and one that has none (an older one, or a session without a `cwd`) is reported in any. Says nothing when there is nothing to say. For a subagent, only which Sosies run: the report is the developer's |
 | Session end, or VS Code's `Stop` | The session's files: its transcript, and the folder beside it, named the same, where Claude Code keeps subagent transcripts and long tool results; or Copilot CLI's session folder | When a store exists, takes the session's lock, created only if none is there, starts `scan.mjs` in a process of its own with the session's folder, puts its pid in the lock, and returns: two turns that end together start one scan. While a scan of the session holds the lock, asks it to run once more instead; a lock no live scan holds is taken over. Nothing for a subagent |
 
 A hook gets little time, and a scan reads the whole store, so the scan runs on its own and the next session reports
@@ -881,7 +902,7 @@ upstream for when the client did not.
 
 A type is known by its send function, read from `pg_type` at start-up: a
 domain sends as its base type, an enum as its label, an array by its element.
-Written: every type Sosie fakes but `money`, and the catalog's own a driver reads: the
+Written: every type Sosie fakes but `money`, ranges and multiranges, and the catalog's own a driver reads: the
 integers, `oid`, `xid`, `float4` and `float8`, `numeric`, the text types,
 `name`, `"char"`, `bytea`, `bool`, `uuid`, `json` and `jsonb`, `date`, `time`,
 `timetz`, `timestamp`, `timestamptz`, `interval`, `bit`, `varbit`, `inet`, `cidr`, `pg_lsn`,
@@ -1173,7 +1194,7 @@ only. A login (`saslStart`, `authenticate`) gets `AuthenticationFailed`: Sosie t
 
 ### Upstream
 
-One `MongoClient` for the Sosie, its heartbeats polled, and an upstream session (`ClientSession`) per client session:
+One `MongoClient` per MongoDB source, its heartbeats polled, and an upstream session (`ClientSession`) per client session:
 per `lsid` a driver sends, ended by `endSessions` or after 30 minutes unused, as MongoDB ends its own; a connection
 that sends none has one of its own, ended with it. A command is sent through `db.command` in that session, with the client's session, cluster and
 read-preference fields (`lsid`, `txnNumber`, `$clusterTime`, `$readPreference`, `apiVersion`, any other `$` field)
@@ -1546,7 +1567,9 @@ of them is faked.
 
 By introspection, with Sosie's credentials, at start-up. An API with
 introspection off is read from the source's `schema`: its SDL, or an
-introspection result as JSON, in a file. When it is given, it is the schema, and Sosie does not ask the API at
+introspection result as JSON, in a file or at a URL. A URL at the API's origin is fetched with the source's headers
+and no redirect followed, as they would go along; one elsewhere without them, and anything but a 200 is refused.
+When it is given, it is the schema, and Sosie does not ask the API at
 start-up: wrong credentials, or an API out of reach, show at the first query. Each object and interface type, except the mutation and subscription types, is an entity;
 each field that holds a scalar or an enum is a field; one that holds another object
 is that object's row. Built-in scalars map to neutral types, and custom ones by
@@ -1739,8 +1762,11 @@ source learns. Format domains make a person's email the same fake from the datab
   the wrong type and through introspection: no canary may come back.
 - **The CLI.** The built CLI is run: start one source, and a database, a REST API and a GraphQL API in one Sosie, from
   a `sosie.yml` and the variables it names; MCP over stdio, each source by its name; `scan`, Ctrl+C, and the errors a
-  developer meets first, `sosie.yml`'s among them. `sosie init` is run through its prompts as a terminal would answer
-  them.
+  developer meets first, `sosie.yml`'s among them; each flag, and each that an earlier version took; SIGTERM. It is run
+  as in a terminal too, its input a TTY: the first run writes `sosie.yml` and starts with the string typed, and a
+  variable not set is asked for. `sosie init` and the prompts are run with what a terminal sends: a CRLF, whole or in
+  two pieces, Ctrl+C, a backspace, raw mode on and off. Ports are tested on real sockets: a given one kept for its
+  source, the next free taken, and one that cannot listen closing those that did.
 - **The dependency rule.** A test reads the imports and manifests.
 - **The plugin.** `test/plugin.test.ts`: the plugin's version and the CLI its server runs are `@sosie/cli`'s, in its
   source and in Claude Code's files, and its hooks read the `running/` entries the core writes. Each assistant's hooks
@@ -1753,7 +1779,11 @@ source learns. Format domains make a person's email the same fake from the datab
   planted value, and the next session reported it. A CI job runs
   `opencastle plugin check`, which loads it as each assistant would, and checks that the marketplaces list it as it
   is. The hooks were run by hand against a running Sosie: what Claude Code would send them, and what they answer.
-- **CI.** PostgreSQL 15, 16, 17 and 18 on Node 26, and 18 on Node 24; each with MySQL 8.4 or 9 and MongoDB 6.0, 7.0
+- **A command that never ends.** Each run of the built CLI has 20 s. One that has not ended is asked for Node's
+  diagnostic report, its JavaScript stack and what keeps its event loop waiting, and on Linux for each thread's state
+  from `/proc`, before it is killed: the test fails saying where it was, rather than holding the run.
+- **CI.** Each test job has 15 minutes, the plugin's 10, so a run that hangs fails rather than waits for GitHub's
+  limit. PostgreSQL 15, 16, 17 and 18 on Node 26, and 18 on Node 24; each with MySQL 8.4 or 9 and MongoDB 6.0, 7.0
   or 8.0 beside it (8.0 on Ubuntu 22.04, as mongod 8.0 does not start on the newer kernel); and the plugin's check.
 
 ## Defaults
@@ -1771,8 +1801,9 @@ source learns. Format domains make a person's email the same fake from the datab
 
 - Prisma's own schema engine (`prisma db pull`, migrations) is not checked:
   migrations write, and `db pull` reads the catalogs, which pass.
-- Postgres types without a neutral type come back `NULL`: `xml` and `tsvector`. An array of ranges is shaped,
-  not faked bound by bound; a range compared in a query is used as written.
+- Postgres types without a neutral type come back `NULL`, such as `xml`, `tsvector`, `tsquery`, `macaddr` and the
+  geometric types. An array of ranges is shaped, not faked bound by bound; a range compared in a query is used as
+  written.
 - MySQL: MariaDB, refused at start-up.
 - MongoDB: a fake in a `$lookup`'s `let`, an index bound (`min`, `max`, `hint` by value), or what `$expr` computes is used as
   written; Compass and the drivers other than Node's are not checked; a cursor cut at `max-rows` says so only in the

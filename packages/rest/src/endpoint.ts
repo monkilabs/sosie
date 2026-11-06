@@ -9,7 +9,7 @@ export interface RestContext {
   upstream: RestUpstream
   api: Api | undefined
   faker: Faker
-  /** Items of a list at most, as --max-rows. */
+  /** Items of a list at most: the source's max-rows. */
   maxItems: number
   /** Sosie's own credentials for the API, as `secretParts` gives them. */
   secrets: readonly string[]
@@ -284,7 +284,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     }
     const faked = await fakeBody(body, read, fake)
     publish()
-    const notice = `Sosie returned the first ${ctx.maxItems} items of a list; the rest were cut. Narrow the request, or start Sosie with a higher --max-rows.`
+    const notice = `Sosie returned the first ${ctx.maxItems} items of a list; the rest were cut. Narrow the request, or raise max-rows in sosie.yml.`
     return send(res, answer.status, faked.body, faked.cut ? { 'sosie-notice': notice } : {})
   }
 

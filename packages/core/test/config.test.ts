@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ConfigError, interpolate, readConfig, settingsProblems, variableFor, variablesOf } from '../src/config.js'
-import { rulesFor, RulesError, unheldRules } from '../src/rules.js'
+import { rulesFor, RulesError, unheldRules, unmetRules } from '../src/rules.js'
 import type { Schema } from '../src/source.js'
 
 const KINDS = [{ kind: 'postgres' }, { kind: 'mysql' }, { kind: 'rest', settings: ['headers', 'schema'] }, { kind: 'graphql', settings: ['headers', 'schema'] }]
@@ -60,6 +60,18 @@ sources:
     expect(interpolate('${A}-${B}', { A: 'x', B: 'y' })).toBe('x-y')
   })
 
+  it('asks for no variable a $$ writes out as text', () => {
+    const config = read('sources:\n  billing:\n    upstream: ${API_URL}\n    headers:\n      X-Note: "price $${AMOUNT}, $$${TOKEN}"\n')
+    expect(variablesOf(config)).toEqual(['API_URL', 'TOKEN'])
+    expect(interpolate(config.sources[0]!.headers['X-Note']!, { TOKEN: 'abc' })).toBe('price ${AMOUNT}, $abc')
+  })
+
+  it('sends a header as it is written, a number or a word YAML would read as another type among them', () => {
+    const config = read('sources:\n  billing:\n    upstream: ${API_URL}\n    headers:\n      X-Version: 1.0\n      X-Mask: 0x1F\n      X-Debug: true\n      X-Zip: 01234\n')
+    expect(config.sources[0]!.headers).toEqual({ 'X-Version': '1.0', 'X-Mask': '0x1F', 'X-Debug': 'true', 'X-Zip': '01234' })
+    expect(problems('sources:\n  billing:\n    upstream: ${API_URL}\n    headers:\n      X-Empty:\n')).toEqual(['sosie.yml: sources.billing.headers.X-Empty has no value.'])
+  })
+
   it('names the variable a source would be kept in', () => {
     expect(variableFor('shop')).toBe('SHOP_URL')
     expect(variableFor('billing-api')).toBe('BILLING_API_URL')
@@ -116,10 +128,82 @@ sources:
     ])
   })
 
-  it('says a file without sources names none, and how to add one', () => {
-    for (const text of ['', 'pass: [orders.status]\n', 'sources: {}\n']) {
-      expect(problems(text)).toEqual(['sosie.yml names no sources. Add one under sources:, or run sosie init.'])
+  it('says of each thing written wrong how it is written', () => {
+    const shop = 'sources:\n  shop:\n    upstream: ${SHOP_URL}\n'
+    const billing = (more: string) => `sources:\n  billing:\n    upstream: \${BILLING_URL}\n${more}`
+    for (const [text, problem] of [
+      ['sources: [\n', 'sosie.yml: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1.'],
+      ['- shop\n', 'sosie.yml: expected keys such as sources, pass and format.'],
+      ['shop\n', 'sosie.yml: expected keys such as sources, pass and format.'],
+      ['sources: [shop]\n', 'sosie.yml: sources maps each source by its name to its settings, such as shop: { upstream: ${SHOP_URL} }.'],
+      ['sources:\n  shop: ${SHOP_URL}\n', 'sosie.yml: sources.shop holds its settings, at least its upstream: shop: { upstream: ${SHOP_URL} }.'],
+      [billing('    schema: ""\n'), 'sosie.yml: sources.billing.schema is a file, by its path from sosie.yml, or a URL.'],
+      [billing('    schema: " "\n'), 'sosie.yml: sources.billing.schema is a file, by its path from sosie.yml, or a URL.'],
+      [billing('    headers: [Authorization]\n'), 'sosie.yml: sources.billing.headers maps each header to its value, such as Authorization: Bearer ${TOKEN}.'],
+      [billing('    headers:\n      X Team: core\n'), 'sosie.yml: sources.billing.headers: a header is named in letters, digits and dashes.'],
+      [billing('    headers:\n      X-Teams: [core, web]\n'), 'sosie.yml: sources.billing.headers.X-Teams is a value on one line.'],
+      [billing('    headers:\n      X-Team: { name: core }\n'), 'sosie.yml: sources.billing.headers.X-Team is a value on one line.'],
+      [billing('    headers:\n      Authorization: Bearer ${TOKEN\n'), 'sosie.yml: sources.billing.headers.Authorization names a variable as ${NAME}: letters, digits and _.'],
+      [`host: ""\n${shop}`, 'sosie.yml: host is an address to listen on, such as 127.0.0.1.'],
+      [`max-rows: 0\n${shop}`, 'sosie.yml: max-rows is a whole number from 1, not 0.'],
+      [`timeout: 3601\n${shop}`, 'sosie.yml: timeout is a whole number from 1 to 3600, not 3601.'],
+      [`database: shop\n${shop}`, 'sosie.yml: database is not a key. Keys: sources, pass, format, host, max-rows, timeout.'],
+      [`${shop}    database: shop\n`, 'sosie.yml: sources.shop.database is not a key of a source. Keys: upstream, kind, schema, headers, port, host, max-rows, timeout, pass, format.'],
+      [`${shop}    kind: 5\n`, 'sosie.yml: sources.shop.kind is one of postgres, mysql, rest, graphql.'],
+    ] as const) {
+      expect(problems(text), text).toEqual([problem])
     }
+  })
+
+  it('names every problem of each source at once, going on past one it cannot read', () => {
+    expect(
+      problems(`
+host: ""
+max-rows: 0
+sources:
+  shop: \${SHOP_URL}
+  billing:
+    upstream: \${BILLING_URL}
+    kind: 5
+    schema: ""
+    headers:
+      X Team: core
+      X-Teams: [core, web]
+      Authorization: Bearer \${TOKEN
+    timeout: 3601
+`),
+    ).toEqual([
+      'sosie.yml: host is an address to listen on, such as 127.0.0.1.',
+      'sosie.yml: max-rows is a whole number from 1, not 0.',
+      'sosie.yml: sources.shop holds its settings, at least its upstream: shop: { upstream: ${SHOP_URL} }.',
+      'sosie.yml: sources.billing.kind is one of postgres, mysql, rest, graphql.',
+      'sosie.yml: sources.billing.schema is a file, by its path from sosie.yml, or a URL.',
+      'sosie.yml: sources.billing.headers: a header is named in letters, digits and dashes.',
+      'sosie.yml: sources.billing.headers.X-Teams is a value on one line.',
+      'sosie.yml: sources.billing.headers.Authorization names a variable as ${NAME}: letters, digits and _.',
+      'sosie.yml: sources.billing.timeout is a whole number from 1 to 3600, not 3601.',
+    ])
+  })
+
+  it('says a file without sources names none, and how to add one', () => {
+    const unwritten = (text: string) => {
+      try {
+        read(text)
+      } catch (error) {
+        return (error as ConfigError).unwritten
+      }
+    }
+    for (const text of ['', 'pass: [orders.status]\n']) {
+      expect(problems(text)).toEqual(['sosie.yml names no sources. Add one under sources:, or run sosie init.'])
+      expect(unwritten(text)).toBe(true)
+    }
+    // sosie init writes no second sources key: a source goes under the one there.
+    for (const text of ['sources:\n', 'sources: {}\n']) {
+      expect(problems(text)).toEqual(['sosie.yml has a sources: key with none under it. Add one there, such as shop: { upstream: ${SHOP_URL} }.'])
+      expect(unwritten(text)).toBe(false)
+    }
+    // Something else wrong is told first, never written around.
+    expect(unwritten('sourcs:\n  app:\n    upstream: ${APP_URL}\n')).toBe(false)
   })
 
   it('refuses a key a source’s kind does not take, saying why', () => {
@@ -132,6 +216,17 @@ sources:
     ])
   })
 })
+
+/** The problems rulesFor told, by the RulesError it threw. */
+const refused = (work: () => unknown): string[] => {
+  try {
+    work()
+  } catch (error) {
+    if (error instanceof RulesError) return error.problems
+    throw error
+  }
+  throw new Error('expected problems')
+}
 
 describe('rules for each source', () => {
   const shop: Schema = {
@@ -155,17 +250,13 @@ describe('rules for each source', () => {
 
   it('tells a top rule no source holds, and a typo in a table that is there', () => {
     const shared = { pass: ['order.status'], format: { 'users.nick': 'username' } }
-    expect(() => rulesFor(shop, { shared, source: 'shop' })).toThrow(
-      new RulesError(["sosie.yml: users.nick is not a field of shop's users. A rule for one source goes under it."]),
-    )
+    expect(refused(() => rulesFor(shop, { shared, source: 'shop' }))).toEqual(["sosie.yml: users.nick is not a field of shop's users. A rule for one source goes under it."])
     const forCrm = rulesFor(crm, { shared: { pass: ['order.status'] }, source: 'crm' })
     expect(unheldRules({ pass: ['order.status'] }, [forCrm.applied])).toEqual(['sosie.yml: order.status is not a table of any source.'])
   })
 
   it('checks a source’s own rules against its schema alone', () => {
-    expect(() => rulesFor(crm, { own: { pass: ['contacts.regoin'] }, source: 'crm' })).toThrow(
-      new RulesError(['sosie.yml: sources.crm: contacts.regoin is not a field. Did you mean contacts.region?']),
-    )
+    expect(refused(() => rulesFor(crm, { own: { pass: ['contacts.regoin'] }, source: 'crm' }))).toEqual(['sosie.yml: sources.crm: contacts.regoin is not a field. Did you mean contacts.region?'])
   })
 
   it('keeps a top rule for a source that learns its fields, and holds it there', () => {
@@ -173,5 +264,42 @@ describe('rules for each source', () => {
     expect([...learned.pass]).toEqual(['orders.status'])
     expect(learned.warnings).toEqual([])
     expect(unheldRules({ pass: ['orders.status'] }, [learned.applied])).toEqual([])
+  })
+
+  it('warns of a top rule only a source that learns its fields kept: no source knows it, and it may be a typo', () => {
+    const shared = { pass: ['user.emial', 'contacts.region', 'invoice.*'], format: { 'user.handle': 'username' } }
+    const learned = rulesFor({ entities: [] }, { shared, source: 'api', learns: true })
+    const forCrm = rulesFor(crm, { shared, source: 'crm' })
+    expect(unheldRules(shared, [learned.applied, forCrm.applied])).toEqual([])
+    // contacts.region is crm's: known, so no word of it.
+    expect(unmetRules([learned, forCrm])).toEqual([
+      'sosie.yml: user.emial is not known yet: it applies once Sosie meets it.',
+      'sosie.yml: invoice.* is not known yet: it applies once Sosie meets it.',
+      'sosie.yml: user.handle is not known yet: it applies once Sosie meets it.',
+    ])
+  })
+
+  it('tells a field that passes without the one it shares values with where its rule is: the top, or the source', () => {
+    const linked: Schema = {
+      entities: [
+        { id: 'users', name: 'users', fields: [{ id: 'users.id', name: 'id', type: { kind: 'integer' } }] },
+        { id: 'orders', name: 'orders', fields: [{ id: 'orders.user_id', name: 'user_id', type: { kind: 'integer' }, references: 'users.id' }] },
+      ],
+    }
+    const broken = 'orders.user_id passes but users.id, whose values it shares, does not. List both or neither.'
+    expect(refused(() => rulesFor(linked, { shared: { pass: ['orders.user_id'] }, source: 'shop' }))).toEqual([`sosie.yml: ${broken}`])
+    expect(refused(() => rulesFor(linked, { own: { pass: ['orders.user_id'] }, source: 'shop' }))).toEqual([`sosie.yml: sources.shop: ${broken}`])
+  })
+
+  it('says which of the top’s rules a source holds even when its own are wrong, so all is told at once', () => {
+    const shared = { pass: ['contacts.region', 'order.status'] }
+    let error: unknown
+    try {
+      rulesFor(crm, { shared, own: { pass: ['contacts.regoin'] }, source: 'crm' })
+    } catch (e) {
+      error = e
+    }
+    expect(error).toBeInstanceOf(RulesError)
+    expect(unheldRules(shared, [(error as RulesError).applied!])).toEqual(['sosie.yml: order.status is not a table of any source.'])
   })
 })

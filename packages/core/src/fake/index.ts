@@ -424,6 +424,10 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
           case 'bytes':
           case 'unknown':
             return undefined
+          case 'bits':
+            // One bit is a flag, flipped as a boolean is and never stored: turned back by the same flip.
+            if (fakeValue === '0' || fakeValue === '1') return label(flip(fakeValue, plan.domain), fakeValue)
+          // falls through
           default: {
             const reals = store.reals(fakeValue, plan.domain)
             return reals.length === 1 ? record(reals[0]!, fakeValue) : undefined

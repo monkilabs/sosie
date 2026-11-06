@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { isSourceName, sourceNames, variableFor, type Source } from '@sosie/core'
+import { ConfigError, isSourceName, noSourcesProblem, readConfig, sourceNames, variableFor, type Source } from '@sosie/core'
 import { fail, ok } from './print.js'
 import { hiddenPrompt, prompt } from './prompt.js'
 
@@ -33,7 +33,14 @@ export async function init(file: string, terminal: Terminal, sources: Source[]):
   if (existing !== undefined) {
     const names = sourceNames(existing)
     if (names?.length) throw new Error(`sosie.yml names its sources already: ${names.join(', ')}. Add another under sources:.`)
-    if (names) throw new Error('sosie.yml has a sources: key with none under it. Add one there, such as shop: { upstream: ${SHOP_URL} }.')
+    // Anything else wrong is told, as starting tells it, and nothing written: a sources key misspelt would end up
+    // beside a second one. Not that it names no sources, or to run sosie init: that is what runs.
+    try {
+      readConfig(existing, file, sources)
+    } catch (error) {
+      if (!(error instanceof ConfigError)) throw error
+      if (!error.unwritten) throw new ConfigError(error.problems.filter((p) => p !== noSourcesProblem()))
+    }
   }
   const say = (line = '') => terminal.output.write(`${line}\n`)
   say()
@@ -71,7 +78,8 @@ export async function init(file: string, terminal: Terminal, sources: Source[]):
   }
 
   const block = `sources:\n  ${name}:\n    upstream: \${${variable}}\n`
-  writeFileSync(file, existing === undefined ? `${HEADER}${block}` : `${existing}${!existing || existing.endsWith('\n') ? '' : '\n'}\n${block}`)
+  // An empty sosie.yml is written as a new one is, with its header.
+  writeFileSync(file, !existing?.trim() ? `${HEADER}${block}` : `${existing}${existing.endsWith('\n') ? '' : '\n'}\n${block}`)
   say(ok(`Wrote sosie.yml: ${name}, its upstream read from \${${variable}}, never written there. Commit it.`))
   say(`    Set ${variable} in your terminal, and Sosie starts without asking for it.`)
   return { name, variable, value }
@@ -84,10 +92,14 @@ export function upstreamUrl(text: string): URL {
   if (/^mongodb:\/\/[^/?#]*,/.test(text)) {
     throw new Error('Give one host of the replica set, with its replicaSet option: mongodb://user:password@host:27017/database?replicaSet=rs0. The driver finds the others.')
   }
+  const none = new Error('That is not a URL. It looks like postgres://user:password@host:5432/database, or https://api.example.com/v1.')
+  // new URL() reads kim:secret@db, or localhost:5432/db, as a scheme and a path: the scheme said would quote the user
+  // name or the host. Every upstream has // after its scheme.
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) throw none
   try {
     return new URL(text)
   } catch {
-    throw new Error('That is not a URL. It looks like postgres://user:password@host:5432/database, or https://api.example.com/v1.')
+    throw none
   }
 }
 

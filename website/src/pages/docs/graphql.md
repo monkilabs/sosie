@@ -50,7 +50,8 @@ Without it, the URL goes to the REST source. Sosie never sends a `POST` to find 
 ## The schema
 
 By introspection, with Sosie's credentials, at start-up. An API with introspection off is read from the
-source's `schema`: a file with its SDL, or with an introspection result as JSON.
+source's `schema`: its SDL, or an introspection result as JSON, in a file or at a URL. A URL at the API's own origin is
+read with the source's `headers`, and Sosie follows no redirect from it; one elsewhere is read without them.
 
 - Each object and interface type is an entity; each field that holds a scalar or an enum is a field.
 - Custom scalars map by name: `DateTime`, `Date`, `UUID`, `JSON`, `BigInt` and the like. `Email` and `EmailAddress`

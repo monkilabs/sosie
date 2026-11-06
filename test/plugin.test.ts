@@ -121,6 +121,26 @@ describe('the plugin', () => {
       expect(hooks.cli()).toBe(`@sosie/cli@${cli}`)
     })
 
+    it('read an earlier version’s entry as one source, named by its kind, and pass over a Sosie that stopped', () => {
+      mkdirSync(join(home, 'running'), { recursive: true })
+      // 0.3.0 wrote one source, at the top of its entry.
+      writeFileSync(join(home, 'running', `${process.pid}.json`), JSON.stringify({ pid: process.pid, startedAt: 1, kind: 'mysql', address: 'mysql://127.0.0.1:7674/crm', schema: { entities: [] }, passing: [] }))
+      writeRunning(home, [{ name: 'gone', kind: 'postgres', address: 'postgres://localhost:7676/gone', schema: { entities: [] }, passing: [] }], 2 ** 30)
+      expect(hooks.running()).toEqual([{ name: 'mysql', kind: 'mysql', address: 'mysql://127.0.0.1:7674/crm' }])
+      rmSync(join(home, 'running'), { recursive: true })
+    })
+
+    it('list the newest Sosie’s sources first, as describe does, whichever entry is read first', () => {
+      const source = (name: string) => ({ name, kind: 'postgres', address: `postgres://localhost:7674/${name}`, schema: { entities: [] }, passing: [] })
+      for (const [mine, parents] of [[1, 2], [2, 1]] as const) {
+        writeRunning(home, [source('mine')], process.pid, mine)
+        writeRunning(home, [source('parents')], process.ppid, parents)
+        const names = hooks.running().map((r) => (r as { name: string }).name)
+        expect(names).toEqual(mine > parents ? ['mine', 'parents'] : ['parents', 'mine'])
+        rmSync(join(home, 'running'), { recursive: true })
+      }
+    })
+
     it('find what to scan: a transcript and the folder beside it, or a Copilot CLI session by its id', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sosie-sessions-'))
       writeFileSync(join(dir, 'a.jsonl'), '')
@@ -228,6 +248,36 @@ describe('the plugin', () => {
       expect(copilot.additionalContext).toMatch(/^Sosie is running/)
       expect(copilot.additionalContext).toMatch(/line 4, from users.email/)
       expect(copilot.additionalContext).toMatch(/could not scan it again after a later turn: npm error network/)
+      rmSync(own, { recursive: true, force: true })
+    })
+
+    it('tell the agent each source running by its name, kind and address; else that a project with a sosie.yml has none running; else nothing', () => {
+      const own = mkdtempSync(join(tmpdir(), 'sosie-plugin-'))
+      const project = join(own, 'project')
+      const elsewhere = join(own, 'elsewhere')
+      for (const dir of ['home', 'data', 'project', 'elsewhere']) mkdirSync(join(own, dir))
+      writeFileSync(join(project, 'sosie.yml'), '')
+      const start = (cwd: string) =>
+        hook('session-start.mjs', { hook_event_name: 'SessionStart', cwd }, { ...bare(), SOSIE_HOME: join(own, 'home'), CLAUDE_PLUGIN_DATA: join(own, 'data') }).stdout
+      expect(start(elsewhere)).toBe('')
+      expect(JSON.parse(start(project))).toEqual({
+        hookSpecificOutput: {
+          hookEventName: 'SessionStart',
+          additionalContext:
+            'This project uses Sosie (it has a sosie.yml), and no Sosie is running. Before you read its database or API, ' +
+            "ask the developer to start Sosie in their own terminal, in the project's folder, with `npx @sosie/cli`. Never ask for a connection string or the credentials.",
+        },
+      })
+      writeRunning(join(own, 'home'), [
+        { name: 'shop', kind: 'postgres', address: 'postgres://localhost:7674/shop', schema: { entities: [] }, passing: [] },
+        { name: 'billing', kind: 'rest', address: 'http://localhost:7675/v1', schema: { entities: [] }, passing: [] },
+      ])
+      const said =
+        'Sosie is running on this machine: shop (postgres) at postgres://localhost:7674/shop; billing (rest) at http://localhost:7675/v1. ' +
+        'Every value it returns is a fake of a real one: read the sosie skill before you query. ' +
+        'Read this data through these addresses or the sosie MCP tools, never from the real database or API.'
+      // A project with a sosie.yml whose Sosie runs is told what runs, not that none does.
+      for (const cwd of [project, elsewhere]) expect(JSON.parse(start(cwd))).toEqual({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: said } })
       rmSync(own, { recursive: true, force: true })
     })
 
