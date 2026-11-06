@@ -199,4 +199,16 @@ describe('rules for each source', () => {
     expect(refused(() => rulesFor(linked, { shared: { pass: ['orders.user_id'] }, source: 'shop' }))).toEqual([`sosie.yml: ${broken}`])
     expect(refused(() => rulesFor(linked, { own: { pass: ['orders.user_id'] }, source: 'shop' }))).toEqual([`sosie.yml: sources.shop: ${broken}`])
   })
+
+  it('says which of the top’s rules a source holds even when its own are wrong, so all is told at once', () => {
+    const shared = { pass: ['contacts.region', 'order.status'] }
+    let error: unknown
+    try {
+      rulesFor(crm, { shared, own: { pass: ['contacts.regoin'] }, source: 'crm' })
+    } catch (e) {
+      error = e
+    }
+    expect(error).toBeInstanceOf(RulesError)
+    expect(unheldRules(shared, [(error as RulesError).applied!])).toEqual(['sosie.yml: order.status is not a table of any source.'])
+  })
 })

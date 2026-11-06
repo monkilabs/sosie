@@ -13,7 +13,11 @@ export interface Rules {
 }
 
 export class RulesError extends Error {
-  constructor(readonly problems: string[]) {
+  /** `applied`, from rulesFor: the top's rules the source held all the same, so one that no source holds is told too. */
+  constructor(
+    readonly problems: string[],
+    readonly applied?: Set<string>,
+  ) {
     super(problems.join('\n'))
     this.name = 'RulesError'
   }
@@ -135,7 +139,7 @@ export function rulesFor(schema: Schema, { own, shared, file = 'sosie.yml', sour
     }
   }
 
-  if (problems.length) throw new RulesError(problems)
+  if (problems.length) throw new RulesError(problems, rules.applied)
   return rules
 }
 

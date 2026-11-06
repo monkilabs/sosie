@@ -437,6 +437,13 @@ describe('sosie, when something is wrong', () => {
     expect(key.stderr).toContain('✗ sosie.yml: max_rows is not a key. Did you mean max-rows?')
   })
 
+  it('tells every problem with the rules at once: a top rule no source holds among a source’s own', () => {
+    const result = run([], { APP_URL: inject('upstream'), SOSIE_HOME: home }, project(`pass: [contacts.region]\n${ONE('    pass: [users.citi]\n')}`))
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('✗ sosie.yml: sources.app: users.citi is not a field. Did you mean users.city?')
+    expect(result.stderr).toContain('✗ sosie.yml: contacts.region is not a table of any source.')
+  })
+
   it('starts a second Sosie, for another project, on the next free port, and MCP serves both', async () => {
     const shared = mkdtempSync(join(tmpdir(), 'sosie-two-'))
     const shopAt = project('sources:\n  shop:\n    upstream: ${SHOP_URL}\n')

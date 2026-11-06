@@ -192,16 +192,20 @@ async function start(): Promise<void> {
 
   const rules: SourceRules[] = []
   const problems: string[] = []
+  // The top's rules each source holds, its own rules right or wrong: one that no source holds is told with the rest.
+  const held: Set<string>[] = []
   plans.forEach((plan, i) => {
     const connection = connections[i]!
     try {
       rules.push(rulesFor(connection.schema, { own: plan.config.rules, shared: config.rules, file: FILE, source: plan.config.name, learns: !!connection.learns }))
+      held.push(rules.at(-1)!.applied)
     } catch (error) {
       if (!(error instanceof RulesError)) throw error
       problems.push(...error.problems)
+      if (error.applied) held.push(error.applied)
     }
   })
-  if (!problems.length) problems.push(...unheldRules(config.rules, rules.map((r) => r.applied), FILE))
+  problems.push(...unheldRules(config.rules, held, FILE))
   if (problems.length) {
     await closeAll()
     throw new Exit(1, problems.map(fail).join('\n'))
