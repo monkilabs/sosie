@@ -139,6 +139,17 @@ sources:
   })
 })
 
+/** The problems rulesFor told, by the RulesError it threw. */
+const refused = (work: () => unknown): string[] => {
+  try {
+    work()
+  } catch (error) {
+    if (error instanceof RulesError) return error.problems
+    throw error
+  }
+  throw new Error('expected problems')
+}
+
 describe('rules for each source', () => {
   const shop: Schema = {
     entities: [
@@ -161,17 +172,13 @@ describe('rules for each source', () => {
 
   it('tells a top rule no source holds, and a typo in a table that is there', () => {
     const shared = { pass: ['order.status'], format: { 'users.nick': 'username' } }
-    expect(() => rulesFor(shop, { shared, source: 'shop' })).toThrow(
-      new RulesError(["sosie.yml: users.nick is not a field of shop's users. A rule for one source goes under it."]),
-    )
+    expect(refused(() => rulesFor(shop, { shared, source: 'shop' }))).toEqual(["sosie.yml: users.nick is not a field of shop's users. A rule for one source goes under it."])
     const forCrm = rulesFor(crm, { shared: { pass: ['order.status'] }, source: 'crm' })
     expect(unheldRules({ pass: ['order.status'] }, [forCrm.applied])).toEqual(['sosie.yml: order.status is not a table of any source.'])
   })
 
   it('checks a source’s own rules against its schema alone', () => {
-    expect(() => rulesFor(crm, { own: { pass: ['contacts.regoin'] }, source: 'crm' })).toThrow(
-      new RulesError(['sosie.yml: sources.crm: contacts.regoin is not a field. Did you mean contacts.region?']),
-    )
+    expect(refused(() => rulesFor(crm, { own: { pass: ['contacts.regoin'] }, source: 'crm' }))).toEqual(['sosie.yml: sources.crm: contacts.regoin is not a field. Did you mean contacts.region?'])
   })
 
   it('keeps a top rule for a source that learns its fields, and holds it there', () => {
@@ -179,5 +186,17 @@ describe('rules for each source', () => {
     expect([...learned.pass]).toEqual(['orders.status'])
     expect(learned.warnings).toEqual([])
     expect(unheldRules({ pass: ['orders.status'] }, [learned.applied])).toEqual([])
+  })
+
+  it('tells a field that passes without the one it shares values with where its rule is: the top, or the source', () => {
+    const linked: Schema = {
+      entities: [
+        { id: 'users', name: 'users', fields: [{ id: 'users.id', name: 'id', type: { kind: 'integer' } }] },
+        { id: 'orders', name: 'orders', fields: [{ id: 'orders.user_id', name: 'user_id', type: { kind: 'integer' }, references: 'users.id' }] },
+      ],
+    }
+    const broken = 'orders.user_id passes but users.id, whose values it shares, does not. List both or neither.'
+    expect(refused(() => rulesFor(linked, { shared: { pass: ['orders.user_id'] }, source: 'shop' }))).toEqual([`sosie.yml: ${broken}`])
+    expect(refused(() => rulesFor(linked, { own: { pass: ['orders.user_id'] }, source: 'shop' }))).toEqual([`sosie.yml: sources.shop: ${broken}`])
   })
 })

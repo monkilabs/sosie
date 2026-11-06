@@ -124,13 +124,14 @@ export function rulesFor(schema: Schema, { own, shared, file = 'sosie.yml', sour
   }
   // The top's first, so a source's own format for a field wins.
   check(shared, true)
+  const fromTop = new Set(rules.pass)
   check(own, false)
 
-  // A field that shares another's values must pass with it, or joins between them break.
+  // A field that shares another's values must pass with it, or joins between them break. Told where its rule is.
   for (const id of rules.pass) {
     const target = fields.get(id)?.references
     if (target && !rules.pass.has(target)) {
-      problems.push(`${where(!source)} ${id} passes but ${target}, whose values it shares, does not. List both or neither.`)
+      problems.push(`${where(fromTop.has(id))} ${id} passes but ${target}, whose values it shares, does not. List both or neither.`)
     }
   }
 
