@@ -556,6 +556,15 @@ describe('sosie, when something is wrong', () => {
     expect(result.stderr).toContain('✗ Set APP_URL, which sosie.yml names, in the terminal Sosie starts in, or start it in a terminal to type it.')
   })
 
+  it('names every variable sosie.yml names that is not set, one set empty among them', () => {
+    const dir = project(`sources:\n  a:\n    upstream: \${A_URL}\n  b:\n    upstream: \${B_URL}\n    headers:\n      Authorization: Bearer \${B_TOKEN}\n`)
+    const two = run([], { A_URL: '', B_URL: undefined, B_TOKEN: TOKEN, SOSIE_HOME: home }, dir)
+    expect(two.status).toBe(2)
+    expect(two.stderr).toBe('  ✗ Set A_URL and B_URL, which sosie.yml names, in the terminal Sosie starts in, or start it in a terminal to type them.\n')
+    const three = run([], { A_URL: '', B_URL: undefined, B_TOKEN: undefined, SOSIE_HOME: home }, dir)
+    expect(three.stderr).toBe('  ✗ Set A_URL, B_URL and B_TOKEN, which sosie.yml names, in the terminal Sosie starts in, or start it in a terminal to type them.\n')
+  })
+
   it('names an upstream it cannot read, without echoing it', () => {
     const dir = project(ONE())
     const result = run([], { APP_URL: 'redis://kim:secret@db/0', SOSIE_HOME: home }, dir)
@@ -660,11 +669,13 @@ describe('sosie, when something is wrong', () => {
     }
   })
 
-  it('stops when its terminal closes, and leaves no running file', async () => {
-    const sosie = await start({ APP_URL: inject('upstream'), SOSIE_HOME: home }, project(ONE()))
-    expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`))).toBe(true)
-    expect(await stop(sosie.child, 'SIGHUP')).toBe(0)
-    expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`))).toBe(false)
+  it('stops on a kill, or when its terminal closes, and leaves no running file', async () => {
+    for (const signal of ['SIGTERM', 'SIGHUP'] as const) {
+      const sosie = await start({ APP_URL: inject('upstream'), SOSIE_HOME: home }, project(ONE()))
+      expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`)), signal).toBe(true)
+      expect(await stop(sosie.child, signal), signal).toBe(0)
+      expect(existsSync(join(home, 'running', `${sosie.child.pid}.json`)), signal).toBe(false)
+    }
   })
 
   it('counts the fields that pass, and names a port in use', async () => {
@@ -698,13 +709,35 @@ describe('sosie, when something is wrong', () => {
   })
 
   it('explains its commands, and says where a flag of an earlier version went', () => {
-    expect(run(['--help']).stdout).toContain('sosie init            Write sosie.yml, with the first source.')
-    expect(run(['--version']).stdout.trim()).toBe(VERSION)
-    expect(run(['serve']).status).toBe(2)
-    const port = run(['--port', '7674'])
-    expect(port.status).toBe(2)
-    expect(port.stderr).toContain('✗ --port is in sosie.yml now: port, under a source.')
-    expect(run(['--max-rows=5']).stderr).toContain('✗ --max-rows is in sosie.yml now: max-rows.')
+    for (const flag of ['--help', '-h']) {
+      const help = run([flag])
+      expect(help.status, flag).toBe(0)
+      expect(help.stdout, flag).toContain('sosie init            Write sosie.yml, with the first source.')
+    }
+    // The version, even before a command: sosie -v mcp prints it, and serves nothing.
+    for (const args of [['--version'], ['-v'], ['-v', 'mcp']]) {
+      const version = run(args)
+      expect(version.status, args.join(' ')).toBe(0)
+      expect(version.stdout, args.join(' ')).toBe(`${VERSION}\n`)
+    }
+    const serve = run(['serve'])
+    expect(serve.status).toBe(2)
+    expect(serve.stderr).toMatch(/^Unknown command: serve\n\nSosie: your AI agent sees a double of your data\. Never the real thing\.\n\nUsage:\n/)
+    const flag = run(['--nope'])
+    expect(flag.status).toBe(2)
+    expect(flag.stderr).toMatch(/^Unknown option '--nope'\. .*\n\nSosie: your AI agent sees a double of your data\. Never the real thing\.\n\nUsage:\n/)
+    const gone: [string[], string][] = [
+      [['--port', '7674'], '--port is in sosie.yml now: port, under a source.'],
+      [['--host=0.0.0.0'], '--host is in sosie.yml now: host.'],
+      [['--rules', 'rules.yml'], '--rules is in sosie.yml now: pass and format, in sosie.yml itself.'],
+      [['--max-rows=5'], '--max-rows is in sosie.yml now: max-rows.'],
+      [['--timeout', '5'], '--timeout is in sosie.yml now: timeout.'],
+    ]
+    for (const [args, said] of gone) {
+      const result = run(args)
+      expect(result.status, args.join(' ')).toBe(2)
+      expect(result.stderr, args.join(' ')).toBe(`  ✗ ${said}\n`)
+    }
     expect(run(['scan']).status).toBe(2)
     const nothing = run(['scan', '.'], { SOSIE_HOME: mkdtempSync(join(tmpdir(), 'sosie-empty-')) })
     expect(nothing.status).toBe(2)
