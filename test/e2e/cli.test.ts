@@ -574,6 +574,23 @@ describe('sosie, when something is wrong', () => {
     }
   })
 
+  it('names a kind that does not read its upstream, and a key the kind its upstream says does not take, every one at once', () => {
+    const dir = project(
+      `sources:\n  app:\n    upstream: \${APP_URL}\n    kind: graphql\n    port: 0\n  shop:\n    upstream: \${SHOP_URL}\n    port: 0\n    headers:\n      Authorization: Bearer \${SHOP_TOKEN}\n    schema: ./schema.graphql\n`,
+    )
+    const result = run([], { APP_URL: 'postgres://kim:secret@db/app', SHOP_URL: 'postgres://kim:secret@db/shop', SHOP_TOKEN: 'secret', SOSIE_HOME: home }, dir)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toBe(
+      [
+        '  ✗ sosie.yml: sources.app: A graphql source reads http:// or https:// upstreams, not postgres://.',
+        '  ✗ sosie.yml: sources.shop.headers: shop is a postgres source, which takes no headers.',
+        '  ✗ sosie.yml: sources.shop.schema: shop is a postgres source, which takes no schema.',
+        '',
+      ].join('\n'),
+    )
+    expect(result.stdout).toBe('')
+  })
+
   it('refuses an upstream written in sosie.yml, without echoing it', () => {
     const result = run([], { SOSIE_HOME: home }, project('sources:\n  app:\n    upstream: postgres://kim:secret@db/app\n'))
     expect(result.status).toBe(1)
