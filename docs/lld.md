@@ -321,6 +321,11 @@ set gets a line saying what in `sosie.yml` replaces it.
 A `host` other than this machine is allowed, for running Sosie on a host of its own, with a warning: the endpoints
 have no password, so anyone who can reach one can query the fakes.
 
+A command ends by setting its exit code and letting Node's event loop run dry, never by `process.exit()`: that joins
+V8's own threads while one may be waiting on the main thread, and can hang for good (nodejs/node#54918). A command
+that left a handle open is ended by `process.exit()` a second later all the same, on a timer that keeps nothing
+waiting.
+
 **`sosie init`** asks for the first source's connection string at a hidden prompt, says what it found there (`A
 Postgres database: db.internal:5432/shop`), and asks for a name for the source (the database's name, or the API's
 host, by default) and for the variable to keep the string in (the name in capitals, with `_URL`: `SHOP_URL`). It
@@ -1770,7 +1775,11 @@ source learns. Format domains make a person's email the same fake from the datab
   planted value, and the next session reported it. A CI job runs
   `opencastle plugin check`, which loads it as each assistant would, and checks that the marketplaces list it as it
   is. The hooks were run by hand against a running Sosie: what Claude Code would send them, and what they answer.
-- **CI.** PostgreSQL 15, 16, 17 and 18 on Node 26, and 18 on Node 24; each with MySQL 8.4 or 9 and MongoDB 6.0, 7.0
+- **A command that never ends.** Each run of the built CLI has 20 s. One that has not ended is asked for Node's
+  diagnostic report, its JavaScript stack and what keeps its event loop waiting, and on Linux for each thread's state
+  from `/proc`, before it is killed: the test fails saying where it was, rather than holding the run.
+- **CI.** Each test job has 15 minutes, the plugin's 10, so a run that hangs fails rather than waits for GitHub's
+  limit. PostgreSQL 15, 16, 17 and 18 on Node 26, and 18 on Node 24; each with MySQL 8.4 or 9 and MongoDB 6.0, 7.0
   or 8.0 beside it (8.0 on Ubuntu 22.04, as mongod 8.0 does not start on the newer kernel); and the plugin's check.
 
 ## Defaults
