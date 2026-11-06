@@ -146,10 +146,6 @@ interface Plan {
 }
 
 async function start(): Promise<void> {
-  const notes = Object.entries(GONE_VARIABLES)
-    .filter(([name]) => process.env[name])
-    .map(([name, now]) => `${name} is not read any more: sosie.yml says it, as ${now}.`)
-
   // Without a sosie.yml, or one that names no sources, its first source is asked for, then Sosie starts with it.
   const file = resolve(FILE)
   const typed: Record<string, string> = {}
@@ -169,6 +165,11 @@ async function start(): Promise<void> {
     if (error instanceof ConfigError) throw new Exit(1, error.problems.map(fail).join('\n'))
     throw error
   }
+  // A variable an earlier version read, left set, is told; not one sosie.yml reads, as upgrading says to.
+  const read = variablesOf(config)
+  const notes = Object.entries(GONE_VARIABLES)
+    .filter(([name]) => process.env[name] && !read.includes(name))
+    .map(([name, now]) => `${name} is not read any more: sosie.yml says it, as ${now}.`)
 
   const values = await readVariables(config, typed)
   const plans = planSources(config, values)

@@ -431,6 +431,16 @@ describe('sosie, upgraded from 0.3', () => {
     }
   })
 
+  it('reads SOSIE_UPSTREAM where sosie.yml names it, as upgrading says to, and tells none as not read', async () => {
+    const sosie = await start({ SOSIE_UPSTREAM: inject('upstream'), SOSIE_HOME: home }, project('sources:\n  app:\n    upstream: ${SOSIE_UPSTREAM}\n    port: 0\n'))
+    try {
+      expect(sosie.stdout()).toMatch(/✓ app {2}127\.0\.0\.1:\d+\/sosie_test_\w+, read-only: 6 tables, 2 views/)
+      expect(sosie.stdout()).not.toContain('is not read any more')
+    } finally {
+      expect(await stop(sosie.child)).toBe(0)
+    }
+  })
+
   it('says how to add the first source to a sosie.yml of rules only, with no terminal to write it in', () => {
     const text = 'pass: [orders.status]\n'
     const dir = project(text)

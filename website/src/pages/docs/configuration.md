@@ -162,7 +162,7 @@ sources:
     upstream: ${SOSIE_UPSTREAM}
 ```
 
-Sosie says so when one of them is still set, and a flag given says where it went.
+Sosie says so when one of them is still set and `sosie.yml` does not name it, and a flag given says where it went.
 
 ## Several projects
 

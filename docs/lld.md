@@ -303,7 +303,7 @@ read them; nor written in `sosie.yml`, which is committed. `sosie.yml` names the
 reads them from the terminal it starts in, or asks for each at a hidden prompt. Sosie reads no variable of its own but
 `SOSIE_HOME`, where the store is, which is the machine's and not the project's. `SOSIE_UPSTREAM`,
 `SOSIE_UPSTREAM_HEADERS`, `SOSIE_OPENAPI` and `SOSIE_GRAPHQL_SCHEMA`, which earlier versions read, are not: one left
-set gets a line saying what in `sosie.yml` replaces it.
+set that `sosie.yml` does not name gets a line saying what in `sosie.yml` replaces it.
 
 ```
   ✓ shop     db.internal:5432/shop, read-only: 42 tables, 3 views
