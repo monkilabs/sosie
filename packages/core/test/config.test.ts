@@ -66,6 +66,12 @@ sources:
     expect(interpolate(config.sources[0]!.headers['X-Note']!, { TOKEN: 'abc' })).toBe('price ${AMOUNT}, $abc')
   })
 
+  it('sends a header as it is written, a number or a word YAML would read as another type among them', () => {
+    const config = read('sources:\n  billing:\n    upstream: ${API_URL}\n    headers:\n      X-Version: 1.0\n      X-Mask: 0x1F\n      X-Debug: true\n      X-Zip: 01234\n')
+    expect(config.sources[0]!.headers).toEqual({ 'X-Version': '1.0', 'X-Mask': '0x1F', 'X-Debug': 'true', 'X-Zip': '01234' })
+    expect(problems('sources:\n  billing:\n    upstream: ${API_URL}\n    headers:\n      X-Empty:\n')).toEqual(['sosie.yml: sources.billing.headers.X-Empty has no value.'])
+  })
+
   it('names the variable a source would be kept in', () => {
     expect(variableFor('shop')).toBe('SHOP_URL')
     expect(variableFor('billing-api')).toBe('BILLING_API_URL')

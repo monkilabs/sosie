@@ -84,14 +84,19 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
   const problems: string[] = []
   const at = (path: string, what: string) => problems.push(`${file}: ${path}${what}`)
   let doc: unknown
+  // Every value as its text, for headers: 1.0, 0x1F and true are sent as written, never as YAML reads them.
+  let written: unknown
   try {
     doc = parse(text)
+    written = parse(text, { schema: 'failsafe' })
   } catch (error) {
     throw new ConfigError([`${file}: ${(error as Error).message.split('\n')[0]}`])
   }
   if (doc == null) doc = {}
   if (typeof doc !== 'object' || Array.isArray(doc)) throw new ConfigError([`${file}: expected keys such as sources, pass and format.`])
   const top = doc as Record<string, unknown>
+  const textOf = (name: string, header: string): unknown =>
+    (written as { sources?: Record<string, { headers?: Record<string, unknown> }> } | null)?.sources?.[name]?.headers?.[header]
 
   for (const key of Object.keys(top)) {
     if (TOP.includes(key)) continue
@@ -165,11 +170,13 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
         if (!source.headers || typeof source.headers !== 'object' || Array.isArray(source.headers)) {
           at(`${path}.headers`, ' maps each header to its value, such as Authorization: Bearer ${TOKEN}.')
         } else {
-          for (const [header, v] of Object.entries(source.headers as Record<string, unknown>)) {
+          for (const header of Object.keys(source.headers as Record<string, unknown>)) {
+            const v = textOf(name, header)
             if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(header)) at(`${path}.headers`, ': a header is named in letters, digits and dashes.')
-            else if (typeof v !== 'string' && typeof v !== 'number') at(`${path}.headers.${header}`, ' is a value on one line.')
+            else if (typeof v !== 'string') at(`${path}.headers.${header}`, ' is a value on one line.')
+            else if (!v) at(`${path}.headers.${header}`, ' has no value.')
             else {
-              const template = String(v)
+              const template = v
               const unclosed = template.replace(/\$\$/g, '').replace(VARIABLE, '').includes('${')
               if (unclosed) at(`${path}.headers.${header}`, ' names a variable as ${NAME}: letters, digits and _.')
               else headers[header] = template
