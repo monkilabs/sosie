@@ -146,6 +146,13 @@ describe('turning fakes back in a filter', () => {
     expect(near).toEqual(['users.email', 'users.address.city', 'users.phone', 'users.phone'])
   })
 
+  it('in $expr, turns back a value under $and, $or and $not written without their array, as MongoDB takes one argument', () => {
+    near.length = 0
+    const out = rewriteFilter({ $expr: { $and: { $or: { $not: { $ne: ['$email', 'fake@x'] } } } } }, collection('users'), scope)
+    expect(out).toEqual({ $expr: { $and: { $or: { $not: { $ne: ['$email', 'FAKE@X'] } } } } })
+    expect(near).toEqual(['users.email'])
+  })
+
   it('in $expr, leaves as written what compares no field with a value', () => {
     near.length = 0
     const asWritten: unknown[] = [

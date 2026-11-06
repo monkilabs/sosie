@@ -163,14 +163,15 @@ describe('querying by what you saw', () => {
     expect(await db.collection('orders').distinct('status', { userId: first!._id })).toHaveLength(2)
   })
 
-  it('finds a document by a fake compared in $expr, either way round and in $in', async () => {
+  it('finds a document by a fake compared in $expr, either way round, in $in, and under a $not without its array', async () => {
     const [first] = await all('users', { tags: { $size: 2 } })
     const byEq = await all('users', { $expr: { $eq: ['$email', first!.email] } })
     const byRoot = await all('users', { $expr: { $eq: [{ $literal: first!.email }, '$$ROOT.email'] } })
     const byIn = await all('users', { $expr: { $and: [{ $in: ['$_id', [first!._id]] }, { $ne: ['$email', 'nobody@example.com'] }] } })
+    const byNot = await all('users', { $expr: { $not: { $ne: ['$email', first!.email] } } })
     const piped = await db.collection('users').aggregate([{ $match: { $expr: { $eq: ['$address.city', first!.address.city] } } }, { $match: { _id: first!._id } }]).toArray()
-    for (const docs of [byEq, byRoot, byIn, piped]) expect(docs.map((d) => d.fullName)).toEqual([first!.fullName])
-    keep([byEq, byRoot, byIn, piped])
+    for (const docs of [byEq, byRoot, byIn, byNot, piped]) expect(docs.map((d) => d.fullName)).toEqual([first!.fullName])
+    keep([byEq, byRoot, byIn, byNot, piped])
   })
 
   it('turns back a $match after a $group by what the group made', async () => {

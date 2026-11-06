@@ -68,7 +68,10 @@ function expression(expr: unknown, shape: Shape, scope: RequestScope): unknown {
   if (keys.length !== 1) return expr
   const op = keys[0]!
   const args = expr[op]
-  if ((op === '$and' || op === '$or' || op === '$not') && Array.isArray(args)) return { [op]: args.map((a) => expression(a, shape, scope)) }
+  if (op === '$and' || op === '$or' || op === '$not') {
+    // One argument may be written without its array: { $not: { $eq: … } }.
+    return { [op]: Array.isArray(args) ? args.map((a) => expression(a, shape, scope)) : expression(args, shape, scope) }
+  }
   if (!Array.isArray(args) || args.length !== 2) return expr
   const [a, b] = args
   if (op === '$eq' || op === '$ne') {
