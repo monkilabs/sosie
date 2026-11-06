@@ -60,6 +60,12 @@ sources:
     expect(interpolate('${A}-${B}', { A: 'x', B: 'y' })).toBe('x-y')
   })
 
+  it('asks for no variable a $$ writes out as text', () => {
+    const config = read('sources:\n  billing:\n    upstream: ${API_URL}\n    headers:\n      X-Note: "price $${AMOUNT}, $$${TOKEN}"\n')
+    expect(variablesOf(config)).toEqual(['API_URL', 'TOKEN'])
+    expect(interpolate(config.sources[0]!.headers['X-Note']!, { TOKEN: 'abc' })).toBe('price ${AMOUNT}, $abc')
+  })
+
   it('names the variable a source would be kept in', () => {
     expect(variableFor('shop')).toBe('SHOP_URL')
     expect(variableFor('billing-api')).toBe('BILLING_API_URL')

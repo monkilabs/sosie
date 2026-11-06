@@ -51,6 +51,8 @@ const TOP = ['sources', 'pass', 'format', 'host', 'max-rows', 'timeout']
 const SOURCE = ['upstream', 'kind', 'schema', 'headers', 'port', 'host', 'max-rows', 'timeout', 'pass', 'format']
 const NAME = /^[a-z][a-z0-9_-]{0,39}$/
 const VARIABLE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g
+/** A header's $$, a $ of its text, or a ${NAME}: read from the left, so $${NAME} is text and asks for nothing. */
+const TEMPLATE = /\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g
 const WHOLE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/
 
 /** The variable a source's upstream would be kept in, by its name: shop, SHOP_URL. */
@@ -227,14 +229,14 @@ export function variablesOf(config: Config): string[] {
   const names = new Set<string>()
   for (const source of config.sources) {
     if (source.upstream) names.add(source.upstream)
-    for (const template of Object.values(source.headers)) for (const [, name] of template.matchAll(VARIABLE)) names.add(name!)
+    for (const template of Object.values(source.headers)) for (const [, name] of template.matchAll(TEMPLATE)) if (name) names.add(name)
   }
   return [...names]
 }
 
 /** A header's value, its ${NAME}s read from `values` and each $$ a $. */
 export function interpolate(template: string, values: Record<string, string | undefined>): string {
-  return template.replace(/\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, name: string | undefined) => (name ? (values[name] ?? '') : '$'))
+  return template.replace(TEMPLATE, (match, name: string | undefined) => (name ? (values[name] ?? '') : '$'))
 }
 
 /** host, max-rows and timeout, at the top or in a source, each checked. */
