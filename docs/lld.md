@@ -1393,13 +1393,23 @@ in the banner's warning; an answer that is no document (no `openapi` or `swagger
 passed over, and the banner says none was found. A `schema` that cannot be read stops Sosie; when it is a
 file, Sosie does not reach the API at start-up. Without it, finding the document is how Sosie checks it can reach
 the API: when it cannot, it stops. Only named schemas (`components.schemas`, Swagger's `definitions`) are entities,
-and only `GET` operations count, their answer's schema read from `200`, or the first `2xx`, under `application/json`.
+and only `GET` operations count, their answer's schema read from `200`, or the first `2xx`, under the best media type
+that has one: `application/json`, whatever its parameters (`;charset=UTF-8`), as Sosie asks for it; then a range that
+holds it, `application/*` and `*/*`, as Springdoc writes for a controller that does not say what it produces; then any
+other JSON type (`application/hal+json`, `text/json`). Under none of them, as under `application/xml`, the answer has
+no schema: its entity is named by the path, as without a document.
 JSON Schema types and formats map to neutral types (`date-time` to `datetime`,
 `uuid`, `ipv4`, `enum` to `enum`); `format: email` and `uri` pick the email and
 URL formats. A property `id` is the entity's key; one named `userId`, `user_id`
 or `userIds` shares the values of the id of the entity it names, `User`. Such a
 reference is a guess from a name: it shares the target's fakes, but never
-passes because the target does in `sosie.yml`.
+passes because the target does in `sosie.yml`. A word no schema is named for
+names the entity the document answers under it, the plainest path first, as
+Springdoc names schemas for what they answer: `/users/{userId}` answering a
+`UserResp` with an `id` makes `user` name `UserResp`, so the path's id,
+`/users/{userId}/orders`, `?userId=` and `OrderResp.userId` share the fakes of
+`UserResp.id`, which its answers show. A list under a plural word (`/users`)
+names its items' entity too.
 
 Without a document, the schema is learned as responses come: a value is the
 field of where it sits, in the entity its path names, singular (`/users` and
@@ -1519,8 +1529,12 @@ would turn into that field's real value, which the passing field would show.
 - A key that starts with a capital or is in kebab case (`UserName`, `x-rate`) is not taken for structure: without a
   document it is faked, and no rule but `entity.*` reaches its value. APIs that write keys in Pascal case, as
   .NET's often do, want a document.
-- Answers under another JSON type than `application/json` in the document (`application/hal+json`,
-  `application/vnd.api+json`, `*/*`) have no schema there: their entity is named by the path, as without a document.
+- An answer's schema is read by its media type, never by what the API sends: when the document gives JSON types
+  different schemas, the one under `application/json`, or the range that holds it, is the one read, as Sosie asks for
+  `application/json`, even where the source's `headers` ask for another.
+- A word a schema is named for names that schema, whatever the document answers under it: with a `User` that clients
+  send and a `UserResp` that `/users/{userId}` answers, the path's id is `User.id`, which no answer shows, so a fake
+  number from an answer does not turn back there. Text, a UUID, is looked up anywhere, and does.
 - A word of the API's that a client types where a path starts (`/deep`), when it is also the fake Sosie gave a
   value, is read as that value, as a client that saw the fake would mean it: a single word is faked as a word. A word
   the document declares, or the API has answered with a list, is the API's, and stays.

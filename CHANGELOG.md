@@ -7,6 +7,22 @@
   fake ran as written, and found no row, or the rows it does not stand for.
   Bits are faked as text is: no two values of a field share a fake while it has
   bits to spare.
+- (0.1) REST, from a trial in front of a Spring Boot API
+  ([#37](https://github.com/monkilabs/sosie/issues/37)): with a document whose
+  schemas are named for what they answer, as Springdoc's are (`UserResp` under
+  `/users/{userId}`), a path's id was read as `user.id`, which no answer shows.
+  A fake number from an answer did not turn back: `/users/<fake id>` asked the
+  API for that number, another record or none. A word no schema is named for
+  names the entity the document answers under it, so the path's id, `?userId=`
+  and `OrderResp.userId` share the fakes of `UserResp.id`.
+- (0.1) REST: an answer's schema was read under `application/json` only.
+  Springdoc writes `*/*` for every controller that does not say what it
+  produces, its default, so most of a Spring API's answers had no schema:
+  `sosie.yml`'s rules for its schemas never applied, though the banner said
+  they pass, and an enum was faked as any text, not as one of its labels. The
+  schema is read under the best media type that has one: `application/json`,
+  whatever its parameters (`;charset=UTF-8`); then `application/*` or `*/*`;
+  then any other JSON type (`application/hal+json`).
 
 ## 0.4.1, 6 November 2026
 

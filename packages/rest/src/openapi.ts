@@ -1,4 +1,4 @@
-import { linkByName, referenceOf, type Entity, type Field, type FieldType, type Schema } from '@sosie/core'
+import { linkByName, referenceOf, singular, type Entity, type Field, type FieldType, type Schema } from '@sosie/core'
 import { parse as parseYaml } from 'yaml'
 
 
@@ -24,6 +24,11 @@ export interface Api {
   operations: Operation[]
   /** Schemas by name, to follow a $ref. */
   schemas: Record<string, Node>
+  /**
+   * The entity a word of a path names, singular and lowercase: the one named for it ('user' for User), or else the one
+   * the document answers under it ('user' for UserResp, from /users/{userId}).
+   */
+  words: Map<string, string>
   /** 'OpenAPI 3.1', 'Swagger 2.0'. */
   version: string
 }
@@ -70,7 +75,6 @@ export function readApi(doc: Node): Api {
     add(properties, '', 0)
     entities.push({ id: name, name, fields })
   }
-  linkByName(entities)
 
   const operations: Operation[] = []
   for (const [template, item] of Object.entries<Node>(doc.paths ?? {})) {
@@ -78,7 +82,7 @@ export function readApi(doc: Node): Api {
     if (!get) continue
     const responses: Node = get.responses ?? {}
     const ok = responses['200'] ?? Object.entries(responses).find(([code]) => /^2\d\d$/.test(code))?.[1]
-    const response = ok?.content?.['application/json']?.schema ?? ok?.schema
+    const response = jsonSchemaOf(ok?.content) ?? ok?.schema
     operations.push({
       template,
       segments: template.split('/').filter(Boolean),
@@ -86,11 +90,61 @@ export function readApi(doc: Node): Api {
       ...(response && entityOf(response, schemas) && { entity: entityOf(response, schemas) }),
     })
   }
+  const fixed = (op: Operation) => op.segments.filter((s) => !s.startsWith('{')).length
+
+  // A word no schema is named for names the entity the document answers under it, as Springdoc's schemas are named
+  // for what they answer (UserResp under /users/{userId}): the path's ids, ?userId= and OrderResp.userId are then its
+  // id, as the answers show it. The plainest path says it first: /users/{id} before /admin/users/{id}.
+  const words = new Map(entities.map((e) => [singular(e.name.toLowerCase()), e.name]))
+  const aliases = new Map<string, string>()
+  for (const op of [...operations].sort((a, b) => fixed(a) - fixed(b))) {
+    const word = collectionOf(op)
+    const entity = entities.find((e) => e.id === op.entity)
+    if (!word || words.has(word) || aliases.has(word) || !entity?.fields.some((f) => f.id === `${entity.id}.id`)) continue
+    aliases.set(word, entity.id)
+  }
+  linkByName(entities, aliases)
+  for (const [word, id] of aliases) words.set(word, id)
+
   // The most specific template first: /users/me before /users/{id}.
-  operations.sort((a, b) => b.segments.filter((s) => !s.startsWith('{')).length - a.segments.filter((s) => !s.startsWith('{')).length)
+  operations.sort((a, b) => fixed(b) - fixed(a))
 
   const version = doc.openapi ? `OpenAPI ${String(doc.openapi).split('.').slice(0, 2).join('.')}` : `Swagger ${doc.swagger}`
-  return { schema: { entities }, operations, schemas, version }
+  return { schema: { entities }, operations, schemas, words, version }
+}
+
+/**
+ * Media types that hold the JSON Sosie passes on, the best first: what it asks for, application/json, whatever its
+ * parameters (;charset=UTF-8); then a range that holds it, as Springdoc writes for a controller that does not say what
+ * it produces; then any other JSON type (application/hal+json).
+ */
+const JSON_TYPES = [/^application\/json$/i, /^application\/\*$/i, /^\*\/\*$/i, /^[\w.-]+\/(?:[\w.*-]+\+)?json$/i]
+
+/** The schema of an answer's JSON, from its content by media type: the best type that has one. */
+function jsonSchemaOf(content: Node | undefined): Node | undefined {
+  let best: Node | undefined
+  let rank = JSON_TYPES.length
+  for (const [type, media] of Object.entries<Node>(content ?? {})) {
+    const at = JSON_TYPES.findIndex((json) => json.test(type.split(';')[0]!.trim()))
+    if (at >= 0 && at < rank && media?.schema) {
+      best = media.schema
+      rank = at
+    }
+  }
+  return best
+}
+
+/**
+ * The collection an operation answers its entity under, singular and lowercase: the word before a template's last
+ * parameter, answered with one record (/users/{id}), or a plural last word, answered with a list (/users).
+ */
+function collectionOf(op: Operation): string | undefined {
+  if (!op.entity) return undefined
+  const [before, last] = op.segments.length > 1 ? op.segments.slice(-2) : [undefined, op.segments[0]]
+  const param = (segment: string | undefined) => segment?.startsWith('{')
+  if (refOf(op.response)) return before && param(last) && !param(before) ? singular(before.toLowerCase()) : undefined
+  const word = last && !param(last) ? last.toLowerCase() : undefined
+  return word && singular(word) !== word ? singular(word) : undefined
 }
 
 /** The entity a response schema is about: a $ref, or an array of them. */

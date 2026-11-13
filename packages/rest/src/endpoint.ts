@@ -53,7 +53,8 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
   const base = ctx.upstream.base
   const basePath = base.pathname.replace(/\/$/, '')
   const fields = new Map<string, Field>((ctx.api?.schema.entities ?? []).flatMap((e) => e.fields.map((f) => [f.id, f] as const)))
-  const byWord = new Map((ctx.api?.schema.entities ?? []).map((e) => [singular(e.name.toLowerCase()), e.name]))
+  // The entity a word names: the document's, by its name or by what the document answers under the word.
+  const byWord = ctx.api?.words ?? new Map<string, string>()
   // A word that is no name (an email in a path) names no entity, so it never becomes part of a domain.
   const entityFor = (word: string) => byWord.get(singular(word.toLowerCase())) ?? (/^[A-Za-z][\w-]*$/.test(word) ? singular(word.toLowerCase()) : '*')
   const documented = (word: string) => byWord.has(singular(word.toLowerCase()))

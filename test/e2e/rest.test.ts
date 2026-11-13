@@ -646,7 +646,83 @@ describe('the guard and the credentials', () => {
   })
 })
 
+/**
+ * A Spring Boot API as Springdoc documents it, in the file `schema`: its schemas are named for what they answer
+ * (UserResp), and each answer's schema is under the content type given.
+ */
+async function startSpring(type = 'application/json') {
+  const user = { id: 42, email: 'quill.vantablack@canary-mail.test', status: 'STATUS_ACTIVE', plan: 'PLAN_TEAM' }
+  const orders = [{ id: 7, userId: 42 }]
+  const requests: FakeApi['requests'] = []
+  const server = createServer((req, res) => {
+    requests.push({ method: req.method ?? '', path: req.url ?? '', authorization: req.headers.authorization })
+    const body = req.url === '/api/users/42' ? user : req.url === '/api/users/42/orders' ? orders : undefined
+    res.writeHead(body ? 200 : 404, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(body ?? { error: 'not found' }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const answer = (schema: object) => ({ get: { responses: { '200': { description: 'OK', content: { [type]: { schema } } } } } })
+  const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` })
+  const id = { type: 'integer', format: 'int64' }
+  const doc = {
+    openapi: '3.0.1',
+    paths: { '/api/users/{userId}': answer(ref('UserResp')), '/api/users/{userId}/orders': answer({ type: 'array', items: ref('OrderResp') }) },
+    components: {
+      schemas: {
+        UserResp: {
+          type: 'object',
+          properties: {
+            id,
+            email: { type: 'string' },
+            status: { type: 'string', enum: ['STATUS_ACTIVE', 'STATUS_BLOCKED', 'STATUS_DELETED'] },
+            plan: { type: 'string', enum: ['PLAN_FREE', 'PLAN_TEAM', 'PLAN_ENTERPRISE'] },
+          },
+        },
+        OrderResp: { type: 'object', properties: { id, userId: id } },
+      },
+    },
+  }
+  const schema = join(mkdtempSync(join(tmpdir(), 'sosie-spring-')), 'openapi.json')
+  writeFileSync(schema, JSON.stringify(doc))
+  const api: FakeApi = {
+    url: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+    requests,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  }
+  return { api, schema }
+}
+
 describe('an API with an OpenAPI document', () => {
+  it('reads a path’s id as the id its answers show, under a schema named for what it answers (UserResp)', async () => {
+    const { api: spring, schema } = await startSpring()
+    const s = await startRest(spring, { schema })
+    const user = (await s.get('/api/users/42')).body
+    expect(user.id).not.toBe(42)
+    spring.requests.length = 0
+    // The fake id leads back to its record, and to what is under it; a reference by name (userId) is the same fake.
+    expect((await s.get(`/api/users/${user.id}`)).body).toEqual(user)
+    const orders = (await s.get(`/api/users/${user.id}/orders`)).body
+    expect(spring.requests.map((r) => r.path)).toEqual(['/api/users/42', '/api/users/42/orders'])
+    expect(orders[0].userId).toBe(user.id)
+    await s.close()
+    await spring.close()
+  })
+
+  it('reads an answer’s schema under */*, as Springdoc writes it: its rules apply, its enums fake as labels', async () => {
+    const { api: spring, schema } = await startSpring('*/*')
+    const s = await startRest(spring, { schema, rules: 'pass:\n  - UserResp.status\n' })
+    const user = (await s.get('/api/users/42')).body
+    expect(user.status).toBe('STATUS_ACTIVE')
+    expect(['PLAN_FREE', 'PLAN_TEAM', 'PLAN_ENTERPRISE']).toContain(user.plan)
+    expect(user.email).not.toBe('quill.vantablack@canary-mail.test')
+    // And a fake id still leads back to its record.
+    spring.requests.length = 0
+    expect((await s.get(`/api/users/${user.id}`)).body).toEqual(user)
+    expect(spring.requests.map((r) => r.path)).toEqual(['/api/users/42'])
+    await s.close()
+    await spring.close()
+  })
+
   it('finds the document, and fakes each value by its schema', async () => {
     const documented = await startApi({ withOpenapi: true })
     const s = await startRest(documented)
