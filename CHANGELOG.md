@@ -1,20 +1,26 @@
 # Changelog
 
-## Unreleased
+## 0.4.2, 13 November 2026
+
+Fixes from a trial of 0.4.1 in front of a Spring Boot API documented by
+Springdoc ([#37](https://github.com/monkilabs/sosie/issues/37)): the schemas of
+its answers, under `*/*`, were not read, so `sosie.yml`'s rules for them never
+applied; and a fake id from an answer did not turn back. And a bit field's
+values no longer share fakes. All seven packages move to 0.4.2 together. Each
+fix is marked with the release it came in.
 
 - (0.4) Two values of a bit field could share a fake, in a short field almost
   always: a field of four bits gave twelve values six fakes. A WHERE on such a
   fake ran as written, and found no row, or the rows it does not stand for.
   Bits are faked as text is: no two values of a field share a fake while it has
   bits to spare.
-- (0.1) REST, from a trial in front of a Spring Boot API
-  ([#37](https://github.com/monkilabs/sosie/issues/37)): with a document whose
-  schemas are named for what they answer, as Springdoc's are (`UserResp` under
-  `/users/{userId}`), a path's id was read as `user.id`, which no answer shows.
-  A fake number from an answer did not turn back: `/users/<fake id>` asked the
-  API for that number, another record or none. A word no schema is named for
-  names the entity the document answers under it, so the path's id, `?userId=`
-  and `OrderResp.userId` share the fakes of `UserResp.id`.
+- (0.1) REST: with a document whose schemas are named for what they answer, as
+  Springdoc's are (`UserResp` under `/users/{userId}`), a path's id was read as
+  `user.id`, which no answer shows. A fake number from an answer did not turn
+  back: `/users/<fake id>` asked the API for that number, another record or
+  none. A word no schema is named for names the entity the document answers
+  under it, so the path's id, `?userId=` and `OrderResp.userId` share the fakes
+  of `UserResp.id`.
 - (0.1) REST: an answer's schema was read under `application/json` only.
   Springdoc writes `*/*` for every controller that does not say what it
   produces, its default, so most of a Spring API's answers had no schema:
