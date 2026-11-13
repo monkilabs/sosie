@@ -138,6 +138,47 @@ describe('an OpenAPI document', () => {
     expect(JSON.stringify(cells.type)).toMatch(/"kind":"json"/)
   })
 
+  it('names an entity by the collection the document answers it under, where no schema is named for the word', () => {
+    const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` })
+    const ok = (schema: object) => ({ get: { responses: { '200': { content: { 'application/json': { schema } } } } } })
+    const record = (more: object = {}) => ({ type: 'object', properties: { id: { type: 'integer' }, ...more } })
+    const api = readApi({
+      openapi: '3.0.1',
+      paths: {
+        // The plainer path says what a word names: /admin/users/{userId} answers another kind of user.
+        '/api/admin/users/{userId}': ok(ref('AdminUserResp')),
+        '/api/users/{userId}': ok(ref('UserResp')),
+        '/api/users/{userId}/orders': ok({ type: 'array', items: ref('OrderResp') }),
+        // No id follows me, and search is no collection's name.
+        '/api/users/me': ok(ref('MeResp')),
+        '/api/search': ok({ type: 'array', items: ref('UserResp') }),
+        // A schema named for the word keeps it.
+        '/api/countries/{code}': ok(ref('CountryResp')),
+        // A record without an id is not what a path's id names.
+        '/api/settings/{key}': ok(ref('SettingResp')),
+      },
+      components: {
+        schemas: {
+          UserResp: record({ email: { type: 'string' } }),
+          AdminUserResp: record(),
+          MeResp: record(),
+          OrderResp: record({ userId: { type: 'integer' } }),
+          Country: record(),
+          CountryResp: record(),
+          SettingResp: { type: 'object', properties: { value: { type: 'string' } } },
+        },
+      },
+    })
+    expect(api.words.get('user')).toBe('UserResp')
+    expect(api.words.get('order')).toBe('OrderResp')
+    expect(api.words.get('country')).toBe('Country')
+    expect(api.words.get('userresp')).toBe('UserResp')
+    for (const word of ['me', 'search', 'setting']) expect(api.words.has(word)).toBe(false)
+    // So a reference by name shares the id the answers show.
+    const order = api.schema.entities.find((e) => e.id === 'OrderResp')!
+    expect(order.fields.find((f) => f.name === 'userId')).toMatchObject({ references: 'UserResp.id', guessed: true })
+  })
+
   it('reads the GET operations, the most specific first', () => {
     expect(api.operations.map((o) => [o.template, o.entity])).toEqual([
       ['/users/me', 'User'],

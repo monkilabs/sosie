@@ -62,7 +62,9 @@ file or URL, or the first of these the API serves under its base:
 `openapi.json`, `openapi.yaml`, `swagger.json`, `v3/api-docs`, `api-docs`, `docs/openapi.json`
 
 Each object schema is an entity, each property a field. `format: email` and `uri` pick their formats; a property named
-`id` is the entity's key, and `userId` shares the values of `User.id`.
+`id` is the entity's key, and `userId` shares the values of `User.id`. Where no schema is named for a path's word, the
+one the document answers under it is: with `/users/{userId}` answering a `UserResp`, as Springdoc names them, a fake id
+from an answer leads back to its record, and `userId` shares the values of `UserResp.id`.
 
 **Without a document**, Sosie learns the schema as answers come: a value's field is where it sits, in the entity its
 path names, singular: `/users` and `/users/87` are `user`, and `{ "data": [{ "email": … }] }` under `/users` is

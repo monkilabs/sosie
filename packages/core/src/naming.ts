@@ -20,9 +20,16 @@ export function referenceOf<T>(key: string, find: (name: string) => T | undefine
   return m ? find(singular(m[1]!.toLowerCase())) : undefined
 }
 
-/** A field named like `userId` or `user_id` shares the values of the id of the entity it names. */
-export function linkByName(entities: Entity[]): void {
+/**
+ * A field named like `userId` or `user_id` shares the values of the id of the entity it names: the one named for the
+ * word, or else the one `aliases` gives for it, by its id ('user' for an API's UserResp).
+ */
+export function linkByName(entities: Entity[], aliases: ReadonlyMap<string, string> = new Map()): void {
   const byName = new Map(entities.map((e) => [singular(e.name.toLowerCase()), e]))
+  for (const [word, id] of aliases) {
+    const entity = entities.find((e) => e.id === id)
+    if (entity && !byName.has(word)) byName.set(word, entity)
+  }
   for (const entity of entities) {
     for (const field of entity.fields) {
       if (field.references) continue

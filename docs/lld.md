@@ -1399,7 +1399,13 @@ JSON Schema types and formats map to neutral types (`date-time` to `datetime`,
 URL formats. A property `id` is the entity's key; one named `userId`, `user_id`
 or `userIds` shares the values of the id of the entity it names, `User`. Such a
 reference is a guess from a name: it shares the target's fakes, but never
-passes because the target does in `sosie.yml`.
+passes because the target does in `sosie.yml`. A word no schema is named for
+names the entity the document answers under it, the plainest path first, as
+Springdoc names schemas for what they answer: `/users/{userId}` answering a
+`UserResp` with an `id` makes `user` name `UserResp`, so the path's id,
+`/users/{userId}/orders`, `?userId=` and `OrderResp.userId` share the fakes of
+`UserResp.id`, which its answers show. A list under a plural word (`/users`)
+names its items' entity too.
 
 Without a document, the schema is learned as responses come: a value is the
 field of where it sits, in the entity its path names, singular (`/users` and
@@ -1521,6 +1527,9 @@ would turn into that field's real value, which the passing field would show.
   .NET's often do, want a document.
 - Answers under another JSON type than `application/json` in the document (`application/hal+json`,
   `application/vnd.api+json`, `*/*`) have no schema there: their entity is named by the path, as without a document.
+- A word a schema is named for names that schema, whatever the document answers under it: with a `User` that clients
+  send and a `UserResp` that `/users/{userId}` answers, the path's id is `User.id`, which no answer shows, so a fake
+  number from an answer does not turn back there. Text, a UUID, is looked up anywhere, and does.
 - A word of the API's that a client types where a path starts (`/deep`), when it is also the fake Sosie gave a
   value, is read as that value, as a client that saw the fake would mean it: a single word is faked as a word. A word
   the document declares, or the API has answered with a list, is the API's, and stays.

@@ -7,6 +7,14 @@
   fake ran as written, and found no row, or the rows it does not stand for.
   Bits are faked as text is: no two values of a field share a fake while it has
   bits to spare.
+- (0.1) REST, from a trial in front of a Spring Boot API
+  ([#37](https://github.com/monkilabs/sosie/issues/37)): with a document whose
+  schemas are named for what they answer, as Springdoc's are (`UserResp` under
+  `/users/{userId}`), a path's id was read as `user.id`, which no answer shows.
+  A fake number from an answer did not turn back: `/users/<fake id>` asked the
+  API for that number, another record or none. A word no schema is named for
+  names the entity the document answers under it, so the path's id, `?userId=`
+  and `OrderResp.userId` share the fakes of `UserResp.id`.
 
 ## 0.4.1, 6 November 2026
 
