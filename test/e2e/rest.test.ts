@@ -708,6 +708,21 @@ describe('an API with an OpenAPI document', () => {
     await spring.close()
   })
 
+  it('reads an answer’s schema under */*, as Springdoc writes it: its rules apply, its enums fake as labels', async () => {
+    const { api: spring, schema } = await startSpring('*/*')
+    const s = await startRest(spring, { schema, rules: 'pass:\n  - UserResp.status\n' })
+    const user = (await s.get('/api/users/42')).body
+    expect(user.status).toBe('STATUS_ACTIVE')
+    expect(['PLAN_FREE', 'PLAN_TEAM', 'PLAN_ENTERPRISE']).toContain(user.plan)
+    expect(user.email).not.toBe('quill.vantablack@canary-mail.test')
+    // And a fake id still leads back to its record.
+    spring.requests.length = 0
+    expect((await s.get(`/api/users/${user.id}`)).body).toEqual(user)
+    expect(spring.requests.map((r) => r.path)).toEqual(['/api/users/42'])
+    await s.close()
+    await spring.close()
+  })
+
   it('finds the document, and fakes each value by its schema', async () => {
     const documented = await startApi({ withOpenapi: true })
     const s = await startRest(documented)

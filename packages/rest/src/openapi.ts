@@ -82,7 +82,7 @@ export function readApi(doc: Node): Api {
     if (!get) continue
     const responses: Node = get.responses ?? {}
     const ok = responses['200'] ?? Object.entries(responses).find(([code]) => /^2\d\d$/.test(code))?.[1]
-    const response = ok?.content?.['application/json']?.schema ?? ok?.schema
+    const response = jsonSchemaOf(ok?.content) ?? ok?.schema
     operations.push({
       template,
       segments: template.split('/').filter(Boolean),
@@ -111,6 +111,27 @@ export function readApi(doc: Node): Api {
 
   const version = doc.openapi ? `OpenAPI ${String(doc.openapi).split('.').slice(0, 2).join('.')}` : `Swagger ${doc.swagger}`
   return { schema: { entities }, operations, schemas, words, version }
+}
+
+/**
+ * Media types that hold the JSON Sosie passes on, the best first: what it asks for, application/json, whatever its
+ * parameters (;charset=UTF-8); then a range that holds it, as Springdoc writes for a controller that does not say what
+ * it produces; then any other JSON type (application/hal+json).
+ */
+const JSON_TYPES = [/^application\/json$/i, /^application\/\*$/i, /^\*\/\*$/i, /^[\w.-]+\/(?:[\w.*-]+\+)?json$/i]
+
+/** The schema of an answer's JSON, from its content by media type: the best type that has one. */
+function jsonSchemaOf(content: Node | undefined): Node | undefined {
+  let best: Node | undefined
+  let rank = JSON_TYPES.length
+  for (const [type, media] of Object.entries<Node>(content ?? {})) {
+    const at = JSON_TYPES.findIndex((json) => json.test(type.split(';')[0]!.trim()))
+    if (at >= 0 && at < rank && media?.schema) {
+      best = media.schema
+      rank = at
+    }
+  }
+  return best
 }
 
 /**
