@@ -373,6 +373,22 @@ describe('sosie, in front of an API', () => {
   })
 })
 
+describe('sosie, in front of an API, refusing paths', () => {
+  it('never sends one of the paths sosie.yml refuses, and says in the banner how many it refuses', async () => {
+    const api = await startApi()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-refuse-'))
+    const dir = project(`sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n    headers:\n      Authorization: Bearer \${APP_TOKEN}\n    refuse: [/users/*]\n`)
+    const sosie = await start({ APP_URL: api.url, APP_TOKEN: TOKEN, SOSIE_HOME: home }, allowSends(home, dir))
+    expect(sosie.stdout()).toMatch(/✓ app {2}127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document; refuses 1 path\n/)
+    expect((await fetch(`${sosie.address()}/users/1`)).status).toBe(403)
+    expect((await fetch(`${sosie.address()}/users`)).status).toBe(200)
+    expect(api.requests.map((r) => r.path)).toContain('/v1/users')
+    expect(api.requests.map((r) => r.path)).not.toContain('/v1/users/1')
+    expect(await stop(sosie.child)).toBe(0)
+    await api.close()
+  })
+})
+
 describe('sosie, before a source sends a variable', () => {
   const billing = (header = 'Bearer ${APP_TOKEN}') => `sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n    headers:\n      Authorization: ${header}\n`
 

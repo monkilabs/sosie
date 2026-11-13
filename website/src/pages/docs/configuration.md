@@ -51,6 +51,7 @@ your first source and writes one, as `npx @sosie/cli init` does.
 | `kind` | a source | from the URL | `postgres`, `mysql`, `mongodb`, `rest` or `graphql`, for a URL that does not say: GraphQL at `/query` |
 | `schema` | a REST or GraphQL source | the API's own: its OpenAPI document if it serves one, or introspection | A file, by its path from `sosie.yml`, or a URL: an OpenAPI document, or GraphQL SDL or an introspection result as JSON |
 | `headers` | a REST or GraphQL source | none | Headers Sosie sends the API: `Authorization: Bearer ${TOKEN}` |
+| `refuse` | a REST source | none | Paths Sosie never sends a request to, each with every path under it: `[/oauth/*, /billing/portal]` |
 | `port` | a source | the next free from 7674, in the order listed | `0` lets the system pick |
 | `host` | the top, or a source | `127.0.0.1` | Another address is allowed, with a warning: the endpoints have no password |
 | `max-rows` | the top, or a source | `1000` | Rows a query returns, and items of each list in an API's answer |

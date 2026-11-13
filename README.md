@@ -129,7 +129,7 @@ name or a query name its document or its answers show, stays as written.
 A GraphQL API works the same way, at its endpoint (`https://api.internal/graphql`, or Supabase's `/graphql/v1`; one
 at another path with `kind: graphql`). Sosie reads the schema by introspection, or from the source's `schema`, answers
 the client's introspection from it, and sends only queries on, never mutations. A query field that writes, like a
-`GET` that writes, is the API's to guard.
+`GET` that writes, is the API's to guard; a REST source's `refuse` closes off the paths it lists.
 
 ### In front of MySQL
 

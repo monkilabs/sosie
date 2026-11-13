@@ -28,6 +28,7 @@ async function startRest(
     userinfo = '',
     learned = undefined as ((schema: Schema) => void) | undefined,
     schema = undefined as string | undefined,
+    refuse = undefined as string[] | undefined,
   } = {},
 ) {
   const connection = await rest.connect(new URL(`${api.url.replace('//', `//${userinfo}`)}${query}`), {
@@ -35,6 +36,7 @@ async function startRest(
     statementTimeout: 5000,
     headers,
     ...(schema && { schema }),
+    ...(refuse && { refuse }),
   })
   // The same key on every run, so the same fakes. With a key of its own each run, a value's fake could by chance be
   // one of the API's own words: a single word is faked as a word, and a value Sosie gave, typed where a path starts
@@ -351,6 +353,28 @@ describe('an API without an OpenAPI document', () => {
 })
 
 describe('the guard and the credentials', () => {
+  it('never sends a path sosie.yml refuses, however it is written, nor follows a redirect to one', async () => {
+    const strict = await startRest(api, { refuse: ['/users/*', '/countries', '/v1/members'] })
+    expect(strict.connection.summary).toBe('no OpenAPI document; refuses 3 paths')
+    const [user] = (await strict.get('/users')).body.data
+    const sent = api.requests.length
+    const refused = 'The source refuses this path: Sosie does not send it to the API.'
+    // A fake id turns back into the real path, which is refused; so is a path written another way, and one under it.
+    for (const path of [`/users/${user.id}`, '/users/1', '/COUNTRIES', '/countries;v=2', '/%2563ountries', '/countries/', '/countries/1', '/v1/members']) {
+      expect(await strict.get(path), path).toMatchObject({ status: 403, body: { error: refused } })
+    }
+    expect((await strict.get('/countries', { method: 'HEAD' })).status).toBe(403)
+    // A redirect to a refused path is not followed: the path asked for was sent, the one it led to was not.
+    expect(await strict.get('/products/featured')).toMatchObject({
+      status: 403,
+      body: { error: 'The API redirected to a path the source refuses; Sosie does not follow it.' },
+    })
+    expect(api.requests.slice(sent).map((r) => r.path)).toEqual(['/v1/products/featured'])
+    // A path that only starts like one refused is sent.
+    expect((await strict.get('/country-links')).status).toBe(200)
+    await strict.close()
+  })
+
   it('sends only GET and HEAD to the API', async () => {
     const before = api.requests.length
     const post = await sosie.get('/users', { method: 'POST', body: '{}' })

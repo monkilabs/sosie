@@ -397,6 +397,7 @@ const optionsOf = (plan: Plan) => ({
   statementTimeout: plan.config.timeout * 1000,
   headers: plan.headers,
   ...(plan.config.schema && { schema: plan.config.schema }),
+  ...(plan.config.refuse && { refuse: plan.config.refuse }),
 })
 
 /* sosie mcp */

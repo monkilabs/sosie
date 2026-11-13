@@ -3,7 +3,7 @@ import { crossSite, localRequest, pacer, parseJson, why, type Endpoint, type Fak
 import { ENVELOPES, fakeBody, queryField, type FakeContext } from './fake.js'
 import { referenceOf, type Api } from './openapi.js'
 import { oneSegment, PAGING, PATH_WORD, QUERY_NAME, QUERY_VALUE, route, segmentsOf, singular, VALUE_SEGMENT, valueByHabit, wordName, type Route } from './paths.js'
-import type { RestUpstream } from './upstream.js'
+import { RefusedPath, type RestUpstream, type UpstreamResponse } from './upstream.js'
 
 export interface RestContext {
   upstream: RestUpstream
@@ -223,7 +223,14 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     const target = new URL(`${base.origin}${basePath}/${real.join('/')}`)
     target.search = query.toString()
 
-    const answer = await ctx.upstream.get(target, req.method === 'HEAD' ? 'HEAD' : 'GET')
+    let answer: UpstreamResponse
+    try {
+      answer = await ctx.upstream.get(target, req.method === 'HEAD' ? 'HEAD' : 'GET')
+    } catch (error) {
+      // A path sosie.yml refuses, as the API would read it: never sent, nor followed to from another.
+      if (error instanceof RefusedPath) return send(res, 403, { error: error.message })
+      throw error
+    }
     if (answer.status === 401 || answer.status === 403) {
       ctx.log(`The API answered ${answer.status} to ${incoming.pathname}: check the source's headers.`)
     }

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+The asks of a trial in front of a Spring Boot API
+([#37](https://github.com/monkilabs/sosie/issues/37)) beyond its fix in 0.4.2.
+
+- REST: a source's `refuse` lists paths Sosie never sends a request to, each
+  with every path under it: `refuse: [/oauth/*, /billing/portal]`. A `GET`
+  that acts, such as an OAuth callback or a portal that opens a session, is
+  the API's to guard, and this closes it off in front of an agent. A refused
+  path gets `403`. It is compared as the API would read what Sosie sends,
+  fakes turned back into real values: in any case, without `;params`, decoded
+  twice, from the base or the root. A redirect to one is not followed. The
+  banner says how many paths a source refuses.
+
 ## 0.4.2, 13 November 2026
 
 Fixes from a trial of 0.4.1 in front of a Spring Boot API documented by

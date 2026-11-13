@@ -39,7 +39,20 @@ Only `GET` and `HEAD` reach the API. Anything else gets `405` and never leaves S
 (`?_method=DELETE` and the like), which some frameworks run instead of `GET`, gets `400`; the client's headers never
 reach the API at all.
 
-A `GET` that writes is the API's to guard: Sosie sends every `GET` on.
+A `GET` that writes is the API's to guard: Sosie sends every `GET` on, but those the source's `refuse` lists. A `GET`
+that acts, such as an OAuth callback or a billing portal that opens a session, can be closed off in front of an agent:
+
+```yaml
+sources:
+  api:
+    upstream: ${API_URL}
+    refuse: [/oauth/*, /billing/portal]
+```
+
+A path listed, and every path under it, gets `403` and never reaches the API. `*` or `{name}` is any one segment, and
+a `*` within one any text (`/exports/report*`). Sosie compares the path it would send, fakes turned back into real
+values, as the API would read it: in any case, without `;params`, decoded twice, from the base or the root. A redirect
+to a refused path is not followed.
 
 ## Credentials
 

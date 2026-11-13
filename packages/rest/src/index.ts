@@ -3,7 +3,7 @@ import { readCapped, secretParts, upstreamHeaders, why, type Connection, type So
 import { startEndpoint } from './endpoint.js'
 import { requestTool } from './mcp.js'
 import { parseDocument, readApi, type Api } from './openapi.js'
-import { RestUpstream } from './upstream.js'
+import { RefusedPath, RestUpstream } from './upstream.js'
 
 /** Where an API usually serves its OpenAPI document, relative to its base. */
 const DISCOVER = ['openapi.json', 'openapi.yaml', 'swagger.json', 'v3/api-docs', 'api-docs', 'docs/openapi.json']
@@ -14,7 +14,7 @@ export const rest: Source = {
   title: 'REST API',
   schemes: ['http:', 'https:'],
   matches: (url) => url.protocol === 'http:' || url.protocol === 'https:',
-  settings: ['headers', 'schema'],
+  settings: ['headers', 'schema', 'refuse'],
   async connect(upstream, options): Promise<Connection> {
     const headers = upstreamHeaders(options.headers)
     const user = decodeURIComponent(upstream.username)
@@ -25,7 +25,7 @@ export const rest: Source = {
     const params = new URLSearchParams(base.search)
     base.username = base.password = base.search = base.hash = ''
     base.pathname = base.pathname.replace(/\/?$/, '/')
-    const api = new RestUpstream(base, headers, options.statementTimeout, params)
+    const api = new RestUpstream(base, headers, options.statementTimeout, params, options.refuse)
     const secrets = secretParts(headers, [...params.values(), user, password])
     const label = `${base.host}${base.pathname.replace(/\/$/, '')}`
 
@@ -49,7 +49,8 @@ export const rest: Source = {
           if (answer.status !== 200) continue
           found = parseDocument(answer.body)
         } catch (error) {
-          if (!reached) reason = why(error)
+          // A path sosie.yml refuses is never asked for, a document's included.
+          if (!reached) reason = error instanceof RefusedPath ? reason || error.message : why(error)
           continue
         }
         try {
@@ -69,10 +70,11 @@ export const rest: Source = {
       }
     }
     const operations = doc?.operations.length ?? 0
+    const refused = options.refuse?.length ? `; refuses ${options.refuse.length} ${options.refuse.length === 1 ? 'path' : 'paths'}` : ''
     return {
       schema: doc?.schema ?? { entities: [] },
       label,
-      summary: doc ? `${doc.version}, ${doc.schema.entities.length} schemas, ${operations} GET ${operations === 1 ? 'path' : 'paths'}` : 'no OpenAPI document',
+      summary: `${doc ? `${doc.version}, ${doc.schema.entities.length} schemas, ${operations} GET ${operations === 1 ? 'path' : 'paths'}` : 'no OpenAPI document'}${refused}`,
       warnings,
       learns: !doc,
       serve: (listen, faker, learned) =>

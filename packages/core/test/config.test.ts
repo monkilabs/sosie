@@ -3,7 +3,7 @@ import { ConfigError, interpolate, readConfig, settingsProblems, variableFor, va
 import { rulesFor, RulesError, unheldRules, unmetRules } from '../src/rules.js'
 import type { Schema } from '../src/source.js'
 
-const KINDS = [{ kind: 'postgres' }, { kind: 'mysql' }, { kind: 'rest', settings: ['headers', 'schema'] }, { kind: 'graphql', settings: ['headers', 'schema'] }]
+const KINDS = [{ kind: 'postgres' }, { kind: 'mysql' }, { kind: 'rest', settings: ['headers', 'schema', 'refuse'] }, { kind: 'graphql', settings: ['headers', 'schema'] }]
 const read = (text: string) => readConfig(text, '/work/app/sosie.yml', KINDS)
 const problems = (text: string) => {
   try {
@@ -30,6 +30,7 @@ sources:
       Authorization: Bearer \${BILLING_TOKEN}
       X-Tenant: production
     schema: ./openapi/billing.yaml
+    refuse: [/oauth/*, /billing/portal]
     port: 7700
     max-rows: 5
     pass: [invoice.total]
@@ -46,6 +47,7 @@ sources:
       upstream: 'BILLING_API_URL',
       headers: { Authorization: 'Bearer ${BILLING_TOKEN}', 'X-Tenant': 'production' },
       schema: '/work/app/openapi/billing.yaml',
+      refuse: ['/oauth/*', '/billing/portal'],
       port: 7700,
       maxRows: 5,
       timeout: 10,
@@ -121,7 +123,7 @@ sources:
       'sosie.yml: max_rows is not a key. Did you mean max-rows? Keys: sources, pass, format, host, max-rows, timeout.',
       'sosie.yml: timeout is a whole number from 1 to 3600, not 0.',
       'sosie.yml: sources.Shop: a source is named in lowercase letters, digits, - and _, a letter first.',
-      'sosie.yml: sources.crm.upstrem is not a key of a source. Did you mean upstream? Keys: upstream, kind, schema, headers, port, host, max-rows, timeout, pass, format.',
+      'sosie.yml: sources.crm.upstrem is not a key of a source. Did you mean upstream? Keys: upstream, kind, schema, headers, refuse, port, host, max-rows, timeout, pass, format.',
       'sosie.yml: sources.crm.kind is one of postgres, mysql, rest, graphql. Did you mean postgres?',
       'sosie.yml: sources.crm.port is a whole number from 0 to 65535, not 70000.',
       "sosie.yml: sources.api.port: 7700 is web's port too.",
@@ -144,11 +146,15 @@ sources:
       [billing('    headers:\n      X-Teams: [core, web]\n'), 'sosie.yml: sources.billing.headers.X-Teams is a value on one line.'],
       [billing('    headers:\n      X-Team: { name: core }\n'), 'sosie.yml: sources.billing.headers.X-Team is a value on one line.'],
       [billing('    headers:\n      Authorization: Bearer ${TOKEN\n'), 'sosie.yml: sources.billing.headers.Authorization names a variable as ${NAME}: letters, digits and _.'],
+      [billing('    refuse: /oauth\n'), 'sosie.yml: sources.billing.refuse is a list of paths, each from /, such as [/oauth/*, /billing/portal].'],
+      [billing('    refuse: [oauth/start]\n'), 'sosie.yml: sources.billing.refuse is a list of paths, each from /, such as [/oauth/*, /billing/portal].'],
+      [billing('    refuse: ["/billing?portal=1"]\n'), 'sosie.yml: sources.billing.refuse is a list of paths, each from /, such as [/oauth/*, /billing/portal]: /billing?portal=1 has a query or a fragment.'],
+      [billing('    refuse: []\n'), 'sosie.yml: sources.billing.refuse is a list of paths, each from /, such as [/oauth/*, /billing/portal].'],
       [`host: ""\n${shop}`, 'sosie.yml: host is an address to listen on, such as 127.0.0.1.'],
       [`max-rows: 0\n${shop}`, 'sosie.yml: max-rows is a whole number from 1, not 0.'],
       [`timeout: 3601\n${shop}`, 'sosie.yml: timeout is a whole number from 1 to 3600, not 3601.'],
       [`database: shop\n${shop}`, 'sosie.yml: database is not a key. Keys: sources, pass, format, host, max-rows, timeout.'],
-      [`${shop}    database: shop\n`, 'sosie.yml: sources.shop.database is not a key of a source. Keys: upstream, kind, schema, headers, port, host, max-rows, timeout, pass, format.'],
+      [`${shop}    database: shop\n`, 'sosie.yml: sources.shop.database is not a key of a source. Keys: upstream, kind, schema, headers, refuse, port, host, max-rows, timeout, pass, format.'],
       [`${shop}    kind: 5\n`, 'sosie.yml: sources.shop.kind is one of postgres, mysql, rest, graphql.'],
     ] as const) {
       expect(problems(text), text).toEqual([problem])
@@ -207,12 +213,18 @@ sources:
   })
 
   it('refuses a key a source’s kind does not take, saying why', () => {
-    expect(problems('sources:\n  shop:\n    upstream: ${SHOP_URL}\n    kind: postgres\n    headers:\n      X-Team: core\n')).toEqual([
+    expect(problems('sources:\n  shop:\n    upstream: ${SHOP_URL}\n    kind: postgres\n    headers:\n      X-Team: core\n    refuse: [/admin]\n')).toEqual([
       'sosie.yml: sources.shop.headers: shop is a postgres source, which takes no headers.',
+      'sosie.yml: sources.shop.refuse: shop is a postgres source, which has no paths to refuse.',
     ])
     // A source whose kind its URL says is checked once the URL is read.
-    expect(settingsProblems({ name: 'db', headers: {}, schema: '/x.sql' }, { kind: 'mysql' })).toEqual([
+    expect(settingsProblems({ name: 'db', headers: {}, schema: '/x.sql', refuse: ['/admin'] }, { kind: 'mysql' })).toEqual([
       'sosie.yml: sources.db.schema: db is a mysql source, which takes no schema.',
+      'sosie.yml: sources.db.refuse: db is a mysql source, which has no paths to refuse.',
+    ])
+    // GraphQL is one path: what it refuses would be queries, not paths.
+    expect(problems('sources:\n  shop:\n    upstream: ${SHOP_URL}\n    kind: graphql\n    refuse: [/admin]\n')).toEqual([
+      'sosie.yml: sources.shop.refuse: shop is a graphql source, which has no paths to refuse.',
     ])
   })
 })

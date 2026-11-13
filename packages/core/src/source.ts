@@ -112,6 +112,8 @@ export interface SourceOptions {
   headers?: Record<string, string>
   /** sosie.yml's `schema`: a file, by an absolute path, or a URL. */
   schema?: string
+  /** sosie.yml's `refuse`: paths of an HTTP upstream Sosie never sends a request to, each with every path under it. */
+  refuse?: readonly string[]
 }
 
 export interface Source {
@@ -124,7 +126,7 @@ export interface Source {
   /** Whether this source reads this upstream, when sosie.yml gives it no kind; or serves this endpoint address. */
   matches(url: URL): boolean
   /** The keys of a source in sosie.yml it takes beyond every source's. Any other is an error. */
-  readonly settings?: readonly ('headers' | 'schema')[]
+  readonly settings?: readonly ('headers' | 'schema' | 'refuse')[]
   /** Connect read-only and describe the upstream in neutral terms. */
   connect(upstream: URL, options: SourceOptions): Promise<Connection>
   /** MCP tools this source adds beside the core's describe: Postgres adds query. They talk to the running endpoint, never to the upstream. */

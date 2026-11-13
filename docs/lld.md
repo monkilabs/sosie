@@ -126,7 +126,8 @@ packages/
   rest/src/
     index.ts         the Source: matches http:// and https://, finds the OpenAPI document
     endpoint.ts      the HTTP server: the guard, paths and queries back to real values
-    upstream.ts      the API: Sosie's credentials, same-origin redirects, a timeout
+    upstream.ts      the API: Sosie's credentials, same-origin redirects, a timeout, the paths it refuses
+    refuse.ts        which paths sosie.yml's refuse lists, as the API would read them
     openapi.ts       an OpenAPI document to the neutral schema and its GET operations
     paths.ts         what a path names: an entity, and the field of each value in it
     fake.ts          a JSON body, every value faked by its field
@@ -376,6 +377,7 @@ sources:
       Authorization: Bearer ${BILLING_TOKEN}
       X-Tenant: production
     schema: ./openapi/billing.yaml
+    refuse: [/oauth/*, /billing/portal]
   storefront:
     upstream: ${STOREFRONT_URL}
     kind: graphql
@@ -389,6 +391,7 @@ sources:
 | `kind` | a source | from the URL | `postgres`, `mysql`, `mongodb`, `rest`, `graphql`: for a URL that does not say, such as GraphQL at `/query` |
 | `schema` | a source that takes one | REST: the API's document, if it serves one; GraphQL: introspection | A file, its path from `sosie.yml`'s folder, or a URL: an OpenAPI document, or GraphQL SDL or an introspection result as JSON. A URL at the upstream's origin is read with its `headers`; one elsewhere without them |
 | `headers` | a source that takes them | none | Headers Sosie sends the upstream, each `Name: value`; a value may hold `${NAME}`s among its text |
+| `refuse` | a REST source | none | Paths Sosie never sends a request to, each with every path under it: `[/oauth/*, /billing/portal]` |
 | `port` | a source | the next free from 7674, in the order listed | 0 to 65535; 0 lets the system pick |
 | `host` | the top, or a source | `127.0.0.1` | Where the endpoints listen |
 | `max-rows` | the top, or a source | 1000 | Rows a query returns, items of each list in an API's answer; at least 1 |
@@ -1353,7 +1356,18 @@ read, as the API would resolve it, so both read the same path. A method override
 method that writes), which some frameworks run instead of `GET`, gets `400`,
 its name and its method as written or as Sosie turns them back, and read as frameworks read them: a name with a `.`,
 a space or a `[` in it as `_` (`?.method=`, as PHP reads it), one ending in `[]` without it, a method with spaces
-around it trimmed. On
+around it trimmed.
+
+A `GET` that acts (an OAuth start or callback, a billing portal that opens a session) is the API's to guard, but the
+source's `refuse` closes it off in front of an agent: a path it lists, and every path under it, gets `403`, `GET` and
+`HEAD` alike, and never leaves Sosie. A segment `*` or `{name}` is any one segment (`/oauth/*`, `/users/{id}/sessions`);
+a `*` within one is any text (`/exports/report*`). A path is compared as the API would read the one Sosie sends,
+after fakes turn back into real values, so a fake id cannot reach a refused `/users/42/sessions`: each segment
+without its case and its `;params`, decoded once and twice, and a doubled or trailing `/` ignored. It is compared
+from the upstream's base (`/oauth/start` of `https://api.internal/v1/oauth/start`) and from the origin's root
+(`/v1/oauth/start`), so either way of writing it holds. Each redirect is compared before it is followed: one to a
+refused path is not, and the client gets `403`. Sosie does not look for its OpenAPI document at a refused path. The
+banner says how many paths a source refuses. On
 this machine's own
 address, a request whose `Host` is not `localhost`, a `127.` address or `[::1]`
 gets `403`: a web page that rebinds its own name to this machine cannot read the
@@ -1581,7 +1595,9 @@ would turn into that field's real value, which the passing field would show.
   own (`/jones`) and answered with a list, is taken for a collection's name, and
   links show it, with a document or without one.
 - An endpoint the API serves for `GET` that writes is the API's to guard: Sosie
-  sends every `GET` on.
+  sends every `GET` on, unless the source's `refuse` lists its path.
+- `refuse` names paths, not queries: `/export?format=csv` cannot be refused alone, nor a path only the client's
+  `Accept` makes act.
 - An id with a `/` in it (`group%2Fproject`, as GitLab names projects) cannot
   be asked for by path; the API's other id for it can.
 

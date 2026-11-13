@@ -23,6 +23,8 @@ export interface SourceConfig {
   schema?: string
   /** Each header as written, its ${NAME}s not read yet. */
   headers: Record<string, string>
+  /** Paths of the API Sosie never sends a request to, each with every path under it: /oauth/*, /billing/portal. */
+  refuse?: string[]
   port?: number
   host: string
   maxRows: number
@@ -55,7 +57,7 @@ export const DEFAULTS = { host: '127.0.0.1', maxRows: 1000, timeout: 30 } as con
 export const noSourcesProblem = (file = 'sosie.yml') => `${file} names no sources. Add one under sources:, or run sosie init.`
 
 const TOP = ['sources', 'pass', 'format', 'host', 'max-rows', 'timeout']
-const SOURCE = ['upstream', 'kind', 'schema', 'headers', 'port', 'host', 'max-rows', 'timeout', 'pass', 'format']
+const SOURCE = ['upstream', 'kind', 'schema', 'headers', 'refuse', 'port', 'host', 'max-rows', 'timeout', 'pass', 'format']
 const NAME = /^[a-z][a-z0-9_-]{0,39}$/
 const VARIABLE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g
 /** A header's $$, a $ of its text, or a ${NAME}: read from the left, so $${NAME} is text and asks for nothing. */
@@ -188,6 +190,18 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
         }
       }
 
+      let refuse: string[] | undefined
+      if (source.refuse !== undefined) {
+        const list = source.refuse
+        const how = ' is a list of paths, each from /, such as [/oauth/*, /billing/portal]'
+        if (!Array.isArray(list) || !list.length || list.some((p) => typeof p !== 'string' || !p.startsWith('/'))) at(`${path}.refuse`, `${how}.`)
+        else {
+          const queried = (list as string[]).find((p) => /[?#]/.test(p))
+          if (queried) at(`${path}.refuse`, `${how}: ${queried} has a query or a fragment.`)
+          else refuse = list as string[]
+        }
+      }
+
       let port: number | undefined
       if (source.port !== undefined) {
         if (!Number.isInteger(source.port) || (source.port as number) < 0 || (source.port as number) > 65_535) {
@@ -202,13 +216,14 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
 
       const own = settings(source, `${path}.`, at)
       const known = kind ? kinds.find((k) => k.kind === kind) : undefined
-      if (known) problems.push(...settingsProblems({ name, headers, ...(schema && { schema }) }, known, file))
+      if (known) problems.push(...settingsProblems({ name, headers, ...(schema && { schema }), ...(refuse && { refuse }) }, known, file))
       sources.push({
         name,
         upstream,
         ...(kind && { kind }),
         ...(schema && { schema }),
         headers,
+        ...(refuse && { refuse }),
         ...(port !== undefined && { port }),
         host: own.host ?? shared.host ?? DEFAULTS.host,
         maxRows: own.maxRows ?? shared.maxRows ?? DEFAULTS.maxRows,
@@ -227,7 +242,7 @@ export function readConfig(text: string, location: string, kinds: Kind[]): Confi
 }
 
 /** A key a source's kind does not take: told by its name, and why. */
-export function settingsProblems(source: Pick<SourceConfig, 'name' | 'headers' | 'schema'>, kind: Kind, file = 'sosie.yml'): string[] {
+export function settingsProblems(source: Pick<SourceConfig, 'name' | 'headers' | 'schema' | 'refuse'>, kind: Kind, file = 'sosie.yml'): string[] {
   const takes = new Set(kind.settings ?? [])
   const problems: string[] = []
   if (Object.keys(source.headers).length && !takes.has('headers')) {
@@ -235,6 +250,9 @@ export function settingsProblems(source: Pick<SourceConfig, 'name' | 'headers' |
   }
   if (source.schema !== undefined && !takes.has('schema')) {
     problems.push(`${file}: sources.${source.name}.schema: ${source.name} is a ${kind.kind} source, which takes no schema.`)
+  }
+  if (source.refuse !== undefined && !takes.has('refuse')) {
+    problems.push(`${file}: sources.${source.name}.refuse: ${source.name} is a ${kind.kind} source, which has no paths to refuse.`)
   }
   return problems
 }
