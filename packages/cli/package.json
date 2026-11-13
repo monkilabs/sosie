@@ -1,6 +1,6 @@
 {
   "name": "@sosie/cli",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Your AI agent sees a double of your data. Never the real thing.",
   "keywords": [
     "ai",
@@ -46,11 +46,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "@sosie/core": "^0.4.1",
-    "@sosie/graphql": "^0.4.1",
-    "@sosie/mongodb": "^0.4.1",
-    "@sosie/mysql": "^0.4.1",
-    "@sosie/postgres": "^0.4.1",
-    "@sosie/rest": "^0.4.1"
+    "@sosie/core": "^0.4.2",
+    "@sosie/graphql": "^0.4.2",
+    "@sosie/mongodb": "^0.4.2",
+    "@sosie/mysql": "^0.4.2",
+    "@sosie/postgres": "^0.4.2",
+    "@sosie/rest": "^0.4.2"
   }
 }
