@@ -13,6 +13,8 @@ export interface RestContext {
   maxItems: number
   /** Sosie's own credentials for the API, as `secretParts` gives them. */
   secrets: readonly string[]
+  /** Told the status of each answer: a 401 may say the credentials have expired. */
+  answered?: (status: number) => void
   log: (line: string) => void
   /** Told the schema an API without a document has shown so far, as it grows. */
   learned?: (schema: Schema) => void
@@ -234,6 +236,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
     if (answer.status === 401 || answer.status === 403) {
       ctx.log(`The API answered ${answer.status} to ${incoming.pathname}: check the source's headers.`)
     }
+    ctx.answered?.(answer.status)
     const json = /[/+]json\b/i.test(answer.type)
     // Words the client wrote itself: links in this answer may show them.
     const mine = new Set([...sent.filter((segment, i) => !rt.values.has(i) && words[i] === undefined), ...names])

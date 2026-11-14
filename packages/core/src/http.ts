@@ -5,6 +5,7 @@
  */
 
 import type { IncomingHttpHeaders } from 'node:http'
+import { upstreamHeaders } from './naming.js'
 
 /** A response's body as text, refused as soon as it passes `max` bytes, whatever its content-length says. */
 export async function readCapped(response: Response, max: number): Promise<string> {
@@ -52,6 +53,54 @@ export function secretParts(headers: Record<string, string>, values: Iterable<st
     .flatMap((value) => value.split(/[:"']+/))
     .filter((part) => part.length >= 6 && !SCHEMES.test(part))
   return [...new Set(parts.map((part) => part.toLowerCase()))]
+}
+
+/**
+ * An HTTP upstream's credentials: sosie.yml's headers, each ${NAME} read, and a user and password in its URL as a Basic
+ * header unless the headers hold an Authorization. They may be renewed while Sosie runs, when the API says they have
+ * expired: `headers` is changed in place, so whatever holds it sends the new ones, and `secrets` keeps the old ones
+ * beside the new, as an answer may still quote them.
+ */
+export class Credentials {
+  /** What is sent, by lowercase name. */
+  readonly headers: Record<string, string>
+  /** Sosie's own credentials, as `secretParts` gives them: a key, or a value that passes, that holds one is faked. */
+  readonly secrets: string[]
+  private told = false
+
+  constructor(
+    given: Record<string, string> | undefined,
+    private readonly url: { user: string; password: string; query: Iterable<string> },
+    /** Told of a 401: once, until the API answers 2xx, or the headers are renewed. */
+    private readonly unauthorized?: () => void,
+  ) {
+    this.headers = this.read(given)
+    this.secrets = secretParts(this.headers, [...url.query, url.user, url.password])
+  }
+
+  /** Send these headers from now on: sosie.yml's, read again with new values. One that is no valid header throws, and renews nothing. */
+  renew(given: Record<string, string>): void {
+    const headers = this.read(given)
+    for (const name of Object.keys(this.headers)) delete this.headers[name]
+    Object.assign(this.headers, headers)
+    for (const part of secretParts(headers)) if (!this.secrets.includes(part)) this.secrets.push(part)
+    this.told = false
+  }
+
+  /** Told the status of each answer the API gave a client. */
+  answered(status: number): void {
+    if (status >= 200 && status < 300) this.told = false
+    else if (status === 401 && !this.told) {
+      this.told = true
+      this.unauthorized?.()
+    }
+  }
+
+  private read(given: Record<string, string> | undefined): Record<string, string> {
+    const headers = upstreamHeaders(given)
+    if (this.url.user) headers.authorization ??= `Basic ${Buffer.from(`${this.url.user}:${this.url.password}`).toString('base64')}`
+    return headers
+  }
 }
 
 /** Why a request failed, with the cause fetch keeps behind "fetch failed": a refused connection, a TLS error, a name not found. */

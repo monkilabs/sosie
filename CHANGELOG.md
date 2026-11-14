@@ -13,6 +13,13 @@ The asks of a trial in front of a Spring Boot API
   fakes turned back into real values: in any case, without `;params`, decoded
   twice, from the base or the root. A redirect to one is not followed. The
   banner says how many paths a source refuses.
+- REST and GraphQL: a short-lived token in a header no longer needs a restart.
+  When the API answers `401`, Sosie asks in its terminal, at a hidden prompt,
+  for the variables that source's headers read, each kept with Enter; every
+  source that reads one typed sends the new value from then on, and Sosie
+  keeps running, with the words it has learned. A source is asked once, until
+  its API answers `2xx` or its headers are renewed. Without a terminal,
+  nothing is asked, as before.
 
 ## 0.4.2, 13 November 2026
 

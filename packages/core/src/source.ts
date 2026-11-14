@@ -114,6 +114,11 @@ export interface SourceOptions {
   schema?: string
   /** sosie.yml's `refuse`: paths of an HTTP upstream Sosie never sends a request to, each with every path under it. */
   refuse?: readonly string[]
+  /**
+   * Told when an HTTP upstream answers a client 401, as an expired token makes it: once, until it answers 2xx, or the
+   * connection's headers are renewed. The CLI then asks for the headers' variables again.
+   */
+  unauthorized?: () => void
 }
 
 export interface Source {
@@ -143,6 +148,8 @@ export interface Connection {
   readonly warnings: string[]
   /** The schema grows as values come (an API without a schema): sosie.yml may name fields not met yet. */
   readonly learns?: boolean
+  /** Send these headers from now on: sosie.yml's, read again with new values. One that is no valid header throws, and renews nothing. */
+  renew?(headers: Record<string, string>): void
   /**
    * Start the endpoint clients use. Every value it returns goes through the Faker. A source that `learns` its fields
    * calls `learned` with its schema as it grows, so `sosie mcp` can describe what it has met.

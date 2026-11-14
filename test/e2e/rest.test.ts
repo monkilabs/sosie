@@ -29,6 +29,7 @@ async function startRest(
     learned = undefined as ((schema: Schema) => void) | undefined,
     schema = undefined as string | undefined,
     refuse = undefined as string[] | undefined,
+    unauthorized = undefined as (() => void) | undefined,
   } = {},
 ) {
   const connection = await rest.connect(new URL(`${api.url.replace('//', `//${userinfo}`)}${query}`), {
@@ -37,6 +38,7 @@ async function startRest(
     headers,
     ...(schema && { schema }),
     ...(refuse && { refuse }),
+    ...(unauthorized && { unauthorized }),
   })
   // The same key on every run, so the same fakes. With a key of its own each run, a value's fake could by chance be
   // one of the API's own words: a single word is faked as a word, and a value Sosie gave, typed where a path starts
@@ -373,6 +375,27 @@ describe('the guard and the credentials', () => {
     // A path that only starts like one refused is sent.
     expect((await strict.get('/country-links')).status).toBe(200)
     await strict.close()
+  })
+
+  it('tells of a 401 once, until the API answers 2xx or the headers are renewed, and sends renewed headers from then on', async () => {
+    let told = 0
+    const s = await startRest(api, { unauthorized: () => told++ })
+    expect((await s.get('/users')).status).toBe(200)
+    // The token expires: the first 401 is told, the next not, as the developer is asked once.
+    s.connection.renew!({ Authorization: 'Bearer expired-token-1' })
+    for (let i = 0; i < 2; i++) expect((await s.get('/users')).status).toBe(401)
+    expect(told).toBe(1)
+    expect(api.requests.at(-1)!.authorization).toBe('Bearer expired-token-1')
+    s.connection.renew!({ Authorization: `Bearer ${TOKEN}` })
+    expect((await s.get('/users')).status).toBe(200)
+    expect(api.requests.at(-1)!.authorization).toBe(`Bearer ${TOKEN}`)
+    // Renewed with a value that is wrong too: its 401 is told again.
+    s.connection.renew!({ Authorization: 'Bearer expired-token-2' })
+    expect((await s.get('/users')).status).toBe(401)
+    expect(told).toBe(2)
+    expect(() => s.connection.renew!({ Authorization: 'Bearer a\nb' })).toThrow('The header Authorization is not a valid one')
+    expect(api.requests.at(-1)!.authorization).toBe('Bearer expired-token-2')
+    await s.close()
   })
 
   it('sends only GET and HEAD to the API', async () => {

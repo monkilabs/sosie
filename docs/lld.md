@@ -79,7 +79,7 @@ packages/
     scan.ts          sosie scan
     mcp.ts           the MCP server: describe, and each source's tools
     running.ts       which Sosies run, for sosie mcp
-    http.ts          what the HTTP sources share: capped reads, local clients only, faking a large body in slices
+    http.ts          what the HTTP sources share: capped reads, local clients only, faking a large body in slices, credentials renewed
     json.ts          JSON with integers beyond 2^53 kept as written
   postgres/src/
     index.ts         the Source: matches postgres:// and postgresql://, connects, serves
@@ -423,6 +423,24 @@ A yes keeps it, beside what was allowed before, so a branch that says otherwise 
 Sosie with nothing sent (exit 1); without a terminal, Sosie stops and says to start it in one (exit 2). The text
 around a variable, a header that names none, and a variable's value are never asked about: a source whose headers
 name no variable sends none.
+
+**A token that expires.** A REST or GraphQL source's API that answers a client `401`, as it does when a short-lived
+token in a header has expired, has the variables that source's headers read asked for again, in the terminal Sosie
+runs in, at a hidden prompt, each kept with Enter:
+
+```
+  ! billing: the API answered 401: a value its headers send may have expired.
+  BILLING_TOKEN, a new value (hidden), or Enter to keep it:
+```
+
+Every source whose headers read a variable typed sends the new value from then on, and Sosie keeps running, with
+the words it has learned and its store; the `401` itself passes to the client as it came. A value that is no valid
+header renews nothing, and is said to be none, never quoted. The old value stays among Sosie's own credentials, so
+an answer that still quotes it is faked. A source is asked once, until its API answers `2xx` or its headers are
+renewed, so a `401` the API gives for a reason of its own asks no more after Enter; and one prompt is open at a
+time. Ctrl+C at the prompt stops Sosie, as anywhere. Without a terminal, nothing is asked: the terminal is told to
+check the source's `headers`, and a new value needs a restart. Only the headers' variables are asked for, never the
+`upstream`'s.
 
 **Sources.** A name is at most 40 characters, and two sources may not share a `port`. A key a source does not take
 is an error that says why: `sosie.yml: sources.shop.headers: shop is a postgres source, which takes no headers.` A
@@ -1389,7 +1407,8 @@ a user name in it nor through a segment that decodes to a `/` or `..`, so
 credentials never go elsewhere and the client never sees a real URL. What the
 terminal says when the API cannot be read leaves the query credentials out. Each request has the source's `timeout` (30 s) and
 a body cap (20 MB), counted as the body arrives; at most 5 redirects are followed. A `401` or `403` from the API tells
-the terminal to check the source's `headers`. Sosie sends `Accept: application/json` and `User-Agent: sosie`,
+the terminal to check the source's `headers`; in a terminal, a `401` asks for their variables again (see `sosie.yml`,
+A token that expires). Sosie sends `Accept: application/json` and `User-Agent: sosie`,
 which those headers may replace. A `schema` URL on the API's origin is read like any request; one on another
 origin is fetched once at start-up, without the API's credentials.
 
@@ -1698,7 +1717,8 @@ about, the schema's own names among them (`ACCESS_DENIED`, `ORDER_NOT_FOUND`);
 nothing else does, so a code with a digit or a word of data
 (`USER_7739182046_NOT_FOUND`, `QUILLON_FORBIDDEN`) is dropped. An answer that
 is not JSON is `502`, without its content type. A `401` or `403` from the API
-tells the terminal to check the source's `headers`.
+tells the terminal to check the source's `headers`; in a terminal, a `401` asks for their variables again, as
+REST's does.
 
 ### Query by what you saw
 

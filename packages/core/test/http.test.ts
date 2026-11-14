@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { crossSite, localRequest, readCapped, why } from '../src/http.js'
+import { Credentials, crossSite, localRequest, readCapped, why } from '../src/http.js'
 import { parseJson } from '../src/json.js'
 import { capLists } from '../src/mcp.js'
 
@@ -67,5 +67,36 @@ describe('HTTP sources', () => {
     expect(capLists([{ items: [1] }], 2)).toEqual({ value: [{ items: [1] }], cut: false })
     // An integer beyond 2^53, parsed as written, is written as it was.
     expect(JSON.stringify(capLists(parseJson('{"ids":[12345678901234567890,7]}'), 2).value)).toBe('{"ids":[12345678901234567890,7]}')
+  })
+})
+
+describe('an HTTP upstream’s credentials', () => {
+  it('are its headers, by lowercase name, with a user and password of its URL as Basic unless they hold an Authorization', () => {
+    expect(new Credentials({ 'X-Api-Key': 'k_live_123456' }, { user: '', password: '', query: [] }).headers).toEqual({ 'x-api-key': 'k_live_123456' })
+    expect(new Credentials({}, { user: 'kim', password: 'secret', query: [] }).headers).toEqual({ authorization: `Basic ${btoa('kim:secret')}` })
+    expect(new Credentials({ Authorization: 'Bearer abcdef123' }, { user: 'kim', password: 'secret', query: [] }).headers).toEqual({ authorization: 'Bearer abcdef123' })
+  })
+
+  it('are renewed in place, the old values kept among the secrets, and one that is no valid header renews nothing', () => {
+    const credentials = new Credentials({ Authorization: 'Bearer old-token-1', 'X-Tenant': 'acme' }, { user: '', password: '', query: ['key_query_99'] })
+    const sent = credentials.headers
+    credentials.renew({ Authorization: 'Bearer new-token-2' })
+    expect(sent).toEqual({ authorization: 'Bearer new-token-2' })
+    expect(credentials.secrets).toEqual(expect.arrayContaining(['old-token-1', 'key_query_99', 'new-token-2']))
+    expect(() => credentials.renew({ Authorization: 'Bearer a\nb' })).toThrow('The header Authorization is not a valid one')
+    expect(sent).toEqual({ authorization: 'Bearer new-token-2' })
+  })
+
+  it('tell of a 401 once, until the API answers 2xx or they are renewed', () => {
+    let told = 0
+    const credentials = new Credentials({ Authorization: 'Bearer old-token-1' }, { user: '', password: '', query: [] }, () => told++)
+    for (const status of [200, 401, 401, 403, 404]) credentials.answered(status)
+    expect(told).toBe(1)
+    credentials.answered(204)
+    credentials.answered(401)
+    expect(told).toBe(2)
+    credentials.renew({ Authorization: 'Bearer new-token-2' })
+    credentials.answered(401)
+    expect(told).toBe(3)
   })
 })

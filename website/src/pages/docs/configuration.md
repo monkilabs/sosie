@@ -91,6 +91,18 @@ Your yes is kept on your machine, in `~/.sosie/allowed.json`, never in `sosie.ym
 have a header carry another variable, or send one to another upstream, is asked about the same way. Without a
 terminal to ask in, Sosie stops and says so; start it in a terminal once.
 
+A short-lived token need not mean a restart. When a REST or GraphQL API answers `401`, as it does once a token has
+expired, Sosie asks in its terminal for the variables that source's headers read, at a hidden prompt:
+
+```
+  ! billing: the API answered 401: a value its headers send may have expired.
+  BILLING_TOKEN, a new value (hidden), or Enter to keep it:
+```
+
+Every source that reads a variable you type sends the new value from then on, and Sosie keeps running, with all it
+has learned. Enter keeps the old one, and Sosie asks again only after the API has answered with it. Without a
+terminal it asks nothing, and a new value needs a restart.
+
 ### Field ids
 
 | Source | A field's id |

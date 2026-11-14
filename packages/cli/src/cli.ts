@@ -22,6 +22,7 @@ import {
   storeDirs,
   unheldRules,
   unmetRules,
+  upstreamHeaders,
   variablesOf,
   writeRunning,
   type Config,
@@ -181,9 +182,11 @@ async function start(): Promise<void> {
   const closeAll = async () => {
     for (const connection of connections) await connection.close().catch(() => {})
   }
-  for (const plan of plans) {
+  let stopping = false
+  const renewal = renewer(plans, connections, values, () => stopping)
+  for (const [i, plan] of plans.entries()) {
     try {
-      connections.push(await plan.source.connect(plan.upstream, optionsOf(plan)))
+      connections.push(await plan.source.connect(plan.upstream, { ...optionsOf(plan), ...renewal(i) }))
     } catch (error) {
       await closeAll()
       throw new Exit(1, fail(`${plan.config.name}: ${(error as Error).message}`))
@@ -219,7 +222,6 @@ async function start(): Promise<void> {
   const startedAt = Date.now()
   const schemas = connections.map((c) => c.schema)
   const addresses: string[] = []
-  let stopping = false
   let rewrite: NodeJS.Timeout | undefined
   const entry = () => {
     const running: Running[] = plans.map((plan, i) => {
@@ -391,6 +393,58 @@ function planSources(config: Config, values: Record<string, string>): Plan[] {
   if (problems.length) throw new Exit(1, problems.map(fail).join('\n'))
   return plans
 }
+
+/**
+ * A token that expires mid-run: when a source's API answers 401, the variables its headers read are asked for again at
+ * a hidden prompt, each kept with Enter, and every source whose headers read one sends the new value from then on, so
+ * Sosie keeps running, and keeps what it has learned. Only in a terminal, one prompt at a time; never while stopping.
+ */
+function renewer(plans: Plan[], connections: Connection[], values: Record<string, string>, stopping: () => boolean) {
+  const namesOf = (plan: Plan) => [...new Set(Object.values(plan.config.headers).flatMap(headerVariables))]
+  const headersOf = (plan: Plan, read: Record<string, string>) =>
+    Object.fromEntries(Object.entries(plan.config.headers).map(([name, template]) => [name, interpolate(template, read)]))
+  const say = (line: string) => process.stdout.write(`${line}\n`)
+  let asking = false
+  let closed = false
+  const renew = async (i: number) => {
+    if (asking || closed || stopping()) return
+    asking = true
+    const plan = plans[i]!
+    const names = namesOf(plan)
+    try {
+      say(warn(`${plan.config.name}: the API answered 401: a value its headers send may have expired.`))
+      const typed: Record<string, string> = {}
+      for (const name of names) {
+        const value = await hiddenPrompt(`  ${name}, a new value (hidden), or Enter to keep it: `, process.stdin, process.stdout)
+        if (value) typed[name] = value
+      }
+      const renewed = Object.keys(typed)
+      if (!renewed.length) return say(`  ${plan.config.name} sends ${and(names)} as before.`)
+      const read = { ...values, ...typed }
+      const changed = plans.filter((p) => namesOf(p).some((name) => renewed.includes(name)))
+      // Each checked before any is renewed: a value that is no valid header renews nothing.
+      for (const p of changed) upstreamHeaders(headersOf(p, read))
+      for (const p of changed) {
+        p.headers = headersOf(p, read)
+        connections[plans.indexOf(p)]!.renew?.(p.headers)
+      }
+      Object.assign(values, typed)
+      say(ok(`${and(renewed)} renewed: ${and(changed.map((p) => p.config.name))} ${changed.length === 1 ? 'sends' : 'send'} the new value from now on.`))
+    } catch (error) {
+      const message = (error as Error).message
+      // Ctrl+C at the prompt stops Sosie, as it does anywhere else; a terminal that closed is asked nothing again.
+      if (message === 'Cancelled.') process.kill(process.pid, 'SIGINT')
+      else if (message === 'No input.') closed = true
+      else say(fail(`${message} ${plan.config.name} sends ${and(names)} as before.`))
+    } finally {
+      asking = false
+    }
+  }
+  return (i: number) => (process.stdin.isTTY && namesOf(plans[i]!).length ? { unauthorized: () => void renew(i) } : {})
+}
+
+/** 'A', 'A and B', 'A, B and C'. */
+const and = (items: string[]) => (items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`)
 
 const optionsOf = (plan: Plan) => ({
   maxRows: plan.config.maxRows,

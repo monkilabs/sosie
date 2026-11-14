@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -386,6 +387,58 @@ describe('sosie, in front of an API, refusing paths', () => {
     expect(api.requests.map((r) => r.path)).not.toContain('/v1/users/1')
     expect(await stop(sosie.child)).toBe(0)
     await api.close()
+  })
+})
+
+describe('sosie, when a token expires', () => {
+  it('asks for its header’s variable again at a hidden prompt on a 401, and sends the new value from then on', async () => {
+    // An API whose token is replaced while Sosie runs.
+    let accepted = 'first-token-4f1c'
+    const sent: string[] = []
+    const server = createServer((req, res) => {
+      sent.push(req.headers.authorization ?? '')
+      const allowed = req.headers.authorization === `Bearer ${accepted}`
+      const found = req.url === '/users'
+      res.writeHead(allowed ? (found ? 200 : 404) : 401, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(allowed && found ? [{ id: 1, email: 'quill.vantablack@canary-mail.test' }] : { error: allowed ? 'not found' : 'token expired' }))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-renew-'))
+    const dir = allowSends(home, project(ONE('    headers:\n      Authorization: Bearer ${APP_TOKEN}\n')))
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+    const sosie = await start({ APP_URL: url, APP_TOKEN: accepted, SOSIE_HOME: home }, dir, '')
+    /** Wait until Sosie has printed this text, this many times. */
+    const until = async (text: string, times = 1) => {
+      const count = () => sosie.stdout().split(text).length - 1
+      for (let i = 0; i < 100 && count() < times; i++) await new Promise((r) => setTimeout(r, 50))
+      expect(count()).toBe(times)
+    }
+    const users = () => fetch(`${sosie.address()}/users`).then((r) => r.status)
+    const asked = '  APP_TOKEN, a new value (hidden), or Enter to keep it: '
+    try {
+      expect(await users()).toBe(200)
+      accepted = 'second-token-9d2e'
+      expect(await users()).toBe(401)
+      await until(asked)
+      expect(sosie.stdout()).toContain('  ! app: the API answered 401: a value its headers send may have expired.\n')
+      sosie.child.stdin!.write('second-token-9d2e\n')
+      await until('✓ APP_TOKEN renewed: app sends the new value from now on.')
+      expect(await users()).toBe(200)
+      expect(sent.at(-1)).toBe('Bearer second-token-9d2e')
+      // Expired again, and kept with Enter: asked no more until the API answers 2xx.
+      accepted = 'third-token-77ab'
+      expect(await users()).toBe(401)
+      await until(asked, 2)
+      sosie.child.stdin!.write('\n')
+      await until('  app sends APP_TOKEN as before.')
+      expect(await users()).toBe(401)
+      await new Promise((r) => setTimeout(r, 200))
+      expect(sosie.stdout().split(asked)).toHaveLength(3)
+      expect(sosie.stdout() + sosie.stderr()).not.toMatch(/first-token|second-token|third-token/)
+    } finally {
+      expect(await stop(sosie.child)).toBe(0)
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   })
 })
 

@@ -29,6 +29,7 @@ async function startGraphqlSosie(
     schema = undefined as string | undefined,
     rules = '',
     maxRows = 1000,
+    unauthorized = undefined as (() => void) | undefined,
   } = {},
 ) {
   const connection = await graphql.connect(new URL(api.url), {
@@ -36,6 +37,7 @@ async function startGraphqlSosie(
     statementTimeout: 5000,
     headers,
     ...(schema && { schema }),
+    ...(unauthorized && { unauthorized }),
   })
   const store = Store.open(storeDir(home))
   const faker = createFaker({ schema: connection.schema, rules: loadRules(rules, connection.schema), store })
@@ -747,6 +749,24 @@ describe('reaching the API', () => {
       'message',
       `Cannot reach 127.0.0.1:${server.port}/graphql: fetch failed: connect ECONNREFUSED 127.0.0.1:${server.port}`,
     )
+  })
+
+  it('tells of a 401 once, until the headers are renewed, and sends renewed headers from then on', async () => {
+    let told = 0
+    const s = await startGraphqlSosie(api, { unauthorized: () => told++ })
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    try {
+      s.connection.renew!({ Authorization: 'Bearer expired-token-1' })
+      for (let i = 0; i < 2; i++) expect((await s.ask('{ motd }')).status).toBe(401)
+      expect(told).toBe(1)
+      s.connection.renew!({ Authorization: `Bearer ${TOKEN}` })
+      const before = api.received.length
+      expect((await s.ask('{ motd }')).status).toBe(200)
+      expect(api.received.length).toBe(before + 1)
+    } finally {
+      write.mockRestore()
+      await s.close()
+    }
   })
 
   it('says in the terminal to check the source’s headers when the API answers 401 or 403', async () => {

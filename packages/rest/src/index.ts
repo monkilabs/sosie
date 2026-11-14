@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { readCapped, secretParts, upstreamHeaders, why, type Connection, type Source } from '@sosie/core'
+import { Credentials, readCapped, why, type Connection, type Source } from '@sosie/core'
 import { startEndpoint } from './endpoint.js'
 import { requestTool } from './mcp.js'
 import { parseDocument, readApi, type Api } from './openapi.js'
@@ -16,17 +16,15 @@ export const rest: Source = {
   matches: (url) => url.protocol === 'http:' || url.protocol === 'https:',
   settings: ['headers', 'schema', 'refuse'],
   async connect(upstream, options): Promise<Connection> {
-    const headers = upstreamHeaders(options.headers)
     const user = decodeURIComponent(upstream.username)
     const password = decodeURIComponent(upstream.password)
-    if (user) headers.authorization ??= `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
     const base = new URL(upstream.href)
     // A query on the base URL (?api_key=) is a credential too: sent upstream, never shown.
     const params = new URLSearchParams(base.search)
     base.username = base.password = base.search = base.hash = ''
     base.pathname = base.pathname.replace(/\/?$/, '/')
-    const api = new RestUpstream(base, headers, options.statementTimeout, params, options.refuse)
-    const secrets = secretParts(headers, [...params.values(), user, password])
+    const credentials = new Credentials(options.headers, { user, password, query: params.values() }, options.unauthorized)
+    const api = new RestUpstream(base, credentials.headers, options.statementTimeout, params, options.refuse)
     const label = `${base.host}${base.pathname.replace(/\/$/, '')}`
 
     const warnings: string[] = []
@@ -83,10 +81,12 @@ export const rest: Source = {
           api: doc,
           faker,
           maxItems: options.maxRows,
-          secrets,
+          secrets: credentials.secrets,
+          answered: (status) => credentials.answered(status),
           log: (line) => process.stderr.write(`  ! ${line}\n`),
           ...(learned && { learned }),
         }),
+      renew: (headers) => credentials.renew(headers),
       async close() {},
     }
   },
