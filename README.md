@@ -5,6 +5,8 @@
   </picture>
 </h1>
 
+[![npm version](https://img.shields.io/npm/v/@sosie/cli)](https://www.npmjs.com/package/@sosie/cli) [![CI](https://github.com/monkilabs/sosie/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/monkilabs/sosie/actions/workflows/ci.yml?query=branch%3Amain) [![Node version](https://img.shields.io/node/v/@sosie/cli)](https://nodejs.org/) [![License](https://img.shields.io/npm/l/@sosie/cli)](https://github.com/monkilabs/sosie/blob/main/LICENSE)
+
 **English** · [Español](i18n/README.es.md) · [Português (Brasil)](i18n/README.pt-BR.md) · [Français](i18n/README.fr.md) · [Deutsch](i18n/README.de.md) · [简体中文](i18n/README.zh-CN.md)
 
 **Your AI agent sees a double of your data. Never the real thing.**
@@ -22,7 +24,7 @@ credentials and hostnames stay on your side.
 
 ## Status
 
-Sosie 0.4.2 is on npm as [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). It works end to end in front of
+Sosie is on npm as [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). It works end to end in front of
 PostgreSQL 15 to 18, MySQL 8.4 and 9, MongoDB 6.0 to 8.0, REST APIs and GraphQL APIs, on Node 26 and 24. The [MVP](docs/mvp.md), the
 [high-level design](docs/hld.md) and the [low-level design](docs/lld.md) say what it does and how.
 

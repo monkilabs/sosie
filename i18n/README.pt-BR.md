@@ -5,6 +5,8 @@
   </picture>
 </h1>
 
+[![npm version](https://img.shields.io/npm/v/@sosie/cli)](https://www.npmjs.com/package/@sosie/cli) [![CI](https://github.com/monkilabs/sosie/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/monkilabs/sosie/actions/workflows/ci.yml?query=branch%3Amain) [![Node version](https://img.shields.io/node/v/@sosie/cli)](https://nodejs.org/) [![License](https://img.shields.io/npm/l/@sosie/cli)](https://github.com/monkilabs/sosie/blob/main/LICENSE)
+
 [English](../README.md) · [Español](README.es.md) · **Português (Brasil)** · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh-CN.md)
 
 *Tradução do [README em inglês](../README.md), que é a versão atualizada quando os dois divergem; a documentação dos links está em inglês.*
@@ -23,7 +25,7 @@ mudança nenhuma nos dados reais. Registros, credenciais e hostnames reais ficam
 
 ## Status
 
-O Sosie 0.4.2 está no npm como [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). Ele funciona de ponta a ponta
+O Sosie está no npm como [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). Ele funciona de ponta a ponta
 na frente de PostgreSQL 15 a 18, MySQL 8.4 e 9, MongoDB 6.0 a 8.0, APIs REST e APIs GraphQL, no Node 26 e 24. O
 [MVP](../docs/mvp.md), o [design de alto nível](../docs/hld.md) e o [design de baixo nível](../docs/lld.md) explicam o
 que ele faz e como.

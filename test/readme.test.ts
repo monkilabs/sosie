@@ -5,12 +5,11 @@ import { describe, expect, it } from 'vitest'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const read = (path: string) => readFileSync(join(root, path), 'utf8')
-const { version } = JSON.parse(read('packages/cli/package.json')) as { version: string }
 
 /**
- * The README, in English and in each language it is translated into, by the name its language bar shows. A release
- * moves the version each one names, and a change to the English one's commands moves them in every translation: the
- * prose of a translation may trail, and says the English one is current.
+ * The README, in English and in each language it is translated into, by the name its language bar shows. None names a
+ * version of Sosie, which nothing would move at a release. A change to the English one's commands moves them in every
+ * translation: the prose of a translation may trail, and says the English one is current.
  */
 const TRANSLATIONS = [
   { file: 'i18n/README.es.md', name: 'Español' },
@@ -24,18 +23,21 @@ const READMES = [{ file: 'README.md', name: 'English' }, ...TRANSLATIONS]
 /** The language bar: every language, this one's in bold, each other linked from where this one is. */
 const bar = (own: string) =>
   READMES.map(({ file, name }) => (file === own ? `**${name}**` : `[${name}](${relative(dirname(own), file)})`)).join(' · ')
+/** The badges each README opens with, under the logo and above its language bar: npm, CI, Node and the license. */
+const badges = (text: string) => /^<\/h1>\n\n(\[!\[.*)\n\n/m.exec(text)?.[1]
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const codeBlocks = (text: string) => text.match(/^```[^\n]*\n[\s\S]*?^```$/gm) ?? []
 /** Every link and image that is not a URL or an anchor, as written. */
 const relativeLinks = (text: string) =>
   [...text.matchAll(/\]\(([^)\s]+)\)|(?:src|srcset)="([^"]+)"/g)].map((m) => (m[1] ?? m[2])!).filter((target) => !/^(https?:|mailto:|#)/.test(target))
 
 describe.each(READMES)('$file', ({ file }) => {
-  it('opens with its language bar, under the logo', () => {
-    expect(read(file)).toMatch(new RegExp(`^</h1>\\n\\n${bar(file).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n\\n`, 'm'))
+  it('opens with its badges, then its language bar, under the logo', () => {
+    expect(read(file)).toMatch(new RegExp(`^</h1>\\n\\n\\[!\\[.*\\n\\n${escaped(bar(file))}\\n\\n`, 'm'))
   })
 
-  it('names the version of @sosie/cli that is on npm', () => {
-    expect(read(file)).toMatch(new RegExp(`Sosie ${version.replaceAll('.', '\\.')}(?!\\.?\\d)`))
+  it('names no version of Sosie, which a release would leave behind', () => {
+    expect(read(file)).not.toMatch(/Sosie v?\d+\.\d+|@sosie\/cli@\d/)
   })
 
   it('links only to files that are there', () => {
@@ -46,8 +48,9 @@ describe.each(READMES)('$file', ({ file }) => {
 })
 
 describe.each(TRANSLATIONS)('$file', ({ file }) => {
-  it('has the English README’s code blocks as they are, and its images', () => {
+  it('has the English README’s code blocks and badges as they are, and its images', () => {
     expect(codeBlocks(read(file))).toEqual(codeBlocks(read('README.md')))
+    expect(badges(read(file))).toBe(badges(read('README.md')))
     expect(read(file).match(/<img [^>]+>/g)).toEqual(read('README.md').match(/<img [^>]+>/g)!.map((img) => img.replace('src="', 'src="../')))
   })
 
