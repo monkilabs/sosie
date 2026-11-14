@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { connect } from 'node:net'
+import { postgres } from '@sosie/postgres'
 import { raw, typed } from './wire.js'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
@@ -456,25 +458,38 @@ describe('the guard', () => {
 
   it('does not apply a field’s rules to a column an alias or search_path renames', async () => {
     await query('SELECT active::text FROM users AS u(a, active, c, d, e, f, g, h)')
-    const admin = await real()
-    // A login of this test's own, so the schema it adds is never seen by a Sosie another file starts meanwhile: one
-    // would count a seventh table. Its Sosie starts before the schema is there, as the file's did.
+    // A database of this test's own, seeded as the shared one, and its login. Not the shared database: every login
+    // reads every table in pg_class, so a Sosie another file started on it meanwhile would count a seventh table.
+    // Its Sosie starts before the schema is there, as the file's did.
     const own = `sosie_s1_${process.pid}`
-    await admin.query(`CREATE ROLE ${own} LOGIN PASSWORD 'reader'; GRANT USAGE ON SCHEMA public, billing TO ${own};
-      GRANT SELECT ON ALL TABLES IN SCHEMA public, billing TO ${own}`)
-    const upstream = new URL(inject('upstream'))
-    upstream.username = own
-    const unaware = await startSosie({ upstream })
+    const server = await real()
+    await server.query(`CREATE DATABASE ${own}`)
+    const admin = await real(own)
     try {
-      await admin.query(`CREATE SCHEMA s1; CREATE TABLE s1.users (id int, active text);
-        INSERT INTO s1.users VALUES (1, 'Quillon Vantablack'); GRANT USAGE ON SCHEMA s1 TO ${own}; GRANT SELECT ON s1.users TO ${own}`)
-      const c = await unaware.client()
-      await c.query('SET search_path = s1, public')
-      seen.push((await c.query('SELECT active::varchar FROM users')).rows)
+      await admin.query(readFileSync(new URL('./seed.sql', import.meta.url), 'utf8'))
+      await admin.query(`CREATE ROLE ${own} LOGIN PASSWORD 'reader'; GRANT USAGE ON SCHEMA public, billing TO ${own};
+        GRANT SELECT ON ALL TABLES IN SCHEMA public, billing TO ${own}`)
+      const upstream = new URL(inject('upstream'))
+      upstream.username = own
+      upstream.pathname = `/${own}`
+      const unaware = await startSosie({ upstream })
+      try {
+        await admin.query(`CREATE SCHEMA s1; CREATE TABLE s1.users (id int, active text);
+          INSERT INTO s1.users VALUES (1, 'Quillon Vantablack'); GRANT USAGE ON SCHEMA s1 TO ${own}; GRANT SELECT ON s1.users TO ${own}`)
+        const c = await unaware.client()
+        await c.query('SET search_path = s1, public')
+        seen.push((await c.query('SELECT active::varchar FROM users')).rows)
+        const meanwhile = await postgres.connect(new URL(inject('upstream')), { maxRows: 10, statementTimeout: 5000 })
+        await meanwhile.close()
+        expect(meanwhile.schema.entities.map((e) => e.id)).not.toContain('s1.users')
+      } finally {
+        await unaware.close()
+      }
     } finally {
-      await unaware.close()
-      await admin.query(`DROP SCHEMA IF EXISTS s1 CASCADE; DROP OWNED BY ${own}; DROP ROLE ${own}`)
       await admin.end()
+      await server.query(`DROP DATABASE IF EXISTS ${own} WITH (FORCE)`)
+      await server.query(`DROP ROLE IF EXISTS ${own}`)
+      await server.end()
     }
   })
 
