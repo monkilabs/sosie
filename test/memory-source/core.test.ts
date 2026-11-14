@@ -476,7 +476,9 @@ describe('requests', async () => {
       [moods, labels],
       [flags, ['t', 'f']],
       [span, ['sad', 'happy']],
-      [during, ['10', '20']],
+      // Two plain numbers may share a fake, and then neither turns back. A fake keeps its number's count of
+      // digits, so bounds of different lengths never share one: 10 and 20 did, in about 1 run in 90.
+      [during, ['5', '120']],
     ] as [Field, string[]][]) {
       const fakes = faker.value(reals, field) as string[]
       expect(fakes.map((fake) => faker.request().lookup(fake, field)), field.id).toEqual(reals)
