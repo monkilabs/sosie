@@ -45,23 +45,34 @@ esac
   return { status: result.status, stdout: result.stdout, stderr: result.stderr, calls: existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [] }
 }
 
-/**
- * CI's release plan, with a git of the test's own on PATH that lists the tags given, or fails. With `tree`, the plan
- * runs in a repository of its own, with that version and CHANGELOG; otherwise in this one.
- */
 /** What every release's notes end with: how to install that version. */
 const install = (version: string) =>
   `## Install\n\n\`\`\`sh\nnpx @sosie/cli@${version}\n\`\`\`\n\nIn Claude Code, with Sosie's MCP server and skill:\n\n` +
   '```sh\nclaude plugin marketplace add monkilabs/sosie\nclaude plugin install sosie@sosie\n```\n'
 
-function plan({ tags = [], failGit = false, tree }: { tags?: string[]; failGit?: boolean; tree?: { version: string; changelog: string } } = {}) {
+/**
+ * CI's release plan, with a git of the test's own on PATH that lists the tags given, or fails. With `before`, it runs
+ * as after a push: the commit before it, 5e1d0a, has `@sosie/cli` at that version, unless `failFetch`. Without, as by
+ * hand. With `tree`, the plan runs in a repository of its own, with that version and CHANGELOG; otherwise in this one.
+ */
+function plan({
+  tags = [],
+  failGit = false,
+  before,
+  failFetch = false,
+  tree,
+}: { tags?: string[]; failGit?: boolean; before?: string; failFetch?: boolean; tree?: { version: string; changelog: string } } = {}) {
   const bin = mkdtempSync(join(tmpdir(), 'sosie-git-'))
-  const listed = tags.map((tag) => `printf '0f3c1e\\trefs/tags/%s\\n' '${tag}'`).join('\n')
+  const listed = tags.map((tag) => `printf '0f3c1e\\trefs/tags/%s\\n' '${tag}'`).join('; ')
   writeFileSync(
     join(bin, 'git'),
     `#!/bin/sh
-[ "$*" = "ls-remote --tags --refs origin" ] || exit 2
-${failGit ? "echo 'fatal: unable to access the remote' >&2; exit 128" : listed}
+case "$*" in
+  "ls-remote --tags --refs origin") ${failGit ? "echo 'fatal: unable to access the remote' >&2; exit 128" : listed || 'true'} ;;
+  "fetch --quiet --no-tags --depth=1 origin 5e1d0a") ${failFetch ? "echo 'fatal: remote error: upload-pack: not our ref 5e1d0a' >&2; exit 128" : 'true'} ;;
+  "show 5e1d0a:packages/cli/package.json") echo '{ "name": "@sosie/cli", "version": "${before}" }' ;;
+  *) echo "git $* was not expected" >&2; exit 2 ;;
+esac
 `,
   )
   chmodSync(join(bin, 'git'), 0o755)
@@ -76,7 +87,8 @@ ${failGit ? "echo 'fatal: unable to access the remote' >&2; exit 128" : listed}
     writeFileSync(join(own, 'CHANGELOG.md'), tree.changelog)
   }
   const notes = join(bin, 'notes.md')
-  const result = spawnSync(process.execPath, [script, notes], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } })
+  const since = before !== undefined || failFetch ? ['--since', '5e1d0a'] : []
+  const result = spawnSync(process.execPath, [script, notes, ...since], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } })
   return { status: result.status, stdout: result.stdout, stderr: result.stderr, notes: existsSync(notes) ? readFileSync(notes, 'utf8') : undefined }
 }
 
@@ -160,6 +172,34 @@ describe('a release', () => {
 
 describe('the release plan, after a push to main', () => {
   const [major] = version.split('.').map(Number) as [number]
+
+  it('releases nothing after a push that does not move the version, though no tag names it: the docs, a README or code', () => {
+    const result = plan({ tags: ['v0.0.1'], before: version })
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe(`version=${version}\nrelease=false\n`)
+    expect(result.stderr).toBe(
+      `  ✓ This push does not move the version: nothing to release. ${version} is not released yet: re-run the job of\n` +
+        '    the push that moved it, or run CI on main by hand (Actions → CI → Run workflow), to release it.\n',
+    )
+    expect(result.notes).toBeUndefined()
+  })
+
+  it('releases the version a push moved, as run by hand releases one no tag names', () => {
+    const pushed = plan({ tags: ['v0.0.1'], before: '0.0.1' })
+    expect(pushed.status).toBe(0)
+    expect(pushed.stdout).toBe(`version=${version}\nrelease=true\n`)
+    expect(pushed.notes).toBe(plan({ tags: ['v0.0.1'] }).notes)
+  })
+
+  it('stops when the commit before the push cannot be read, as the push would seem to move the version', () => {
+    const result = plan({ tags: ['v0.0.1'], failFetch: true })
+    expect(result.status).toBe(1)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toBe(
+      '  ✗ The commit before the push, 5e1d0a, could not be read: fatal: remote error: upload-pack: not our ref 5e1d0a. Nothing was published.\n',
+    )
+    expect(result.notes).toBeUndefined()
+  })
 
   it('releases nothing when a tag names the version', () => {
     const result = plan({ tags: ['v0.0.1', `v${version}`, 'latest'] })
