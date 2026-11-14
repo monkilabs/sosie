@@ -19,7 +19,7 @@ Sosie 位于你的数据和你的 AI 智能体之间。智能体、你的应用�
 
 ## 状态
 
-Sosie 0.4.2 已发布到 npm，包名为 [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli)。它已能在 Node 26 和 24 上端到端运行，代理 PostgreSQL 15 至 18、MySQL 8.4 和 9、MongoDB 6.0 至 8.0、REST API 和 GraphQL API。[MVP](../docs/mvp.md)、[概要设计](../docs/hld.md)和[详细设计](../docs/lld.md)说明了它做什么、怎么做。
+Sosie 已发布到 npm，包名为 [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli)。它已能在 Node 26 和 24 上端到端运行，代理 PostgreSQL 15 至 18、MySQL 8.4 和 9、MongoDB 6.0 至 8.0、REST API 和 GraphQL API。[MVP](../docs/mvp.md)、[概要设计](../docs/hld.md)和[详细设计](../docs/lld.md)说明了它做什么、怎么做。
 
 ## 工作方式
 

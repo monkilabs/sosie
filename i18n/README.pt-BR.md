@@ -23,7 +23,7 @@ mudança nenhuma nos dados reais. Registros, credenciais e hostnames reais ficam
 
 ## Status
 
-O Sosie 0.4.2 está no npm como [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). Ele funciona de ponta a ponta
+O Sosie está no npm como [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). Ele funciona de ponta a ponta
 na frente de PostgreSQL 15 a 18, MySQL 8.4 e 9, MongoDB 6.0 a 8.0, APIs REST e APIs GraphQL, no Node 26 e 24. O
 [MVP](../docs/mvp.md), o [design de alto nível](../docs/hld.md) e o [design de baixo nível](../docs/lld.md) explicam o
 que ele faz e como.

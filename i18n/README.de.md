@@ -23,7 +23,7 @@ Echte Datensätze, Zugangsdaten und Hostnamen bleiben bei dir.
 
 ## Status
 
-Sosie 0.4.2 ist auf npm als [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli) verfügbar. Es funktioniert
+Sosie ist auf npm als [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli) verfügbar. Es funktioniert
 durchgängig vor PostgreSQL 15 bis 18, MySQL 8.4 und 9, MongoDB 6.0 bis 8.0, REST-APIs und GraphQL-APIs, auf Node 26
 und 24. Das [MVP](../docs/mvp.md), das [High-Level-Design](../docs/hld.md) und das [Low-Level-Design](../docs/lld.md)
 beschreiben, was Sosie tut und wie.

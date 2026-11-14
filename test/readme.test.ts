@@ -5,12 +5,11 @@ import { describe, expect, it } from 'vitest'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const read = (path: string) => readFileSync(join(root, path), 'utf8')
-const { version } = JSON.parse(read('packages/cli/package.json')) as { version: string }
 
 /**
- * The README, in English and in each language it is translated into, by the name its language bar shows. A release
- * moves the version each one names, and a change to the English one's commands moves them in every translation: the
- * prose of a translation may trail, and says the English one is current.
+ * The README, in English and in each language it is translated into, by the name its language bar shows. None names a
+ * version of Sosie, which nothing would move at a release. A change to the English one's commands moves them in every
+ * translation: the prose of a translation may trail, and says the English one is current.
  */
 const TRANSLATIONS = [
   { file: 'i18n/README.es.md', name: 'Español' },
@@ -34,8 +33,8 @@ describe.each(READMES)('$file', ({ file }) => {
     expect(read(file)).toMatch(new RegExp(`^</h1>\\n\\n${bar(file).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n\\n`, 'm'))
   })
 
-  it('names the version of @sosie/cli that is on npm', () => {
-    expect(read(file)).toMatch(new RegExp(`Sosie ${version.replaceAll('.', '\\.')}(?!\\.?\\d)`))
+  it('names no version of Sosie, which a release would leave behind', () => {
+    expect(read(file)).not.toMatch(/Sosie v?\d+\.\d+|@sosie\/cli@\d/)
   })
 
   it('links only to files that are there', () => {
