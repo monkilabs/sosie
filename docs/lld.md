@@ -1449,7 +1449,10 @@ field of where it sits, in the entity its path names, singular (`/users` and
 `/users/87` are `user`; `{ "data": [{ "email": … }] }` is `user.email`, the
 envelope keys `data`, `items`, `results` and the like left out). The banner says
 so, and `sosie.yml` may name fields not met yet: they warn instead of failing,
-and apply once met. A body that does not have the shape its document says is no entity's (see below).
+and apply once met. As a rule may stay unmet for good where its entity's paths name none (below: a singular name
+under a record), the banner says so once, after their warnings, for each source that holds one, its own or the top's
+that no source knows: an answer's path must name the entity, which under a record only a list under a plural name
+does, and a `schema` names every field from the document instead. A body that does not have the shape its document says is no entity's (see below).
 
 ### Faking
 

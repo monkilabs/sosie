@@ -351,6 +351,8 @@ describe('sosie, in front of an API', () => {
     const out = sosie.stdout()
     expect(out).toMatch(/✓ app {2}127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document/)
     expect(out).toContain('! app: No OpenAPI document found')
+    // No rule it does not know yet: nothing to say of one.
+    expect(out).not.toContain('A rule not known yet')
     expect(sosie.address()).toMatch(/^http:\/\/localhost:\d+\/v1$/)
     expect(out).not.toContain(TOKEN)
     const users = (await (await fetch(`${sosie.address()}/users`)).json()) as { data: unknown[] }
@@ -370,6 +372,30 @@ describe('sosie, in front of an API', () => {
     expect(text(query)).toBe('Sosie serves rest here, not postgres or mysql: query is for postgres or mysql.')
     await mcp.close()
     expect(await stop(sosie.child)).toBe(0)
+    await api.close()
+  })
+})
+
+describe('sosie, in front of an API without a document, with rules for fields not met yet', () => {
+  it('says why such a rule may never apply, once for each source that holds one, its own or the top’s', async () => {
+    const api = await startApi()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-unmet-'))
+    const why =
+      "  ! app: A rule not known yet applies once an answer's path names its entity: /users and /users/87 name user. Under a record, only a list under a plural name does (/spaces/87/accounts); /spaces/87/account and /spaces/87/accounts/5 name none, so no rule applies to their answers. Give the source a schema, the API's OpenAPI document, to name every field from it.\n"
+    for (const rules of ['    pass: [account.status]\n', '', 'pass: [account.status]\n']) {
+      const top = rules.startsWith('pass') ? rules : ''
+      const own = rules.startsWith(' ') ? rules : ''
+      const dir = project(`${top}sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n    headers:\n      Authorization: Bearer \${APP_TOKEN}\n${own}`)
+      const sosie = await start({ APP_URL: api.url, APP_TOKEN: TOKEN, SOSIE_HOME: home }, allowSends(home, dir))
+      const out = sosie.stdout()
+      if (!rules) expect(out).not.toContain(why)
+      else {
+        const warned = own ? '  ! sosie.yml: sources.app: account is not known yet: it applies once Sosie meets it.\n' : '  ! sosie.yml: account.status is not known yet: it applies once Sosie meets it.\n'
+        expect(out).toContain(`${warned}${why}`)
+        expect(out.split(why)).toHaveLength(2)
+      }
+      expect(await stop(sosie.child)).toBe(0)
+    }
     await api.close()
   })
 })

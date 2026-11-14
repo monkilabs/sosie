@@ -148,6 +148,8 @@ export interface Connection {
   readonly warnings: string[]
   /** The schema grows as values come (an API without a schema): sosie.yml may name fields not met yet. */
   readonly learns?: boolean
+  /** Why a rule for a field not met yet may never apply, and what would name it: told once, after such rules' warnings. */
+  readonly whyUnmet?: string
   /** Send these headers from now on: sosie.yml's, read again with new values. One that is no valid header throws, and renews nothing. */
   renew?(headers: Record<string, string>): void
   /**

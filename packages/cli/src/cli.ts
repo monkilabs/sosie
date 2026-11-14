@@ -275,6 +275,10 @@ async function start(): Promise<void> {
   // Fields each source has: a rule kept for fields a source may meet later passes none yet.
   const passing = rules.reduce((n, r, i) => n + schemas[i]!.entities.reduce((m, e) => m + e.fields.filter((f) => r.pass.has(f.id)).length, 0), 0)
   const hosts = [...new Set(plans.map((p) => p.config.host))].filter((host) => !loopback(host))
+  // A source holding a rule whose field it does not know yet, its own or one of the top's no source knows, says why
+  // such a rule may never apply.
+  const unknown = (r: SourceRules) => r.warnings.length > 0 || [...r.kept].some((id) => !rules.some((o) => o.applied.has(id) && !o.kept.has(id)))
+  const whyUnmet = plans.flatMap((plan, i) => (connections[i]!.whyUnmet && unknown(rules[i]!) ? [`${plan.config.name}: ${connections[i]!.whyUnmet}`] : []))
   const lines = [
     '',
     ...plans.map((plan, i) => ok(`${plan.config.name.padEnd(width)}  ${connections[i]!.label}, read-only: ${connections[i]!.summary}`)),
@@ -282,6 +286,7 @@ async function start(): Promise<void> {
     ...plans.flatMap((plan, i) => connections[i]!.warnings.map((w) => warn(`${plan.config.name}: ${w}`))),
     ...rules.flatMap((r) => r.warnings).map(warn),
     ...unmetRules(rules, FILE).map(warn),
+    ...whyUnmet.map(warn),
     ...notes.map(warn),
     ...hosts.map((host) => warn(`Listening on ${host}, with no password: anyone who can reach it can query the fakes and filter on the real values.`)),
     '',

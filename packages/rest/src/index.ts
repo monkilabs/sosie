@@ -5,6 +5,13 @@ import { requestTool } from './mcp.js'
 import { parseDocument, readApi, type Api } from './openapi.js'
 import { RefusedPath, RestUpstream } from './upstream.js'
 
+/**
+ * Why, without a document, a rule for a field not met yet may never apply: an answer is an entity's only where its path
+ * says so, which a singular name under a record never does.
+ */
+const WHY_UNMET =
+  'A rule not known yet applies once an answer\'s path names its entity: /users and /users/87 name user. Under a record, only a list under a plural name does (/spaces/87/accounts); /spaces/87/account and /spaces/87/accounts/5 name none, so no rule applies to their answers. Give the source a schema, the API\'s OpenAPI document, to name every field from it.'
+
 /** Where an API usually serves its OpenAPI document, relative to its base. */
 const DISCOVER = ['openapi.json', 'openapi.yaml', 'swagger.json', 'v3/api-docs', 'api-docs', 'docs/openapi.json']
 
@@ -75,6 +82,7 @@ export const rest: Source = {
       summary: `${doc ? `${doc.version}, ${doc.schema.entities.length} schemas, ${operations} GET ${operations === 1 ? 'path' : 'paths'}` : 'no OpenAPI document'}${refused}`,
       warnings,
       learns: !doc,
+      ...(!doc && { whyUnmet: WHY_UNMET }),
       serve: (listen, faker, learned) =>
         startEndpoint(listen, {
           upstream: api,

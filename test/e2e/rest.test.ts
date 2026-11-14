@@ -99,6 +99,15 @@ afterAll(async () => {
 })
 
 describe('an API without an OpenAPI document', () => {
+  it('says why a rule for a field not met yet may never apply, and with a document says nothing of it', async () => {
+    expect(sosie.connection.whyUnmet).toMatch(/^A rule not known yet applies once an answer's path names its entity: .* Give the source a schema/)
+    const documented = await startApi({ withOpenapi: true })
+    const s = await startRest(documented)
+    expect(s.connection.whyUnmet).toBeUndefined()
+    await s.close()
+    await documented.close()
+  })
+
   it('says so, and names fields by where values sit', () => {
     expect(sosie.connection.summary).toBe('no OpenAPI document')
     expect(sosie.connection.warnings[0]).toMatch(/^No OpenAPI document found/)

@@ -20,6 +20,12 @@ The asks of a trial in front of a Spring Boot API
   keeps running, with the words it has learned. A source is asked once, until
   its API answers `2xx` or its headers are renewed. Without a terminal,
   nothing is asked, as before.
+- REST: without a document, a rule for a field not met yet said only that it
+  applies once Sosie meets it, though under a record a singular name
+  (`/spaces/87/account`) names no entity, so it may never apply. The banner
+  says why once, after such rules, for each source that holds one: an
+  answer's path must name the entity, which under a record only a list under a
+  plural name does; and that a `schema` names every field from the document.
 
 ## 0.4.2, 13 November 2026
 

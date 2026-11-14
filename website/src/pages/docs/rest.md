@@ -84,7 +84,10 @@ and `userId` shares the values of `UserResp.id`.
 **Without a document**, Sosie learns the schema as answers come: a value's field is where it sits, in the entity its
 path names, singular: `/users` and `/users/87` are `user`, and `{ "data": [{ "email": … }] }` under `/users` is
 `user.email`. `sosie.yml` may
-name fields not met yet: they warn instead of failing, and apply once met.
+name fields not met yet: they warn instead of failing, and apply once met. Under a record, only a list under a plural
+name says what an answer is (`/spaces/87/accounts`): `/spaces/87/account` and `/spaces/87/accounts/5` name no entity,
+so no rule applies to their answers, and a rule for them stays not known yet. The banner says so beside such a rule;
+give the source its `schema` to name every field from the document instead.
 
 ## Faking
 
