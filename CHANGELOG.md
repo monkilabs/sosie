@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.5.0, 14 November 2026
 
 The asks of a trial in front of a Spring Boot API
 ([#37](https://github.com/monkilabs/sosie/issues/37)) beyond its fix in 0.4.2,
-the packages published from CI, and the README in five more languages.
+the packages published from CI, and the README in five more languages. All
+seven packages move to 0.5.0 together; nothing in `sosie.yml` needs changing.
 
 - REST: a source's `refuse` lists paths Sosie never sends a request to, each
   with every path under it: `refuse: [/oauth/*, /billing/portal]`. A `GET`
