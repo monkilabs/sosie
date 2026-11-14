@@ -48,9 +48,11 @@ export async function startSosie({
   }
 }
 
-/** A client straight to the real database, for comparing. */
-export async function real(): Promise<pg.Client> {
-  const client = new pg.Client({ connectionString: inject('admin') })
+/** A client straight to the real database, for comparing; or to another database of its server. */
+export async function real(database?: string): Promise<pg.Client> {
+  const admin = new URL(inject('admin'))
+  if (database) admin.pathname = `/${database}`
+  const client = new pg.Client({ connectionString: admin.href })
   await client.connect()
   return client
 }
