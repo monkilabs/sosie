@@ -23,7 +23,7 @@ los datos reales. Los registros, las credenciales y los nombres de host reales s
 
 ## Estado
 
-Sosie 0.4.2 está en npm como [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). Funciona de extremo a extremo
+Sosie está en npm como [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). Funciona de extremo a extremo
 delante de PostgreSQL 15 a 18, MySQL 8.4 y 9, MongoDB 6.0 a 8.0, APIs REST y GraphQL, en Node 26 y 24. El
 [MVP](../docs/mvp.md), el [diseño de alto nivel](../docs/hld.md) y el [diseño de bajo nivel](../docs/lld.md) explican
 qué hace y cómo.

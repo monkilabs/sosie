@@ -23,7 +23,7 @@ tourne tel quel sur les vraies données. Les vrais enregistrements, identifiants
 
 ## État
 
-Sosie 0.4.2 est publié sur npm sous le nom [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). Il fonctionne de
+Sosie est publié sur npm sous le nom [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). Il fonctionne de
 bout en bout devant PostgreSQL 15 à 18, MySQL 8.4 et 9, MongoDB 6.0 à 8.0, des API REST et des API GraphQL, sous Node 26
 et 24. Le [MVP](../docs/mvp.md), la [conception générale](../docs/hld.md) et la [conception détaillée](../docs/lld.md)
 décrivent ce qu'il fait et comment.
