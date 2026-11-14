@@ -3,7 +3,8 @@
 ## Unreleased
 
 The asks of a trial in front of a Spring Boot API
-([#37](https://github.com/monkilabs/sosie/issues/37)) beyond its fix in 0.4.2.
+([#37](https://github.com/monkilabs/sosie/issues/37)) beyond its fix in 0.4.2,
+and the packages published from CI.
 
 - REST: a source's `refuse` lists paths Sosie never sends a request to, each
   with every path under it: `refuse: [/oauth/*, /billing/portal]`. A `GET`
@@ -26,6 +27,10 @@ The asks of a trial in front of a Spring Boot API
   says why once, after such rules, for each source that holds one: an
   answer's path must name the entity, which under a record only a list under a
   plural name does; and that a `schema` names every field from the document.
+- The packages are published from CI, with provenance: npm shows the commit and
+  the workflow run that built each one, and `npm audit signatures` checks it. A
+  release's pull request sets the version and dates this changelog; its merge
+  publishes the seven packages, tags the commit and makes the GitHub Release.
 
 ## 0.4.2, 13 November 2026
 

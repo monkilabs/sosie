@@ -82,3 +82,68 @@ jobs:
       - run: npx -y opencastle@1.12.8 plugin check plugins/sosie
       # The marketplaces of Claude Code, Copilot, Cursor and Codex.
       - run: npx -y opencastle@1.12.8 plugin index --check --name sosie --owner MonkiLabs
+
+  # A release's pull request moves every package to a new version and dates the CHANGELOG's section for it; its merge
+  # publishes it, here, once every other job passed on that commit. Any other push releases nothing.
+  release:
+    name: A release's merge publishes its packages, tags it, and makes its GitHub Release
+    needs: [test, plugin]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # One release at a time: a push that lands during one waits for it, and then finds the version tagged.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    permissions:
+      contents: write # the tag and the GitHub Release
+      id-token: write # npm's provenance: the commit and the run that built each package
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - name: Is there a version to release?
+        id: plan
+        run: node scripts/release-plan.mjs "$RUNNER_TEMP/notes.md" >> "$GITHUB_OUTPUT"
+      # Before anything long, and before npm's answer can mislead: it refuses a publish it does not authorize with a
+      # 404 on the PUT, as if the package did not exist. npm whoami asks the same registry with the same token.
+      - name: Check the npm token
+        if: steps.plan.outputs.release == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::The NPM_TOKEN secret is not set: Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          if ! WHO=$(npm whoami 2>&1); then
+            echo "::error::npm refused NPM_TOKEN: ${WHO}"
+            echo "::error::It needs to publish the @sosie packages without a one-time password: a granular token with read and write on them, and 2FA bypassed."
+            exit 1
+          fi
+          echo "Publishing as ${WHO}"
+      - if: steps.plan.outputs.release == 'true'
+        run: npm ci
+      - if: steps.plan.outputs.release == 'true'
+        run: npm run build
+      - name: Publish, with provenance
+        if: steps.plan.outputs.release == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+        run: |
+          if ! node scripts/release.mjs --checked; then
+            echo "::error::A 404 on the PUT of a package that exists means the token may not publish it: check that it lists every @sosie package with read and write."
+            exit 1
+          fi
+      # One call makes both, on the commit published: a run that stops before it leaves no tag, so its re-run releases
+      # the version still, passing over the packages on npm already.
+      - name: Tag the release, and make its GitHub Release from the CHANGELOG
+        if: steps.plan.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: gh release create "v${VERSION}" --title "Sosie ${VERSION}" --notes-file "$RUNNER_TEMP/notes.md" --target "$GITHUB_SHA" --latest
