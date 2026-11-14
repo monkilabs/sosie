@@ -31,6 +31,8 @@ and the packages published from CI.
   the workflow run that built each one, and `npm audit signatures` checks it. A
   release's pull request sets the version and dates this changelog; its merge
   publishes the seven packages, tags the commit and makes the GitHub Release.
+  No other merge publishes: one that changes only the docs, a README or code
+  waits for the next release.
 
 ## 0.4.2, 13 November 2026
 

@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # On main, by hand: it releases a version a push moved whose release stopped, once every job passes.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -84,11 +86,12 @@ jobs:
       - run: npx -y opencastle@1.12.8 plugin index --check --name sosie --owner MonkiLabs
 
   # A release's pull request moves every package to a new version and dates the CHANGELOG's section for it; its merge
-  # publishes it, here, once every other job passed on that commit. Any other push releases nothing.
+  # publishes it, here, once every other job passed on that commit. Any other push releases nothing: the docs, a
+  # README or the code alike, even while a version is not released yet.
   release:
     name: A release's merge publishes its packages, tags it, and makes its GitHub Release
     needs: [test, plugin]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # One release at a time: a push that lands during one waits for it, and then finds the version tagged.
@@ -105,9 +108,12 @@ jobs:
           node-version: 26
           registry-url: https://registry.npmjs.org
           cache: npm
+      # A push names the commit before it, so only the push that moved the version releases it; run by hand, none.
       - name: Is there a version to release?
         id: plan
-        run: node scripts/release-plan.mjs "$RUNNER_TEMP/notes.md" >> "$GITHUB_OUTPUT"
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: node scripts/release-plan.mjs "$RUNNER_TEMP/notes.md" ${BEFORE:+--since "$BEFORE"} >> "$GITHUB_OUTPUT"
       # Before anything long, and before npm's answer can mislead: it refuses a publish it does not authorize with a
       # 404 on the PUT, as if the package did not exist. npm whoami asks the same registry with the same token.
       - name: Check the npm token

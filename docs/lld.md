@@ -49,19 +49,23 @@ Later sources are packages of their own in the same scope. The `@sosie` scope is
 registered on 25 October 2026, so nobody else can take a name in it. Its team
 `developers` publishes.
 
-**A release** is a pull request: it moves the seven packages to one version, each depending on the others at `^`
-that version, moves [the plugin](#the-plugin) with them, and dates the CHANGELOG's Unreleased section. Its merge
-publishes it. CI's `release` job runs on each push to `main`, once every other job passed on that commit:
-`scripts/release-plan.mjs` finds the packages' version, and when no tag names it, the job publishes each package
-with provenance, the core first and the CLI last (`scripts/release.mjs --checked`), then tags the commit
-`v<version>` and makes its GitHub Release, "Sosie <version>": the CHANGELOG's section, then how to install it. Any other push
-releases nothing. It publishes with the repository's secret `NPM_TOKEN`, an npm token that may publish the `@sosie`
-packages without a one-time password, and checks it first. It stops with nothing published when the tags cannot be
-read, at a version below the latest tag or a prerelease (npm would serve either as the latest), and when the
-CHANGELOG has no section for the version; `test/release.test.ts` fails the pull request before that, at a package
-left at another version or a section not dated. A job that stops partway is re-run: it passes over the packages on
-npm already, and the tag comes last, in one call with the GitHub Release. `npm run release` publishes by hand, from
-a checkout of the release's commit, after every check.
+**A release** is a pull request: it moves the seven packages to one version, each depending on the others at `^` that
+version, moves [the plugin](#the-plugin) with them, and dates the CHANGELOG's Unreleased section. Its merge publishes
+it. CI's `release` job runs on each push to `main`, once every other job passed on that commit:
+`scripts/release-plan.mjs` finds the packages' version, and when the push moved it and no tag names it, the job
+publishes each package with provenance, the core first and the CLI last (`scripts/release.mjs --checked`), then tags
+the commit `v<version>` and makes its GitHub Release, "Sosie <version>": the CHANGELOG's section, then how to install
+it. Any other push releases nothing, a change to the docs, a README or the code alike: the plan compares the version
+with the commit before the push, even while a version is not released yet. It publishes with the repository's secret
+`NPM_TOKEN`, an npm token that may publish the `@sosie` packages without a one-time password, and checks it first. It
+stops with nothing published when the tags or the commit before the push cannot be read, at a version below the
+latest tag or a prerelease (npm would serve either as the latest), and when the CHANGELOG has no section for the
+version; `test/release.test.ts` fails the pull request before that, at a package left at another version or a section
+not dated. A job that stops partway is re-run: it passes over the packages on npm already, and the tag comes last, in
+one call with the GitHub Release. A release whose job was passed over, as when a test failed on its commit, is
+released by running CI on `main` by hand (Actions → CI → Run workflow): run so, there is no commit before, and a
+version no tag names is released once every job passes. `npm run release` publishes by hand, from a checkout of the
+release's commit, after every check.
 
 Beside the packages, `plugins/sosie` is the [plugin](#the-plugin): files only, not on npm. What it runs is
 `@sosie/cli`.
@@ -1861,10 +1865,12 @@ source learns. Format domains make a person's email the same fake from the datab
   first and the CLI last, each after the packages it depends on, passing over one already on npm and stopping at one
   that fails, so a release that stops partway leaves nothing that fails to install, and running it again finishes it.
   With `--checked`, as CI's release job runs it, it runs no check. The release plan is run with a git of the test's
-  own: a version a tag names releases nothing; one no tag names is released, its notes the CHANGELOG's section for
-  it and how to install that version; and it stops, with nothing published, at a version below the latest tag, at a prerelease, at a version the
-  CHANGELOG has no section for, and when the tags cannot be read. Every package is at one version, each depending
-  on the others at it, and the CHANGELOG has a section for it.
+  own: a version a tag names releases nothing, and so does a push that does not move the version, though no tag names
+  it; a push that moves it releases it, as a run by hand releases one no tag names; one no tag names is released, its
+  notes the CHANGELOG's section for it and how to install that version; and it stops, with nothing published, at a
+  version below the latest tag, at a prerelease, at a version the CHANGELOG has no section for, and when the tags or
+  the commit before the push cannot be read. Every package is at one version, each depending on the others at it, and
+  the CHANGELOG has a section for it.
 - **The plugin.** `test/plugin.test.ts`: the plugin's version and the CLI its server runs are `@sosie/cli`'s, in its
   source and in Claude Code's files, and its hooks read the `running/` entries the core writes. Each assistant's hooks
   file names scripts that are there, by the token it replaces; a session's files are found from a transcript or a
