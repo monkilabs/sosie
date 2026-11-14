@@ -1871,11 +1871,11 @@ source learns. Format domains make a person's email the same fake from the datab
   version below the latest tag, at a prerelease, at a version the CHANGELOG has no section for, and when the tags or
   the commit before the push cannot be read. Every package is at one version, each depending on the others at it, and
   the CHANGELOG has a section for it.
-- **The README.** `test/readme.test.ts`: the README and each translation in `i18n/` open with the same language bar,
-  their own language in bold; none names a version of Sosie, which a release would leave behind, and each links only
-  to files that are there; and each translation has the English README's code blocks as they are, and says the
-  English one is current. So a new command in the English README moves every translation with it; their prose may
-  trail.
+- **The README.** `test/readme.test.ts`: the README and each translation in `i18n/` open with the same badges (npm's
+  version, CI on `main`, Node, the license), each of which updates itself, then the same language bar, their own
+  language in bold; none names a version of Sosie, which a release would leave behind, and each links only to files
+  that are there; and each translation has the English README's code blocks as they are, and says the English one is
+  current. So a new command in the English README moves every translation with it; their prose may trail.
 - **The plugin.** `test/plugin.test.ts`: the plugin's version and the CLI its server runs are `@sosie/cli`'s, in its
   source and in Claude Code's files, and its hooks read the `running/` entries the core writes. Each assistant's hooks
   file names scripts that are there, by the token it replaces; a session's files are found from a transcript or a

@@ -5,6 +5,8 @@
   </picture>
 </h1>
 
+[![npm version](https://img.shields.io/npm/v/@sosie/cli)](https://www.npmjs.com/package/@sosie/cli) [![CI](https://github.com/monkilabs/sosie/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/monkilabs/sosie/actions/workflows/ci.yml?query=branch%3Amain) [![Node version](https://img.shields.io/node/v/@sosie/cli)](https://nodejs.org/) [![License](https://img.shields.io/npm/l/@sosie/cli)](https://github.com/monkilabs/sosie/blob/main/LICENSE)
+
 **English** · [Español](i18n/README.es.md) · [Português (Brasil)](i18n/README.pt-BR.md) · [Français](i18n/README.fr.md) · [Deutsch](i18n/README.de.md) · [简体中文](i18n/README.zh-CN.md)
 
 **Your AI agent sees a double of your data. Never the real thing.**
