@@ -112,6 +112,13 @@ export interface SourceOptions {
   headers?: Record<string, string>
   /** sosie.yml's `schema`: a file, by an absolute path, or a URL. */
   schema?: string
+  /** sosie.yml's `refuse`: paths of an HTTP upstream Sosie never sends a request to, each with every path under it. */
+  refuse?: readonly string[]
+  /**
+   * Told when an HTTP upstream answers a client 401, as an expired token makes it: once, until it answers 2xx, or the
+   * connection's headers are renewed. The CLI then asks for the headers' variables again.
+   */
+  unauthorized?: () => void
 }
 
 export interface Source {
@@ -124,7 +131,7 @@ export interface Source {
   /** Whether this source reads this upstream, when sosie.yml gives it no kind; or serves this endpoint address. */
   matches(url: URL): boolean
   /** The keys of a source in sosie.yml it takes beyond every source's. Any other is an error. */
-  readonly settings?: readonly ('headers' | 'schema')[]
+  readonly settings?: readonly ('headers' | 'schema' | 'refuse')[]
   /** Connect read-only and describe the upstream in neutral terms. */
   connect(upstream: URL, options: SourceOptions): Promise<Connection>
   /** MCP tools this source adds beside the core's describe: Postgres adds query. They talk to the running endpoint, never to the upstream. */
@@ -141,6 +148,10 @@ export interface Connection {
   readonly warnings: string[]
   /** The schema grows as values come (an API without a schema): sosie.yml may name fields not met yet. */
   readonly learns?: boolean
+  /** Why a rule for a field not met yet may never apply, and what would name it: told once, after such rules' warnings. */
+  readonly whyUnmet?: string
+  /** Send these headers from now on: sosie.yml's, read again with new values. One that is no valid header throws, and renews nothing. */
+  renew?(headers: Record<string, string>): void
   /**
    * Start the endpoint clients use. Every value it returns goes through the Faker. A source that `learns` its fields
    * calls `learned` with its schema as it grows, so `sosie mcp` can describe what it has met.

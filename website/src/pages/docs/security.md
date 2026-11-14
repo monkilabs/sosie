@@ -45,7 +45,7 @@ only `GET`, `HEAD` and GraphQL queries reach an API.
 - **Fakes crossing sources.** One store serves every source, so a fake from the database typed into an API request turns
   back into its real value, which goes to that API. It never reaches the client.
 - **A `GET`, or a GraphQL query field, that writes.** That is the API's to guard; Sosie sends every `GET` and every query
-  on.
+  on. A REST source's `refuse` closes off the paths it lists: an OAuth callback, a portal that opens a session.
 
 ## Where to run it
 

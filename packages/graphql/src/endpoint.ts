@@ -39,6 +39,8 @@ export interface GraphqlContext {
   maxItems: number
   /** Sosie's own credentials for the API, as `secretParts` gives them. */
   secrets: readonly string[]
+  /** Told the status of each answer: a 401 may say the credentials have expired. */
+  answered?: (status: number) => void
   log: (line: string) => void
   /** The largest introspection answer, and a batch's together: MAX_ANSWER, or less for a test, which then needs no large one. */
   maxAnswer?: number
@@ -204,6 +206,7 @@ export async function startEndpoint(listen: { host: string; port: number }, ctx:
       ...(operationName && { operationName }),
     })
     if (answer.status === 401 || answer.status === 403) ctx.log(`The API answered ${answer.status}: check the source's headers.`)
+    ctx.answered?.(answer.status)
     if (!/json/i.test(answer.type)) return failed(502, 'The API did not answer with JSON; Sosie fakes JSON only.')
     let body: { data?: unknown; errors?: unknown }
     try {

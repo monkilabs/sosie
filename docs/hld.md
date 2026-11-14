@@ -292,7 +292,8 @@ substituted, links an API returns, and transcripts kept afterwards.
   Sosie's address), its OpenAPI document or GraphQL schema with their
   descriptions, and its status codes are visible: they are the API, not values
   from it. A `GET`, or a GraphQL query field, that writes is the API's to
-  guard; Sosie sends every `GET` and every query on.
+  guard; Sosie sends every `GET` and every query on, but a path a REST source's
+  `refuse` lists.
 - **What the team lets pass, and keys that look like structure.** A field
   listed under `pass` shows its own values: Sosie hides in it only what the
   request turned back and its own credentials. Without an API's document, a

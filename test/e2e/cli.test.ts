@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -350,6 +351,8 @@ describe('sosie, in front of an API', () => {
     const out = sosie.stdout()
     expect(out).toMatch(/✓ app {2}127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document/)
     expect(out).toContain('! app: No OpenAPI document found')
+    // No rule it does not know yet: nothing to say of one.
+    expect(out).not.toContain('A rule not known yet')
     expect(sosie.address()).toMatch(/^http:\/\/localhost:\d+\/v1$/)
     expect(out).not.toContain(TOKEN)
     const users = (await (await fetch(`${sosie.address()}/users`)).json()) as { data: unknown[] }
@@ -370,6 +373,98 @@ describe('sosie, in front of an API', () => {
     await mcp.close()
     expect(await stop(sosie.child)).toBe(0)
     await api.close()
+  })
+})
+
+describe('sosie, in front of an API without a document, with rules for fields not met yet', () => {
+  it('says why such a rule may never apply, once for each source that holds one, its own or the top’s', async () => {
+    const api = await startApi()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-unmet-'))
+    const why =
+      "  ! app: A rule not known yet applies once an answer's path names its entity: /users and /users/87 name user. Under a record, only a list under a plural name does (/spaces/87/accounts); /spaces/87/account and /spaces/87/accounts/5 name none, so no rule applies to their answers. Give the source a schema, the API's OpenAPI document, to name every field from it.\n"
+    for (const rules of ['    pass: [account.status]\n', '', 'pass: [account.status]\n']) {
+      const top = rules.startsWith('pass') ? rules : ''
+      const own = rules.startsWith(' ') ? rules : ''
+      const dir = project(`${top}sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n    headers:\n      Authorization: Bearer \${APP_TOKEN}\n${own}`)
+      const sosie = await start({ APP_URL: api.url, APP_TOKEN: TOKEN, SOSIE_HOME: home }, allowSends(home, dir))
+      const out = sosie.stdout()
+      if (!rules) expect(out).not.toContain(why)
+      else {
+        const warned = own ? '  ! sosie.yml: sources.app: account is not known yet: it applies once Sosie meets it.\n' : '  ! sosie.yml: account.status is not known yet: it applies once Sosie meets it.\n'
+        expect(out).toContain(`${warned}${why}`)
+        expect(out.split(why)).toHaveLength(2)
+      }
+      expect(await stop(sosie.child)).toBe(0)
+    }
+    await api.close()
+  })
+})
+
+describe('sosie, in front of an API, refusing paths', () => {
+  it('never sends one of the paths sosie.yml refuses, and says in the banner how many it refuses', async () => {
+    const api = await startApi()
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-refuse-'))
+    const dir = project(`sources:\n  app:\n    upstream: \${APP_URL}\n    port: 0\n    headers:\n      Authorization: Bearer \${APP_TOKEN}\n    refuse: [/users/*]\n`)
+    const sosie = await start({ APP_URL: api.url, APP_TOKEN: TOKEN, SOSIE_HOME: home }, allowSends(home, dir))
+    expect(sosie.stdout()).toMatch(/✓ app {2}127\.0\.0\.1:\d+\/v1, read-only: no OpenAPI document; refuses 1 path\n/)
+    expect((await fetch(`${sosie.address()}/users/1`)).status).toBe(403)
+    expect((await fetch(`${sosie.address()}/users`)).status).toBe(200)
+    expect(api.requests.map((r) => r.path)).toContain('/v1/users')
+    expect(api.requests.map((r) => r.path)).not.toContain('/v1/users/1')
+    expect(await stop(sosie.child)).toBe(0)
+    await api.close()
+  })
+})
+
+describe('sosie, when a token expires', () => {
+  it('asks for its header’s variable again at a hidden prompt on a 401, and sends the new value from then on', async () => {
+    // An API whose token is replaced while Sosie runs.
+    let accepted = 'first-token-4f1c'
+    const sent: string[] = []
+    const server = createServer((req, res) => {
+      sent.push(req.headers.authorization ?? '')
+      const allowed = req.headers.authorization === `Bearer ${accepted}`
+      const found = req.url === '/users'
+      res.writeHead(allowed ? (found ? 200 : 404) : 401, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(allowed && found ? [{ id: 1, email: 'quill.vantablack@canary-mail.test' }] : { error: allowed ? 'not found' : 'token expired' }))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const home = mkdtempSync(join(tmpdir(), 'sosie-cli-renew-'))
+    const dir = allowSends(home, project(ONE('    headers:\n      Authorization: Bearer ${APP_TOKEN}\n')))
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+    const sosie = await start({ APP_URL: url, APP_TOKEN: accepted, SOSIE_HOME: home }, dir, '')
+    /** Wait until Sosie has printed this text, this many times. */
+    const until = async (text: string, times = 1) => {
+      const count = () => sosie.stdout().split(text).length - 1
+      for (let i = 0; i < 100 && count() < times; i++) await new Promise((r) => setTimeout(r, 50))
+      expect(count()).toBe(times)
+    }
+    const users = () => fetch(`${sosie.address()}/users`).then((r) => r.status)
+    const asked = '  APP_TOKEN, a new value (hidden), or Enter to keep it: '
+    try {
+      expect(await users()).toBe(200)
+      accepted = 'second-token-9d2e'
+      expect(await users()).toBe(401)
+      await until(asked)
+      expect(sosie.stdout()).toContain('  ! app: the API answered 401: a value its headers send may have expired.\n')
+      sosie.child.stdin!.write('second-token-9d2e\n')
+      await until('✓ APP_TOKEN renewed: app sends the new value from now on.')
+      expect(await users()).toBe(200)
+      expect(sent.at(-1)).toBe('Bearer second-token-9d2e')
+      // Expired again, and kept with Enter: asked no more until the API answers 2xx.
+      accepted = 'third-token-77ab'
+      expect(await users()).toBe(401)
+      await until(asked, 2)
+      sosie.child.stdin!.write('\n')
+      await until('  app sends APP_TOKEN as before.')
+      expect(await users()).toBe(401)
+      await new Promise((r) => setTimeout(r, 200))
+      expect(sosie.stdout().split(asked)).toHaveLength(3)
+      expect(sosie.stdout() + sosie.stderr()).not.toMatch(/first-token|second-token|third-token/)
+    } finally {
+      expect(await stop(sosie.child)).toBe(0)
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   })
 })
 

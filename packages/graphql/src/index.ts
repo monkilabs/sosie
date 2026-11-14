@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { readCapped, secretParts, upstreamHeaders, why, type Connection, type Field, type Source } from '@sosie/core'
+import { Credentials, readCapped, why, type Connection, type Field, type Source } from '@sosie/core'
 import { buildClientSchema, buildSchema, getIntrospectionQuery, validateSchema, type GraphQLSchema, type IntrospectionQuery } from 'graphql'
 import { startEndpoint } from './endpoint.js'
 import { graphqlTool } from './mcp.js'
@@ -16,11 +16,11 @@ export const graphql: Source = {
   matches: (url) => (url.protocol === 'http:' || url.protocol === 'https:') && /\/graphql(\.json)?(\/|$)/i.test(url.pathname),
   settings: ['headers', 'schema'],
   async connect(upstream, options): Promise<Connection> {
-    const headers = upstreamHeaders(options.headers)
     const user = decodeURIComponent(upstream.username)
     const password = decodeURIComponent(upstream.password)
-    if (user) headers.authorization ??= `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
-    const secrets = secretParts(headers, [...new URL(upstream.href).searchParams.values(), user, password])
+    const query = new URL(upstream.href).searchParams.values()
+    const credentials = new Credentials(options.headers, { user, password, query }, options.unauthorized)
+    const { headers, secrets } = credentials
     const url = new URL(upstream.href)
     // A query on the URL (?api_key=) is a credential too: sent with every request, never shown.
     url.username = url.password = url.hash = ''
@@ -65,7 +65,18 @@ export const graphql: Source = {
       label,
       summary: `${neutral.entities.length} types, ${queries} ${queries === 1 ? 'query' : 'queries'}`,
       warnings: [],
-      serve: (listen, faker) => startEndpoint(listen, { upstream: api, schema, fields, faker, maxItems: options.maxRows, secrets, log: (line) => process.stderr.write(`  ! ${line}\n`) }),
+      serve: (listen, faker) =>
+        startEndpoint(listen, {
+          upstream: api,
+          schema,
+          fields,
+          faker,
+          maxItems: options.maxRows,
+          secrets,
+          answered: (status) => credentials.answered(status),
+          log: (line) => process.stderr.write(`  ! ${line}\n`),
+        }),
+      renew: (given) => credentials.renew(given),
       async close() {},
     }
   },

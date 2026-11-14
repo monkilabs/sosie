@@ -28,6 +28,8 @@ async function startRest(
     userinfo = '',
     learned = undefined as ((schema: Schema) => void) | undefined,
     schema = undefined as string | undefined,
+    refuse = undefined as string[] | undefined,
+    unauthorized = undefined as (() => void) | undefined,
   } = {},
 ) {
   const connection = await rest.connect(new URL(`${api.url.replace('//', `//${userinfo}`)}${query}`), {
@@ -35,6 +37,8 @@ async function startRest(
     statementTimeout: 5000,
     headers,
     ...(schema && { schema }),
+    ...(refuse && { refuse }),
+    ...(unauthorized && { unauthorized }),
   })
   // The same key on every run, so the same fakes. With a key of its own each run, a value's fake could by chance be
   // one of the API's own words: a single word is faked as a word, and a value Sosie gave, typed where a path starts
@@ -95,6 +99,15 @@ afterAll(async () => {
 })
 
 describe('an API without an OpenAPI document', () => {
+  it('says why a rule for a field not met yet may never apply, and with a document says nothing of it', async () => {
+    expect(sosie.connection.whyUnmet).toMatch(/^A rule not known yet applies once an answer's path names its entity: .* Give the source a schema/)
+    const documented = await startApi({ withOpenapi: true })
+    const s = await startRest(documented)
+    expect(s.connection.whyUnmet).toBeUndefined()
+    await s.close()
+    await documented.close()
+  })
+
   it('says so, and names fields by where values sit', () => {
     expect(sosie.connection.summary).toBe('no OpenAPI document')
     expect(sosie.connection.warnings[0]).toMatch(/^No OpenAPI document found/)
@@ -351,6 +364,49 @@ describe('an API without an OpenAPI document', () => {
 })
 
 describe('the guard and the credentials', () => {
+  it('never sends a path sosie.yml refuses, however it is written, nor follows a redirect to one', async () => {
+    const strict = await startRest(api, { refuse: ['/users/*', '/countries', '/v1/members'] })
+    expect(strict.connection.summary).toBe('no OpenAPI document; refuses 3 paths')
+    const [user] = (await strict.get('/users')).body.data
+    const sent = api.requests.length
+    const refused = 'The source refuses this path: Sosie does not send it to the API.'
+    // A fake id turns back into the real path, which is refused; so is a path written another way, and one under it.
+    for (const path of [`/users/${user.id}`, '/users/1', '/COUNTRIES', '/countries;v=2', '/%2563ountries', '/countries/', '/countries/1', '/v1/members']) {
+      expect(await strict.get(path), path).toMatchObject({ status: 403, body: { error: refused } })
+    }
+    expect((await strict.get('/countries', { method: 'HEAD' })).status).toBe(403)
+    // A redirect to a refused path is not followed: the path asked for was sent, the one it led to was not.
+    expect(await strict.get('/products/featured')).toMatchObject({
+      status: 403,
+      body: { error: 'The API redirected to a path the source refuses; Sosie does not follow it.' },
+    })
+    expect(api.requests.slice(sent).map((r) => r.path)).toEqual(['/v1/products/featured'])
+    // A path that only starts like one refused is sent.
+    expect((await strict.get('/country-links')).status).toBe(200)
+    await strict.close()
+  })
+
+  it('tells of a 401 once, until the API answers 2xx or the headers are renewed, and sends renewed headers from then on', async () => {
+    let told = 0
+    const s = await startRest(api, { unauthorized: () => told++ })
+    expect((await s.get('/users')).status).toBe(200)
+    // The token expires: the first 401 is told, the next not, as the developer is asked once.
+    s.connection.renew!({ Authorization: 'Bearer expired-token-1' })
+    for (let i = 0; i < 2; i++) expect((await s.get('/users')).status).toBe(401)
+    expect(told).toBe(1)
+    expect(api.requests.at(-1)!.authorization).toBe('Bearer expired-token-1')
+    s.connection.renew!({ Authorization: `Bearer ${TOKEN}` })
+    expect((await s.get('/users')).status).toBe(200)
+    expect(api.requests.at(-1)!.authorization).toBe(`Bearer ${TOKEN}`)
+    // Renewed with a value that is wrong too: its 401 is told again.
+    s.connection.renew!({ Authorization: 'Bearer expired-token-2' })
+    expect((await s.get('/users')).status).toBe(401)
+    expect(told).toBe(2)
+    expect(() => s.connection.renew!({ Authorization: 'Bearer a\nb' })).toThrow('The header Authorization is not a valid one')
+    expect(api.requests.at(-1)!.authorization).toBe('Bearer expired-token-2')
+    await s.close()
+  })
+
   it('sends only GET and HEAD to the API', async () => {
     const before = api.requests.length
     const post = await sosie.get('/users', { method: 'POST', body: '{}' })

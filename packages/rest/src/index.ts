@@ -1,9 +1,16 @@
 import { readFileSync } from 'node:fs'
-import { readCapped, secretParts, upstreamHeaders, why, type Connection, type Source } from '@sosie/core'
+import { Credentials, readCapped, why, type Connection, type Source } from '@sosie/core'
 import { startEndpoint } from './endpoint.js'
 import { requestTool } from './mcp.js'
 import { parseDocument, readApi, type Api } from './openapi.js'
-import { RestUpstream } from './upstream.js'
+import { RefusedPath, RestUpstream } from './upstream.js'
+
+/**
+ * Why, without a document, a rule for a field not met yet may never apply: an answer is an entity's only where its path
+ * says so, which a singular name under a record never does.
+ */
+const WHY_UNMET =
+  'A rule not known yet applies once an answer\'s path names its entity: /users and /users/87 name user. Under a record, only a list under a plural name does (/spaces/87/accounts); /spaces/87/account and /spaces/87/accounts/5 name none, so no rule applies to their answers. Give the source a schema, the API\'s OpenAPI document, to name every field from it.'
 
 /** Where an API usually serves its OpenAPI document, relative to its base. */
 const DISCOVER = ['openapi.json', 'openapi.yaml', 'swagger.json', 'v3/api-docs', 'api-docs', 'docs/openapi.json']
@@ -14,19 +21,17 @@ export const rest: Source = {
   title: 'REST API',
   schemes: ['http:', 'https:'],
   matches: (url) => url.protocol === 'http:' || url.protocol === 'https:',
-  settings: ['headers', 'schema'],
+  settings: ['headers', 'schema', 'refuse'],
   async connect(upstream, options): Promise<Connection> {
-    const headers = upstreamHeaders(options.headers)
     const user = decodeURIComponent(upstream.username)
     const password = decodeURIComponent(upstream.password)
-    if (user) headers.authorization ??= `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
     const base = new URL(upstream.href)
     // A query on the base URL (?api_key=) is a credential too: sent upstream, never shown.
     const params = new URLSearchParams(base.search)
     base.username = base.password = base.search = base.hash = ''
     base.pathname = base.pathname.replace(/\/?$/, '/')
-    const api = new RestUpstream(base, headers, options.statementTimeout, params)
-    const secrets = secretParts(headers, [...params.values(), user, password])
+    const credentials = new Credentials(options.headers, { user, password, query: params.values() }, options.unauthorized)
+    const api = new RestUpstream(base, credentials.headers, options.statementTimeout, params, options.refuse)
     const label = `${base.host}${base.pathname.replace(/\/$/, '')}`
 
     const warnings: string[] = []
@@ -49,7 +54,8 @@ export const rest: Source = {
           if (answer.status !== 200) continue
           found = parseDocument(answer.body)
         } catch (error) {
-          if (!reached) reason = why(error)
+          // A path sosie.yml refuses is never asked for, a document's included.
+          if (!reached) reason = error instanceof RefusedPath ? reason || error.message : why(error)
           continue
         }
         try {
@@ -69,22 +75,26 @@ export const rest: Source = {
       }
     }
     const operations = doc?.operations.length ?? 0
+    const refused = options.refuse?.length ? `; refuses ${options.refuse.length} ${options.refuse.length === 1 ? 'path' : 'paths'}` : ''
     return {
       schema: doc?.schema ?? { entities: [] },
       label,
-      summary: doc ? `${doc.version}, ${doc.schema.entities.length} schemas, ${operations} GET ${operations === 1 ? 'path' : 'paths'}` : 'no OpenAPI document',
+      summary: `${doc ? `${doc.version}, ${doc.schema.entities.length} schemas, ${operations} GET ${operations === 1 ? 'path' : 'paths'}` : 'no OpenAPI document'}${refused}`,
       warnings,
       learns: !doc,
+      ...(!doc && { whyUnmet: WHY_UNMET }),
       serve: (listen, faker, learned) =>
         startEndpoint(listen, {
           upstream: api,
           api: doc,
           faker,
           maxItems: options.maxRows,
-          secrets,
+          secrets: credentials.secrets,
+          answered: (status) => credentials.answered(status),
           log: (line) => process.stderr.write(`  ! ${line}\n`),
           ...(learned && { learned }),
         }),
+      renew: (headers) => credentials.renew(headers),
       async close() {},
     }
   },

@@ -1,5 +1,6 @@
 import { readCapped } from '@sosie/core'
 import { oneSegment, segmentsOf } from './paths.js'
+import { refuser } from './refuse.js'
 
 /** The API upstream: credentials Sosie holds, redirects within the API only, a timeout and a size cap. */
 export interface UpstreamResponse {
@@ -13,6 +14,17 @@ export interface UpstreamResponse {
 const MAX_BODY = 20 * 1024 * 1024
 const MAX_REDIRECTS = 5
 
+/** A path sosie.yml's refuse lists: never sent, nor followed to. */
+export class RefusedPath extends Error {
+  constructor(
+    /** The API redirected to it: the request asked for another path. */
+    readonly redirected: boolean,
+  ) {
+    super(redirected ? 'The API redirected to a path the source refuses; Sosie does not follow it.' : 'The source refuses this path: Sosie does not send it to the API.')
+    this.name = 'RefusedPath'
+  }
+}
+
 export class RestUpstream {
   constructor(
     readonly base: URL,
@@ -20,11 +32,28 @@ export class RestUpstream {
     readonly timeout: number,
     /** Query parameters the upstream's URL carries, such as an api_key: sent with every request, never shown. */
     readonly params = new URLSearchParams(),
-  ) {}
+    /** sosie.yml's refuse: paths never sent a request, from the base or from the origin's root. */
+    readonly refuse: readonly string[] = [],
+  ) {
+    this.refused = refuser(refuse)
+  }
 
+  private readonly refused: (segments: readonly string[]) => boolean
+
+  /** Whether sosie.yml's refuse lists a path: as it is under the base (/oauth/start of /v1/oauth/start), or whole. */
+  refuses(pathname: string): boolean {
+    if (!this.refuse.length) return false
+    const segments = segmentsOf(pathname) ?? pathname.split('/').filter(Boolean)
+    const base = segmentsOf(this.base.pathname) ?? []
+    const under = base.every((segment, i) => segments[i] === segment) ? segments.slice(base.length) : undefined
+    return this.refused(segments) || (under !== undefined && this.refused(under))
+  }
+
+  /** A request to the API, following its redirects within it. Throws RefusedPath for a path sosie.yml refuses, the path or a redirect's. */
   async get(url: URL, method: 'GET' | 'HEAD' = 'GET'): Promise<UpstreamResponse> {
     let current = url
     for (let hop = 0; ; hop++) {
+      if (this.refuses(current.pathname)) throw new RefusedPath(hop > 0)
       for (const [name, value] of this.params) current.searchParams.set(name, value)
       const response = await fetch(current, {
         method,

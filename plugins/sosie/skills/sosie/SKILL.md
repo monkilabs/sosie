@@ -74,6 +74,8 @@ This is how Sosie works, not a bug, and not a reason to work around it.
 
 - **Writes.** `INSERT`, `UPDATE`, `DELETE`, schema changes and `EXPLAIN`, whose plan would print real values; GraphQL
   mutations and subscriptions; every HTTP method but `GET` and `HEAD`.
+- **Paths the developer closed off.** A REST path the source's `refuse` lists, and every path under it, gets `403`: an
+  OAuth callback, say, or a portal that opens a session.
 - **What would show the real data or the server:** catalogs such as `pg_stats`, `pg_stat_activity` and `pg_settings`,
   and `pg_roles` read by `*` or its `rolconfig`, MySQL's `mysql` database and `SHOW STATUS`, MongoDB's `admin`, `local` and `config` databases; functions
   and settings such as `inet_server_addr`, `SHOW port`, `@@datadir` and `set_config` with a value from a row; and
