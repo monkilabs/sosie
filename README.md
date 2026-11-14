@@ -5,6 +5,8 @@
   </picture>
 </h1>
 
+**English** · [Español](i18n/README.es.md) · [Português (Brasil)](i18n/README.pt-BR.md) · [Français](i18n/README.fr.md) · [Deutsch](i18n/README.de.md) · [简体中文](i18n/README.zh-CN.md)
+
 **Your AI agent sees a double of your data. Never the real thing.**
 
 Sosie sits between your data and your AI agent. The agent, your app and its

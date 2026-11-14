@@ -4,7 +4,7 @@
 
 The asks of a trial in front of a Spring Boot API
 ([#37](https://github.com/monkilabs/sosie/issues/37)) beyond its fix in 0.4.2,
-and the packages published from CI.
+the packages published from CI, and the README in five more languages.
 
 - REST: a source's `refuse` lists paths Sosie never sends a request to, each
   with every path under it: `refuse: [/oauth/*, /billing/portal]`. A `GET`
@@ -33,6 +33,9 @@ and the packages published from CI.
   publishes the seven packages, tags the commit and makes the GitHub Release.
   No other merge publishes: one that changes only the docs, a README or code
   waits for the next release.
+- The README in Spanish, Brazilian Portuguese, French, German and Simplified
+  Chinese, in `i18n/`, each linked from a language bar at the top of every
+  version. The English one stays current; the docs they link to are in English.
 
 ## 0.4.2, 13 November 2026
 
