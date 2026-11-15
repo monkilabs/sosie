@@ -177,11 +177,11 @@ field each value came from.
 
 | | MongoDB | SQL Server | Oracle |
 | --- | --- | --- | --- |
-| For clients | Its wire protocol, open: `OP_MSG` and BSON, with the first `hello` as `OP_QUERY`. The Node driver, which Mongoose is built on, connects unchanged and is tested; `mongosh` was checked by hand; Compass and MongoDB's own MCP server are not checked yet. FerretDB shows a server of its own can satisfy them | TDS, open ([MS-TDS](https://learn.microsoft.com/openspecs/windows_protocols/ms-tds/)): login, batches, and RPC, which every driver uses for parameters (`sp_executesql`). ODBC Driver 18, JDBC and SqlClient encrypt by default, so the endpoint needs TLS from the start, carried in TDS's own packets | TNS and TTC: closed, known only from Oracle's own thin drivers. Sosie would have to imitate Oracle's logon and whatever each client checks: JDBC, OCI, ODP.NET |
+| For clients | Its wire protocol, open: `OP_MSG` and BSON, with the first `hello` as `OP_QUERY`. The Node driver, which Mongoose is built on, connects unchanged and is tested; `mongosh` was checked by hand; Compass and MongoDB's own MCP server are not checked yet. FerretDB shows a server of its own can satisfy them | TDS, open ([MS-TDS](https://learn.microsoft.com/openspecs/windows_protocols/ms-tds/)): login, batches, and RPC, which drivers use for parameters (`sp_executesql`, and JDBC's `sp_prepexec`). ODBC Driver 18, JDBC, SqlClient and tedious encrypt and check the certificate by default, so the endpoint needs TLS from the start: TDS 7.4's, carried in its own packets, and TDS 8's, TLS first, on one port. None takes a certificate Sosie makes without `TrustServerCertificate=true` or Sosie's CA in its runtime's store ([the spike](#sql-servers-spike)) | TNS and TTC: closed, known only from Oracle's own thin drivers. Sosie would have to imitate Oracle's logon and whatever each client checks: JDBC, OCI, ODP.NET |
 | Read-only | Commands are documents, allowed by name: `find`, `aggregate` without `$out` or `$merge`, `count`, `distinct`, the `list` commands. Server-side JavaScript (`$where`, `$function`, `$accumulator`) is refused. A login with the built-in `read` role is the layer under it | sqlparser's T-SQL dialect reads the usual reads (`TOP`, `CROSS APPLY`, `FOR JSON`); what it cannot parse is refused, as with MySQL. Writes hide in `SELECT INTO`, `EXEC`, `OUTPUT`, `OPENROWSET` and linked servers. SQL Server has no read-only session, so the login's grants (`db_datareader`, no `EXECUTE`) are the only layer under the guard | sqlparser's Oracle dialect reads the usual reads (`ROWNUM`, `CONNECT BY`, `(+)` joins). `SET TRANSACTION READ ONLY`; database links, `UTL_` and `DBMS_` packages refused |
-| Field of a value | No schema to read: the collection and the dotted path (`users.address.city`), as the REST source learns a body without a document, and `$jsonSchema` validators where a collection has them. `find` keeps paths; what an aggregation renames is read from its pipeline, and what it computes is faked by type. A fake in a filter is a value in a document, turned back with no parse | Results name only the column. Browse mode, or `sp_describe_first_result_set` with browse information, names its database, table and column through views and aliases, as MySQL's metadata does | Oracle names no table for a result column, so every column would rest on the parse, and anything it cannot place would be faked by type |
+| Field of a value | No schema to read: the collection and the dotted path (`users.address.city`), as the REST source learns a body without a document, and `$jsonSchema` validators where a collection has them. `find` keeps paths; what an aggregation renames is read from its pipeline, and what it computes is faked by type. A fake in a filter is a value in a document, turned back with no parse | Results name only the column. Browse mode (`SET NO_BROWSETABLE ON` on Sosie's upstream session) adds to each result its tables, and for each column its table and name, or that it is an expression, through aliases, joins, views, synonyms, functions and procedures, as MySQL's metadata does. It also adds each table's key as a hidden column, which Sosie drops | Oracle names no table for a result column, so every column would rest on the parse, and anything it cannot place would be faked by type |
 | Size | Medium. The protocol is small and needs no parser, but documents are new to the core, and ObjectId a type of its own. Decimal128 and dates fit the types it had | Large: the Postgres source's size, with TLS and RPC from the first day | Very large and brittle as an endpoint; medium as an MCP-only source |
-| Tested on | `mongodb-memory-server`, as MySQL is on `mysql-memory-server` | SQL Server's container, x86 only: Rosetta on Apple silicon | Oracle Database Free's container, large and slow to start |
+| Tested on | `mongodb-memory-server`, as MySQL is on `mysql-memory-server` | SQL Server's container, x86 only: Rosetta on Apple silicon, as the spike ran it in Colima | Oracle Database Free's container, large and slow to start |
 
 So MongoDB comes first: it fits Sosie best, and gives the guard least room to be wrong. SQL Server follows, the same
 kind of source as Postgres and MySQL, only bigger. Oracle, if ever, comes as an MCP-only source: `describe` and
@@ -189,8 +189,61 @@ kind of source as Postgres and MySQL, only bigger. Oracle, if ever, comes as an 
 
 Each starts with a spike before it is planned in detail. MongoDB's showed the drivers and `mongosh` take a server of
 Sosie's own, and that an ObjectId needs a type of its own in the core, faked in one domain wherever it is held; it is
-built (see the [low-level design](lld.md#mongodb-source)). For SQL Server: TLS with each driver's defaults, and which
-metadata names the column.
+built (see the [low-level design](lld.md#mongodb-source)). SQL Server's asked what TLS each driver needs as it comes,
+and which metadata names a value's column.
+
+#### SQL Server's spike
+
+**TLS.** An endpoint of the spike's own, serving TDS as Sosie would, with a certificate from a CA of its own, and four
+drivers as they come, each running `SELECT 1`:
+
+| | ODBC Driver 18.7 (`sqlcmd`) | JDBC 13.6 | SqlClient 7.1 | tedious 20.3 |
+| --- | --- | --- | --- | --- |
+| As configured by default | ✗ the certificate is not trusted | ✗ the same | ✗ the same | ✗ the same |
+| `TrustServerCertificate=true` | ✓ | ✓ | ✓ | ✓ |
+| Sosie's CA in the runtime's store | ✓ the system's | ✓ the JVM's | ✓ the system's | ✓ in `NODE_EXTRA_CA_CERTS` |
+| `Encrypt=strict` (TDS 8), which ignores `TrustServerCertificate` | ✓ with the CA trusted | ✓ with the CA trusted, or the certificate in `serverCertificate` | ✓ with the CA trusted, or the certificate in `ServerCertificate` | ✓ with the CA trusted |
+| An endpoint without TLS | ✗, but ✓ in clear with `Encrypt=optional` (`-N o`) | ✗, but ✓ with `encrypt=false` | ✗, but ✓ with `Encrypt=Optional` | ✗, but ✓ with `encrypt: false` |
+
+- Postgres's and MySQL's drivers fall back to clear text, so they connect to Sosie's endpoints as they come. No SQL
+  Server driver does: each needs a TLS endpoint it trusts, or to be told not to ask for one. A connection string to
+  SQL Server's own container already needs `TrustServerCertificate=true`, as the container makes its own certificate;
+  with it, it works against Sosie with only the host changed.
+- A client told not to ask for TLS is still made to check the certificate by ODBC, JDBC and SqlClient when the
+  endpoint answers that it requires TLS. Answered that the endpoint has none, it connects in clear.
+- A trusted CA is one store for each runtime: Node reads its own (the system's only with `--use-system-ca`), Java its
+  `cacerts`, ODBC and SqlClient the system's on Linux, where they ran. On macOS they are not tried yet.
+- One port serves both versions, told apart by the first byte: a PRELOGIN's is `0x12`, a ClientHello's `0x16`. TDS
+  7.4 runs TLS 1.2 inside PRELOGIN packets, each flight of the handshake in one message, which every driver took and
+  tedious requires. TDS 8 runs TLS 1.3 first, with ALPN `tds/8.0`, and TDS inside it.
+
+**The field of a value.** SQL Server 2022, 31 queries, and a query with a parameter sent as `sp_executesql` and as
+`sp_prepexec`:
+
+- Browse mode and `sp_describe_first_result_set` (mode 1, browse information) name the same table and column for
+  every value that comes from one. That holds through aliases, joins, `SELECT *`, views (the base table, under the
+  view's own name for the column), synonyms, CTEs, derived tables, inline functions, procedures and `EXEC` of a
+  string. A computed value (`UPPER(email)`, `CASE`, an aggregate, a window function, a column of a `UNION`, a scalar
+  subquery, `OPENJSON`'s columns) has no table in either: browse mode marks it an expression, and describing marks it
+  computed or gives it no source. It is faked by type, as other sources fake one. Mode 2 names the view, not its
+  table, so it is of no use to Sosie.
+- Browse mode answers in the result itself, for every result set of a batch and for either RPC. It costs nothing
+  measurable: 0.81 ms a query, against 0.85 without it, under Rosetta. Describing first adds a round trip and a
+  compile (2.8 ms), and covers only a batch's first result set.
+- Browse mode's costs. It adds each table's key, when the query did not select it, as a hidden column of the result and
+  of every row; Sosie drops them, and the `TABNAME` and `COLINFO` tokens, before a client sees the result. It names a
+  table as the text that referred to it wrote it, the query's or a view's (`users`, `dbo.users`, `spike.dbo.users`).
+  A bare name is clear when one schema of the database has a table of that name; when two do, describing first names
+  the schema. A client's `SET NO_BROWSETABLE OFF` would turn browse mode off, so the guard refuses that. And
+  `NO_BROWSETABLE` is not in SQL Server's documentation: OLE DB providers set it for results they update. A
+  `db_datareader` login may set it, and a table without a key gets no hidden column.
+
+So the SQL Server endpoint serves both versions of TLS, with a certificate from a CA Sosie keeps in `SOSIE_HOME`, and
+the connection strings it prints say `TrustServerCertificate=true`. A client that asks for no TLS is answered in
+clear, as the Postgres and MySQL endpoints answer theirs, and `Encrypt=strict` works once its runtime trusts the CA.
+The source reads browse mode, and describes first only where browse mode is refused. Still to try: Azure SQL, which
+may refuse browse mode; whether a hidden key changes a plan where the key is not the clustered index; cursors
+(`sp_cursoropen`); and the drivers' trust stores on macOS.
 
 ### In other languages
 
