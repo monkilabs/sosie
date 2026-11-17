@@ -6,7 +6,7 @@ license: MIT
 
 # Sosie
 
-Sosie is a read-only endpoint on the developer's machine, in front of their Postgres, MySQL or MongoDB database, or
+Sosie is a read-only endpoint on the developer's machine, in front of their Postgres, MySQL, MongoDB or SQL Server database, or
 their team's REST or GraphQL API. Every value it returns is a fake of the real one, of the same type and format. The same real value is
 always the same fake, so joins hold and a value you saw finds its record again. The real values, the credentials and
 the hostnames stay on the developer's side. That is the point of it: keep it that way.
@@ -14,19 +14,21 @@ the hostnames stay on the developer's side. That is the point of it: keep it tha
 ## Reach it
 
 - **The MCP tools.** Start with `describe`: every source Sosie serves, by its name, kind and address, with its
-  entities, their fields, types, keys and references, and which fields pass unchanged. Then `query` for Postgres and MySQL (SQL in the database's own
-  dialect, up to 200 rows per statement), `find` and `aggregate` for MongoDB (a collection, and a filter or a pipeline
+  entities, their fields, types, keys and references, and which fields pass unchanged. Then `query` for Postgres, MySQL and SQL Server (SQL in the database's own
+  dialect, T-SQL for SQL Server, up to 200 rows per statement), `find` and `aggregate` for MongoDB (a collection, and a filter or a pipeline
   as JSON, up to 200 documents), `request` for REST (a `GET` path, or a link Sosie returned) and `graphql` for GraphQL
-  (a query and its variables). Use the tool of the source's kind: `query` reaches a Postgres or MySQL source only,
+  (a query and its variables). Use the tool of the source's kind: `query` reaches a Postgres, MySQL or SQL Server source only,
   `find` and `aggregate` a MongoDB one. When several sources of a kind run, pass the `source` by its name, as
   `describe` lists it: the tool asks for one rather than guess. A MongoDB source learns its fields from the documents
   it serves, so `describe` lists what it has met so far.
 - **A REST source without an OpenAPI document** learns its fields from the API's answers, so `describe` lists only
   what it has met so far, and may list nothing. `request` the paths the API serves, such as `/users`, and read the
   fields from what comes back.
-- **Each source's address**, for `psql`, `mongosh`, `curl`, the app and its tests: the one Sosie printed when it
-  started, on 127.0.0.1 from port 7674 up, such as `postgres://localhost:7674/app`, `mysql://127.0.0.1:7674/app` or
-  `mongodb://127.0.0.1:7674/app?directConnection=true`. Point code at it as it would point at the real thing.
+- **Each source's address**, for `psql`, `mongosh`, `sqlcmd`, `curl`, the app and its tests: the one Sosie printed when it
+  started, on 127.0.0.1 from port 7674 up, such as `postgres://localhost:7674/app`, `mysql://127.0.0.1:7674/app`,
+  `mongodb://127.0.0.1:7674/app?directConnection=true` or, for SQL Server, the connection string
+  `Server=127.0.0.1,7674;Database=app;TrustServerCertificate=true`, with any user and password. Point code at it as it
+  would point at the real thing.
 
 ## When Sosie is not running
 
@@ -72,14 +74,17 @@ This is how Sosie works, not a bug, and not a reason to work around it.
 
 ## What Sosie refuses
 
-- **Writes.** `INSERT`, `UPDATE`, `DELETE`, schema changes and `EXPLAIN`, whose plan would print real values; GraphQL
+- **Writes.** `INSERT`, `UPDATE`, `DELETE`, `SELECT … INTO`, schema changes, and `EXPLAIN` or SQL Server's `SHOWPLAN`,
+  whose plan would print real values; GraphQL
   mutations and subscriptions; every HTTP method but `GET` and `HEAD`.
 - **Paths the developer closed off.** A REST path the source's `refuse` lists, and every path under it, gets `403`: an
   OAuth callback, say, or a portal that opens a session.
 - **What would show the real data or the server:** catalogs such as `pg_stats`, `pg_stat_activity` and `pg_settings`,
-  and `pg_roles` read by `*` or its `rolconfig`, MySQL's `mysql` database and `SHOW STATUS`, MongoDB's `admin`, `local` and `config` databases; functions
-  and settings such as `inet_server_addr`, `SHOW port`, `@@datadir` and `set_config` with a value from a row; and
-  JavaScript on a MongoDB server (`$where`, `$function`).
+  and `pg_roles` read by `*` or its `rolconfig`, MySQL's `mysql` database and `SHOW STATUS`, MongoDB's `admin`, `local` and `config` databases,
+  SQL Server's `sys.dm_*` views and `msdb`; functions and settings such as `inet_server_addr`, `SHOW port`,
+  `@@datadir`, `@@SERVERNAME`, `OPENROWSET` and `set_config` with a value from a row; JavaScript on a MongoDB server
+  (`$where`, `$function`); and on SQL Server, every procedure but the catalog's (`sp_tables`, `sp_columns`), `PRINT`,
+  and `FOR XML`.
 
 Do not look for a way around a refusal or a fake, and do not use filters or computed values to work out a real value.
 That defeats the reason the developer put Sosie there.
@@ -104,7 +109,8 @@ Code written against the fakes runs unchanged on the real data: the same tables,
       upstream: ${APP_URL}
   ```
 
-  A field's id is `table.column` for Postgres and MySQL, `collection.path` for MongoDB (`users.address.city`),
+  A field's id is `table.column` for Postgres, MySQL and SQL Server (`schema.table.column` outside the default schema),
+  `collection.path` for MongoDB (`users.address.city`),
   `Schema.property` for REST with an OpenAPI document (`entity.key` without one) and `Type.field` for GraphQL;
   `describe` lists them. A rule at the top holds for every source that has the table; under a source, for that one.
   Sosie reads `sosie.yml` when it starts, so a change applies once the developer restarts it.

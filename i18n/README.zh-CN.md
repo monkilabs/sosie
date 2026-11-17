@@ -21,7 +21,7 @@ Sosie 位于你的数据和你的 AI 智能体之间。智能体、你的应用�
 
 ## 状态
 
-Sosie 已发布到 npm，包名为 [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli)。它已能在 Node 26 和 24 上端到端运行，代理 PostgreSQL 15 至 18、MySQL 8.4 和 9、MongoDB 6.0 至 8.0、REST API 和 GraphQL API。[MVP](../docs/mvp.md)、[概要设计](../docs/hld.md)和[详细设计](../docs/lld.md)说明了它做什么、怎么做。
+Sosie 已发布到 npm，包名为 [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli)。它已能在 Node 26 和 24 上端到端运行，代理 PostgreSQL 15 至 18、MySQL 8.4 和 9、MongoDB 6.0 至 8.0、SQL Server 2019 至 2025、REST API 和 GraphQL API。[MVP](../docs/mvp.md)、[概要设计](../docs/hld.md)和[详细设计](../docs/lld.md)说明了它做什么、怎么做。
 
 ## 工作方式
 
@@ -115,7 +115,13 @@ GraphQL API 的用法相同，指向它的端点即可（`https://api.internal/g
 
 数据源用 `mongodb://` 或 `mongodb+srv://` 连接字符串即可。Node.js 驱动（Mongoose 所用的那个）、mongosh 和你的应用都通过它读取。MongoDB 不会说明一个值从何而来，所以 Sosie 从命令中推断：`find` 或聚合管道返回的每个值，按它所来自的集合字段生成假值；如果值是某个阶段计算出来的，则按它的 BSON 类型生成。所有 ObjectId 共用同一套假值，所以集合之间的引用依然成立。已测试 MongoDB 6.0、7.0 和 8.0。给登录账号授予 `read` 角色。
 
-Postgres、MySQL、MongoDB、REST 和 GraphQL 是首批数据源。接下来是 SQL Server，每种数据源都是同一接口背后的一个独立包（[Sosie 如何扩展](../docs/hld.md#how-sosie-grows)）。
+### 代理 SQL Server
+
+数据源用 `sqlserver://` 连接字符串，或你已有的那种：ADO.NET、ODBC、JDBC 或 Prisma 的连接字符串都会被当作这样一个来读取。`sqlcmd` 和你的应用用它们自己的驱动通过它读取，无论是 ODBC Driver 18、JDBC、SqlClient 还是 tedious：支持批处理、`sp_executesql` 和预处理语句所发送的参数、事务，以及连接池中的连接。SQL Server 会为它返回的每个值指明表和列，经由视图和同义词也一样，Sosie 据此为每个值生成假值。已测试 SQL Server 2019、2022 和 2025；Azure SQL 尚未试过。给登录账号授予 `db_datareader`。
+
+驱动会要求 TLS，Sosie 也提供：它打印的地址中带有 `TrustServerCertificate=true`。需要校验证书的客户端（严格加密，即 TDS 8，总是会校验）信任 Sosie 在 `~/.sosie/tls/ca.pem` 中创建的 CA 即可。Sosie 无法为其生成假值的类型（`xml`、`geography`、`hierarchyid`、`sql_variant`）的值以 `NULL` 返回。
+
+Postgres、MySQL、MongoDB、SQL Server、REST 和 GraphQL 是目前的数据源，每种数据源都是同一接口背后的一个独立包（[Sosie 如何扩展](../docs/hld.md#how-sosie-grows)）。
 
 ### 在你的 AI 助手中
 
@@ -152,7 +158,7 @@ npm install
 npm run check   # typecheck, build, and every test
 ```
 
-端到端测试会启动一个内嵌的 PostgreSQL 18，以及用各自二进制文件运行的 MySQL 8.4 和 MongoDB 8，这些二进制文件在首次运行时下载。要针对其他服务器运行测试，把 `SOSIE_TEST_DATABASE_URL`、`SOSIE_TEST_MYSQL_URL` 和 `SOSIE_TEST_MONGODB_URL` 设为超级用户或 root 的连接字符串；测试会自己创建数据库和登录账号，结束后再删除。PATH 中有 `psql`，或 `PSQL` 给出了它的路径时，才会运行 `psql` 相关的测试。
+端到端测试会启动一个内嵌的 PostgreSQL 18，以及用各自二进制文件运行的 MySQL 8.4 和 MongoDB 8，这些二进制文件在首次运行时下载。要针对其他服务器运行测试，把 `SOSIE_TEST_DATABASE_URL`、`SOSIE_TEST_MYSQL_URL` 和 `SOSIE_TEST_MONGODB_URL` 设为超级用户或 root 的连接字符串；测试会自己创建数据库和登录账号，结束后再删除。PATH 中有 `psql`，或 `PSQL` 给出了它的路径时，才会运行 `psql` 相关的测试。`SOSIE_TEST_SQLSERVER_URL` 以 `sa` 身份指向一个 SQL Server 时，才会运行 SQL Server 相关的测试：没有容器就运行不了 SQL Server。
 
 ## 许可证
 

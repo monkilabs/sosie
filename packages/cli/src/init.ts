@@ -93,6 +93,9 @@ export function upstreamUrl(text: string): URL {
     throw new Error('Give one host of the replica set, with its replicaSet option: mongodb://user:password@host:27017/database?replicaSet=rs0. The driver finds the others.')
   }
   const none = new Error('That is not a URL. It looks like postgres://user:password@host:5432/database, or https://api.example.com/v1.')
+  // SQL Server's connection strings are seldom URLs: ADO.NET's, JDBC's and Prisma's are read as the URL they stand for.
+  const sqlServer = sqlServerUrl(text)
+  if (sqlServer) return sqlServer
   // new URL() reads kim:secret@db, or localhost:5432/db, as a scheme and a path: the scheme said would quote the user
   // name or the host. Every upstream has // after its scheme.
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) throw none
@@ -101,6 +104,100 @@ export function upstreamUrl(text: string): URL {
   } catch {
     throw none
   }
+}
+
+/** ADO.NET's and ODBC's names for each part of a SQL Server's connection string, and JDBC's and Prisma's. */
+const SQL_SERVER_KEYS: Record<string, 'server' | 'database' | 'user' | 'password' | 'encrypt' | 'trust' | 'certificateHost' | 'intent'> = {
+  server: 'server',
+  'data source': 'server',
+  address: 'server',
+  addr: 'server',
+  'network address': 'server',
+  servername: 'server',
+  database: 'database',
+  'initial catalog': 'database',
+  databasename: 'database',
+  'user id': 'user',
+  userid: 'user',
+  uid: 'user',
+  user: 'user',
+  username: 'user',
+  password: 'password',
+  pwd: 'password',
+  encrypt: 'encrypt',
+  trustservercertificate: 'trust',
+  'trust server certificate': 'trust',
+  hostnameincertificate: 'certificateHost',
+  'host name in certificate': 'certificateHost',
+  applicationintent: 'intent',
+  'application intent': 'intent',
+}
+
+/**
+ * A SQL Server connection string as the sqlserver:// URL the source reads: ADO.NET's and ODBC's (Server=host,1433;
+ * Database=app;User Id=kim;Password=…), JDBC's (jdbc:sqlserver://host:1433;databaseName=app;…) and Prisma's
+ * (sqlserver://host:1433;database=app;…). Undefined for anything else. Never quoted: it holds a password.
+ */
+export function sqlServerUrl(text: string): URL | undefined {
+  const trimmed = text.trim()
+  const prefixed = /^(?:jdbc:)?(?:sqlserver|mssql):\/\/([^;/?]*)(;.*)?$/i.exec(trimmed)
+  if (!prefixed && (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) || !/(^|;)\s*(server|data source|address|addr|network address)\s*=/i.test(trimmed))) return undefined
+  if (prefixed && !prefixed[2] && !/^jdbc:/i.test(trimmed)) return undefined
+  const parts: Partial<Record<(typeof SQL_SERVER_KEYS)[string], string>> = {}
+  let host = prefixed?.[1] ?? ''
+  const settings = prefixed ? (prefixed[2] ?? '') : trimmed
+  for (const piece of splitSettings(settings)) {
+    const at = piece.indexOf('=')
+    if (at < 0) continue
+    const key = SQL_SERVER_KEYS[piece.slice(0, at).trim().toLowerCase()]
+    if (key) parts[key] = unquote(piece.slice(at + 1).trim())
+  }
+  host = parts.server ?? host
+  const server = /^(?:tcp:)?\[?([^\]\\,]*?)\]?(?:\\([^,]*))?(?:[,:](\d+))?$/i.exec(host)
+  if (!server || !server[1]) throw new Error('That connection string names no server. It looks like Server=host,1433;Database=app;User Id=kim;Password=….')
+  if (server[2] && !server[3]) throw new Error("Give the named instance's port: Server=host,1433. Sosie does not ask SQL Browser where an instance is.")
+  const url = new URL('sqlserver://localhost')
+  url.hostname = server[1].includes(':') ? `[${server[1]}]` : server[1]
+  url.port = server[3] ?? '1433'
+  url.pathname = `/${encodeURIComponent(parts.database ?? '')}`
+  url.username = encodeURIComponent(parts.user ?? '')
+  url.password = encodeURIComponent(parts.password ?? '')
+  if (parts.encrypt) url.searchParams.set('encrypt', parts.encrypt.toLowerCase())
+  if (parts.trust) url.searchParams.set('trustServerCertificate', /^(true|yes)$/i.test(parts.trust) ? 'true' : 'false')
+  if (parts.certificateHost) url.searchParams.set('hostNameInCertificate', parts.certificateHost)
+  if (parts.intent) url.searchParams.set('applicationIntent', parts.intent)
+  return url
+}
+
+/** Settings split at their semicolons, a value in braces or quotes kept whole. */
+function splitSettings(text: string): string[] {
+  const out: string[] = []
+  let current = ''
+  let quote: string | undefined
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!
+    if (quote) {
+      current += ch
+      if (ch === quote) {
+        if (text[i + 1] === quote) current += text[++i]
+        else quote = undefined
+      }
+    } else if (ch === ';') {
+      if (current.trim()) out.push(current)
+      current = ''
+    } else {
+      if ((ch === '"' || ch === "'" || ch === '{') && current.trim().endsWith('=')) quote = ch === '{' ? '}' : ch
+      current += ch
+    }
+  }
+  if (current.trim()) out.push(current)
+  return out
+}
+
+function unquote(value: string): string {
+  const m = /^(["'])([\s\S]*)\1$/.exec(value) ?? /^\{([\s\S]*)\}$/.exec(value)
+  if (!m) return value
+  return m.length === 3 ? m[2]!.replaceAll(m[1]! + m[1]!, m[1]!) : m[1]!.replaceAll('}}', '}')
 }
 
 /** The source of a kind, or the one that reads the URL; the kind's must read its scheme. */

@@ -8,10 +8,11 @@ lead: From nothing installed to your agent's first faked query in under a minute
 ## What you need
 
 - **Node 24 or 26.** `npx` comes with it.
-- **An upstream:** a PostgreSQL 15 to 18, MySQL 8.4 or 9, or MongoDB 6.0 to 8.0 database, or your team's own REST or
-  GraphQL API.
+- **An upstream:** a PostgreSQL 15 to 18, MySQL 8.4 or 9, MongoDB 6.0 to 8.0, or SQL Server 2019 to 2025 database, or
+  your team's own REST or GraphQL API.
 - **A read-only login** for it. Sosie's own session is read-only either way, but a login that cannot write is
-  safer. [Postgres](./postgres/#a-read-only-login) and [MySQL](./mysql/#a-read-only-login) show one.
+  safer. [Postgres](./postgres/#a-read-only-login), [MySQL](./mysql/#a-read-only-login) and
+  [SQL Server](./sqlserver/#a-read-only-login) show one.
 
 ## 1. Start Sosie, in your own terminal
 

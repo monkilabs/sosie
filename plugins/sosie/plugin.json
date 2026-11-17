@@ -10,5 +10,5 @@
   "homepage": "https://monkilabs.github.io/sosie/",
   "repository": "https://github.com/monkilabs/sosie",
   "license": "MIT",
-  "keywords": ["postgres", "mysql", "mongodb", "rest", "graphql", "mcp", "privacy", "fake-data", "anonymization"]
+  "keywords": ["postgres", "mysql", "mongodb", "sqlserver", "rest", "graphql", "mcp", "privacy", "fake-data", "anonymization"]
 }

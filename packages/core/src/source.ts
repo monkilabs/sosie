@@ -122,7 +122,7 @@ export interface SourceOptions {
 }
 
 export interface Source {
-  /** 'postgres', 'mysql', 'mongodb', 'rest', 'graphql'. */
+  /** 'postgres', 'mysql', 'mongodb', 'sqlserver', 'rest', 'graphql'. */
   readonly kind: string
   /** What it reads, for the terminal: 'Postgres database', 'REST API'. */
   readonly title: string

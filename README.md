@@ -25,7 +25,7 @@ credentials and hostnames stay on your side.
 ## Status
 
 Sosie is on npm as [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). It works end to end in front of
-PostgreSQL 15 to 18, MySQL 8.4 and 9, MongoDB 6.0 to 8.0, REST APIs and GraphQL APIs, on Node 26 and 24. The [MVP](docs/mvp.md), the
+PostgreSQL 15 to 18, MySQL 8.4 and 9, MongoDB 6.0 to 8.0, SQL Server 2019 to 2025, REST APIs and GraphQL APIs, on Node 26 and 24. The [MVP](docs/mvp.md), the
 [high-level design](docs/hld.md) and the [low-level design](docs/lld.md) say what it does and how.
 
 ## How it works
@@ -149,8 +149,22 @@ a `find` or a pipeline is faked by the collection field it comes from, or by its
 Every ObjectId shares one domain, so references between collections hold. MongoDB 6.0, 7.0 and 8.0 are tested. Give
 the login the `read` role.
 
-Postgres, MySQL, MongoDB, REST and GraphQL are the first sources. SQL Server comes
-next, each a package behind the same interface ([how Sosie grows](docs/hld.md#how-sosie-grows)).
+### In front of SQL Server
+
+A source with a `sqlserver://` connection string, or the one you have: an ADO.NET, ODBC, JDBC or Prisma connection
+string is read as one. `sqlcmd` and your app read through it with their own driver, ODBC Driver 18, JDBC, SqlClient or
+tedious: batches, parameters as `sp_executesql` and prepared statements send them, transactions, and pooled
+connections. SQL Server names the table and column of every value it returns, through views and synonyms, and Sosie
+fakes each by them. SQL Server 2019, 2022 and 2025 are tested; Azure SQL is not tried yet. Give the login
+`db_datareader`.
+
+The drivers ask for TLS, and Sosie serves it: the address it prints says `TrustServerCertificate=true`. A client that
+should check the certificate, as strict encryption (TDS 8) always does, trusts the CA Sosie made in
+`~/.sosie/tls/ca.pem`. A value of a type Sosie cannot fake (`xml`, `geography`, `hierarchyid`, `sql_variant`) comes
+back as `NULL`.
+
+Postgres, MySQL, MongoDB, SQL Server, REST and GraphQL are the sources so far, each a package behind the same interface
+([how Sosie grows](docs/hld.md#how-sosie-grows)).
 
 ### In your assistant
 
@@ -214,7 +228,9 @@ The end-to-end tests start an embedded PostgreSQL 18, and MySQL 8.4 and MongoDB
 other servers, set `SOSIE_TEST_DATABASE_URL`, `SOSIE_TEST_MYSQL_URL` and
 `SOSIE_TEST_MONGODB_URL` to a superuser's or root's connection string; the tests
 create their own database and login, and drop them after.
-The `psql` tests run when `psql` is on the PATH, or at `PSQL`.
+The `psql` tests run when `psql` is on the PATH, or at `PSQL`. SQL Server's run
+when `SOSIE_TEST_SQLSERVER_URL` names one, as `sa`: no SQL Server runs without a
+container.
 
 ## License
 
