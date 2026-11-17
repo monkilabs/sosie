@@ -1790,7 +1790,7 @@ returns and every value a client sends. What each planned source maps:
 | GraphQL (built, above) | A local HTTP address, at the API's path | Queries only, no mutations | The schema, by introspection or a file |
 | MySQL (built, above) | MySQL's protocol: statements as text, and prepared | Reads only, read-only session | Its result metadata, as with Postgres |
 | MongoDB (built, above) | Its wire protocol, `OP_MSG`; a standalone server to the driver | Commands and stages allowed by name; writes, `$out`, `$merge` and server-side JavaScript refused; the `read` role | The collection and the dotted path, read from the find or the pipeline |
-| SQL Server (next) | TDS: batches and RPC, with TLS inside it | sqlparser's T-SQL dialect; the login's grants, as there is no read-only session | Browse mode or `sp_describe_first_result_set` |
+| SQL Server (next) | TDS 7.4 and 8 on one port: batches and RPC, with TLS inside PRELOGIN or first | sqlparser's T-SQL dialect; the login's grants, as there is no read-only session | Browse mode (`SET NO_BROWSETABLE ON`), its hidden keys dropped; `sp_describe_first_result_set` where it is refused |
 | Oracle (on demand) | None: MCP's `describe` and `query` only | sqlparser's Oracle dialect; `SET TRANSACTION READ ONLY` | The parse alone |
 
 Rules, domains, fakes, the store, `scan` and `describe` are the core's, and a source adds to them only what its
