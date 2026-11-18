@@ -20,8 +20,10 @@ afterEach(() => {
  * A stand-in for SQL Server, as it answers what these tests send. A request whose text says "slow" is held until an
  * attention; an attention is acknowledged in a message of its own, after the reply to the request it stops.
  */
-async function standIn(): Promise<{ port: number; requests: string[] }> {
+async function standIn(): Promise<{ port: number; requests: string[]; transactions: string[] }> {
   const requests: string[] = []
+  /** Each batch's transaction descriptor, from its ALL_HEADERS, as hex. */
+  const transactions: string[] = []
   const server = createServer((socket) => {
     socket.on('error', () => {})
     const messages = new Messages(socket)
@@ -46,7 +48,15 @@ async function standIn(): Promise<{ port: number; requests: string[] }> {
           continue
         }
         const text = m.type === PACKET.BATCH ? m.payload.subarray(m.payload.readUInt32LE(0)).toString('utf16le') : ''
-        if (m.type === PACKET.BATCH) requests.push(text)
+        if (m.type === PACKET.BATCH) {
+          requests.push(text)
+          transactions.push(m.payload.subarray(10, 18).toString('hex'))
+        }
+        // A reset in a transaction, sent outside it: as a server answers a request whose descriptor is not its transaction's.
+        if (m.status & (STATUS.RESET | STATUS.RESET_SKIP_TRAN) && m.payload.subarray(10, 18).equals(Buffer.alloc(8))) {
+          socket.write(packets(PACKET.REPLY, Buffer.concat([message({ error: true, number: 3988, state: 1, severity: 16, text: 'New transaction is not allowed.', server: 'db1', proc: '', line: 1 }), done(DONE.ERROR)])))
+          continue
+        }
         const says = (word: string) => m.payload.includes(Buffer.from(word, 'utf16le'))
         const token = m.type === PACKET.RPC ? TOKEN.DONEPROC : TOKEN.DONE
         const proc = m.type === PACKET.RPC ? m.payload.readUInt16LE(m.payload.readUInt32LE(0) + 2) : undefined
@@ -79,7 +89,7 @@ async function standIn(): Promise<{ port: number; requests: string[] }> {
     })()
   })
   const port = await listen(server)
-  return { port, requests }
+  return { port, requests, transactions }
 }
 
 const users = buildCatalog({
@@ -199,6 +209,30 @@ describe('prepared statements', () => {
       c.execute(r, { x: 1 })
     })
     expect(error).toBe("Incorrect syntax near 'fake@x.net'.")
+  })
+})
+
+describe('a pool’s reset', () => {
+  const inTransaction = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8])
+  const resetting = (sql: string, transaction: Buffer) => packets(PACKET.BATCH, Buffer.concat([allHeaders(transaction), Buffer.from(sql, 'utf16le')]), 4096, STATUS.RESET_SKIP_TRAN)
+
+  it('sets Sosie’s settings again in the transaction the request runs in', async () => {
+    const up = await standIn()
+    const { socket, messages } = await raw(await sosie(up.port))
+    socket.write(resetting('SELECT 1 AS one', inTransaction))
+    const reply = await messages.next()
+    expect([...readTokens(reply!.payload)].some((t) => t.kind === 'message' && t.error)).toBe(false)
+    expect(up.requests.slice(-2)).toEqual(['SET NO_BROWSETABLE ON; SET ROWCOUNT 101;', 'SELECT 1 AS one'])
+    expect(up.transactions.at(-2)).toBe(inTransaction.toString('hex'))
+  })
+
+  it('runs no request whose settings could not be set again: it would run without browse mode', async () => {
+    const up = await standIn()
+    const { socket, messages } = await raw(await sosie(up.port))
+    socket.write(resetting('SELECT 1 AS one', Buffer.alloc(8)))
+    const reply = await messages.next()
+    expect([...readTokens(reply!.payload)].some((t) => t.kind === 'message' && t.error)).toBe(true)
+    expect(up.requests).not.toContain('SELECT 1 AS one')
   })
 })
 

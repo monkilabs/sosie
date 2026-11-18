@@ -9,7 +9,7 @@ import { rewriteReply, SERVER_NAME, type Request } from './results.js'
 import { constSubstitutions, substitute } from './rewrite.js'
 import { fits, maxOf, PARAM, PROC, procOf, readDeclarations, readRpc, textParam, widen, withText, writeRpc, type Call, type Param } from './rpc.js'
 import type { Catalog } from './schema.js'
-import { allHeaders, headersEnd, HEADER, INITIAL_PACKET_SIZE, Messages, MessageTooLarge, PACKET, packets, STATUS, TruncatedError, type Message } from './tds.js'
+import { headersEnd, HEADER, INITIAL_PACKET_SIZE, Messages, MessageTooLarge, PACKET, packets, STATUS, TruncatedError, type Message } from './tds.js'
 import { acceptTls } from './tls.js'
 import { DONE, done, ENV, envBytes, envText, loginAck, message, readTokens, TOKEN, type Column } from './tokens.js'
 import { bytesOf, textOf, UnknownTypeError } from './types.js'
@@ -228,8 +228,13 @@ export class Session {
     this.#rpc = message.type === PACKET.RPC
     // The client stopped sending it: nothing of it runs, and it is answered like any other.
     if (message.ignored) return this.#write([done(DONE.FINAL, 0, this.#rpc ? TOKEN.DONEPROC : TOKEN.DONE)])
-    const prefix = message.status & (STATUS.RESET | STATUS.RESET_SKIP_TRAN) ? await this.#reset(message.status) : []
+    let prefix: Buffer[] = []
     try {
+      if (message.status & (STATUS.RESET | STATUS.RESET_SKIP_TRAN)) {
+        const reset = await this.#reset(message.status, message.payload.subarray(0, headersEnd(message.payload)))
+        if (!Array.isArray(reset)) return this.#refused([], reset)
+        prefix = reset
+      }
       switch (message.type) {
         case PACKET.BATCH:
           return await this.#batch(message.payload, prefix)
@@ -252,14 +257,20 @@ export class Session {
 
   /**
    * A session reset, as a driver's pool asks for one: done upstream with Sosie's settings again, which a reset
-   * clears. The client is told what the reset changed, its acknowledgment among it.
+   * clears, in the transaction the request runs in (RESET_SKIP_TRAN keeps it open): the request's own ALL_HEADERS.
+   * The client is told what the reset changed, its acknowledgment among it. Settings that fail to be set again leave
+   * the session without browse mode or the cap on rows: the request is refused, not run without them.
    */
-  async #reset(status: number): Promise<Buffer[]> {
-    const payload = Buffer.concat([allHeaders(), Buffer.from(this.#setup(), 'utf16le')])
+  async #reset(status: number, headers: Buffer): Promise<Buffer[] | Refusal> {
+    const payload = Buffer.concat([headers, Buffer.from(this.#setup(), 'utf16le')])
     const reply = await this.#up!.request(PACKET.BATCH, payload, { status })
     this.#prepared.clear()
     const out: Buffer[] = []
     for (const t of readTokens(reply.payload)) {
+      if (t.kind === 'message' && t.error) {
+        this.ctx.log(`Sosie's settings failed after a session reset: ${t.number}, ${t.text}`)
+        return { number: 50000, message: `Sosie could not set its settings again after the session's reset (message ${t.number}): it runs nothing without them.` }
+      }
       if (t.kind !== 'envchange') continue
       if (t.type === ENV.DATABASE) this.#database = t.data.subarray(2, 2 + (t.data[1] ?? 0) * 2).toString('utf16le')
       if (t.type === ENV.RESET_ACK || t.type === ENV.DATABASE || t.type === ENV.LANGUAGE || t.type === ENV.COLLATION) out.push(t.raw)

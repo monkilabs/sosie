@@ -1405,8 +1405,9 @@ sent, it goes with it; answered already, it is acknowledged at once. Drivers rea
 (tedious counts them), so the request's reply is one message and the acknowledgment, a DONE (never a DONEPROC) with
 `DONE_ATTN`, another after it; the server's own acknowledgment is not passed on. A message whose last packet says
 IGNORE, which a driver stopped sending, runs nothing and gets a DONE. A request with the reset bit (a pool's reset) resets the session
-upstream, with Sosie's settings set again, and the client gets the reset's acknowledgment: its prepared statements are
-gone.
+upstream, with Sosie's settings set again in the request's own transaction (its ALL_HEADERS: `RESET_SKIP_TRAN` keeps
+one open), and the client gets the reset's acknowledgment: its prepared statements are gone. If the settings fail, the
+request is refused: it would run without browse mode or the cap on rows.
 
 ### Upstream
 
