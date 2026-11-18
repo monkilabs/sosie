@@ -435,6 +435,8 @@ export class Session {
       this.#inflight = false
     }
     if (reply.timedOut) {
+      // Stopped, but what ran before it stands: a USE among it moved the session upstream, and so Sosie's.
+      this.#database = databaseIn(reply.payload) ?? this.#database
       this.#error(prefix, 50000, `Sosie stopped the statement at its time limit, ${this.ctx.statementTimeout} ms. Narrow the query, or raise timeout in sosie.yml.`)
       return undefined
     }
@@ -472,6 +474,17 @@ export class Session {
     if (!this.#io.writable) return
     this.#io.write(packets(PACKET.REPLY, payload, this.#packetSize))
   }
+}
+
+/** The database a reply leaves the session in, where it changes it. */
+function databaseIn(payload: Buffer): string | undefined {
+  let database: string | undefined
+  try {
+    for (const t of readTokens(payload)) if (t.kind === 'envchange' && t.type === ENV.DATABASE) database = t.data.subarray(2, 2 + (t.data[1] ?? 0) * 2).toString('utf16le')
+  } catch {
+    // A reply cut where the server stopped: what came before the cut is what it said.
+  }
+  return database
 }
 
 /** The texts of parameters' values, so a scope knows what the client sent. */

@@ -143,6 +143,19 @@ async function raw(port: number): Promise<{ socket: Socket; messages: Messages }
 const batch = (sql: string) => Buffer.concat([allHeaders(), Buffer.from(sql, 'utf16le')])
 const dones = (m: Message | null) => [...readTokens(m!.payload)].flatMap((t) => (t.kind === 'done' ? [t.status] : []))
 
+describe('the session’s database', () => {
+  it('moves with a USE in a statement Sosie stopped at its time limit, as the server’s does', async () => {
+    const up = await standIn()
+    const { socket, messages } = await raw(await sosie(up.port, { statementTimeout: 200 }))
+    socket.write(packets(PACKET.BATCH, batch('USE other; SELECT 1 AS slow')))
+    expect(dones(await messages.next())).toEqual([DONE.ERROR])
+    // In other, users is not the table Sosie read: a fake of app's is not turned back there.
+    socket.write(packets(PACKET.BATCH, batch("SELECT email FROM users WHERE email = N'fake@x.net'")))
+    await messages.next()
+    expect(up.requests.at(-1)).toBe("SELECT email FROM users WHERE email = N'fake@x.net'")
+  })
+})
+
 describe('cancelling', () => {
   it('answers a request the client stops with its reply, then the acknowledgment in a message of its own', async () => {
     const up = await standIn()

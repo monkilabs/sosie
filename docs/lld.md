@@ -1420,8 +1420,9 @@ A routing ENVCHANGE (Azure SQL's redirect) is followed, up to three times. Then:
 | `ROWCOUNT` | One more than `max-rows` |
 
 SQL Server has no time limit of its own for a statement: past the source's `timeout`, Sosie sends an attention, as a
-driver's own timeout does, waits up to 5 s for its acknowledgment, and the client gets an error. A reply is read whole
-before it is faked.
+driver's own timeout does, waits up to 5 s for its acknowledgment, and the client gets an error. What ran before the
+attention stands: a `USE` in the reply moves the session's database, Sosie's with it. A reply is read whole before it
+is faked.
 
 ### Schema
 
