@@ -27,6 +27,10 @@ export interface Message {
   /** The first packet's status: its RESET bits, for a request. */
   status: number
   payload: Buffer
+  /** An attention came after this message, before it was taken: the client stops it. */
+  attended?: boolean
+  /** Its last packet says IGNORE: the client stopped sending it, and it is not to be run. */
+  ignored?: boolean
 }
 
 /** A message as packets of at most `size` bytes, the last marked end of message; `status` goes on the first. */
@@ -53,7 +57,8 @@ export class MessageTooLarge extends Error {}
 
 /**
  * Whole messages from a stream of TDS packets. An ATTENTION is told at once, to `attention`, as it may come while a
- * request is being answered; every other message waits for `next`.
+ * request is being answered; but one that comes while a request waits to be taken is that request's, and marks it.
+ * Every other message waits for `next`.
  */
 export class Messages {
   #buf: Buffer = Buffer.alloc(0)
@@ -94,7 +99,9 @@ export class Messages {
       const part = this.#buf.subarray(HEADER, length)
       this.#buf = this.#buf.subarray(length)
       if (type === PACKET.ATTENTION && !this.#first) {
-        this.attention?.()
+        const waiting = this.#ready.at(-1)
+        if (waiting) waiting.attended = true
+        else this.attention?.()
         continue
       }
       this.#first ??= { type, status }
@@ -105,7 +112,7 @@ export class Messages {
       }
       this.#parts.push(part)
       if (status & STATUS.EOM) {
-        this.#ready.push({ ...this.#first, payload: Buffer.concat(this.#parts) })
+        this.#ready.push({ ...this.#first, payload: Buffer.concat(this.#parts), ...(status & STATUS.IGNORE && { ignored: true }) })
         this.#parts = []
         this.#size = 0
         this.#first = undefined

@@ -9,7 +9,7 @@ import { rewriteReply, SERVER_NAME, type Request } from './results.js'
 import { constSubstitutions, substitute } from './rewrite.js'
 import { fits, maxOf, PARAM, PROC, procOf, readDeclarations, readRpc, textParam, widen, withText, writeRpc, type Call, type Param } from './rpc.js'
 import type { Catalog } from './schema.js'
-import { allHeaders, headersEnd, HEADER, INITIAL_PACKET_SIZE, Messages, MessageTooLarge, PACKET, packets, STATUS, TruncatedError } from './tds.js'
+import { allHeaders, headersEnd, HEADER, INITIAL_PACKET_SIZE, Messages, MessageTooLarge, PACKET, packets, STATUS, TruncatedError, type Message } from './tds.js'
 import { acceptTls } from './tls.js'
 import { DONE, done, ENV, envBytes, envText, loginAck, message, readTokens, TOKEN, type Column } from './tokens.js'
 import { bytesOf, textOf, UnknownTypeError } from './types.js'
@@ -39,6 +39,9 @@ interface Prepared {
 
 const NO_ANALYSIS: Analysis = { catalogOnly: true, consts: [], params: new Map() }
 
+/** An attention's acknowledgment: a DONE, never a DONEPROC, as drivers read it in a message of its own. */
+const ACKNOWLEDGED = done(DONE.ATTN)
+
 const UNREACHABLE = 'Sosie cannot reach its upstream database. The terminal running Sosie says why.'
 const SQL_LOGIN_ONLY = 'Sosie takes a SQL Server login, any user and password: it does not log in with Windows, Kerberos or Microsoft Entra.'
 const NO_CURSORS = 'Sosie opens no server cursors: read the rows as a forward-only, read-only result, which is every driver’s default.'
@@ -57,7 +60,12 @@ export class Session {
   #up: Upstream | undefined
   #packetSize = INITIAL_PACKET_SIZE
   #database = ''
+  /** A request is being answered: from when it is taken until its reply is written. */
+  #busy = false
+  /** It is upstream: an attention goes there. */
   #inflight = false
+  /** The client sent an attention for the request being answered: its acknowledgment follows the reply. */
+  #attended = false
   #rpc = false
   readonly #prepared = new Map<number, Prepared>()
   #columns: Column[] = []
@@ -75,7 +83,16 @@ export class Session {
       for (;;) {
         const message = await this.#messages!.next()
         if (!message) break
-        await this.#request(message)
+        this.#busy = true
+        this.#attended = message.attended ?? false
+        try {
+          await this.#request(message)
+        } finally {
+          this.#busy = false
+        }
+        // The attention's answer, after the request's: drivers read one message for each they sent.
+        if (this.#attended) this.#write([ACKNOWLEDGED])
+        this.#attended = false
       }
     } catch (error) {
       if (error instanceof MessageTooLarge) this.#error([], 50000, `Sosie takes requests of up to 256 MB: ${error.message}`)
@@ -189,14 +206,22 @@ export class Session {
 
   /* Requests. */
 
+  /**
+   * An attention, which stops the request being answered. Upstream, it goes there; before it goes, it goes with it;
+   * after its reply was written, it is acknowledged at once. Its acknowledgment is a message of its own, after the
+   * request's reply.
+   */
   #attention(): void {
+    if (!this.#busy) return this.#write([ACKNOWLEDGED])
+    this.#attended = true
     if (this.#inflight) this.#up?.attention()
-    else this.#write([done(DONE.ATTN, 0, this.#rpc ? TOKEN.DONEPROC : TOKEN.DONE)])
   }
 
-  async #request(message: { type: number; status: number; payload: Buffer }): Promise<void> {
-    const prefix = message.status & (STATUS.RESET | STATUS.RESET_SKIP_TRAN) ? await this.#reset(message.status) : []
+  async #request(message: Message): Promise<void> {
     this.#rpc = message.type === PACKET.RPC
+    // The client stopped sending it: nothing of it runs, and it is answered like any other.
+    if (message.ignored) return this.#write([done(DONE.FINAL, 0, this.#rpc ? TOKEN.DONEPROC : TOKEN.DONE)])
+    const prefix = message.status & (STATUS.RESET | STATUS.RESET_SKIP_TRAN) ? await this.#reset(message.status) : []
     try {
       switch (message.type) {
         case PACKET.BATCH:
@@ -405,7 +430,7 @@ export class Session {
     this.#inflight = true
     let reply
     try {
-      reply = await this.#up!.request(type, payload, { timeout: this.ctx.statementTimeout })
+      reply = await this.#up!.request(type, payload, { timeout: this.ctx.statementTimeout, cancel: this.#attended })
     } finally {
       this.#inflight = false
     }
@@ -416,7 +441,9 @@ export class Session {
     const rewritten = rewriteReply(reply.payload, request, { catalog: this.ctx.catalog, faker: this.ctx.faker, maxRows: this.ctx.maxRows, database: this.#database }, this.#columns)
     this.#columns = rewritten.columns
     if (rewritten.database !== undefined) this.#database = rewritten.database
-    this.#write([...prefix, rewritten.payload])
+    // Stopped before it began, the request has no reply of its own but the attention's: it gets a DONE.
+    const answer = rewritten.payload.length ? rewritten.payload : done(DONE.ERROR, 0, this.#rpc ? TOKEN.DONEPROC : TOKEN.DONE)
+    this.#write([...prefix, answer])
     return rewritten
   }
 

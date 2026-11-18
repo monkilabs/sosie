@@ -246,6 +246,13 @@ describe.skipIf(!upstream)('SQL Server through Sosie', () => {
         await slow.close()
       }
     })
+
+    it('stops a statement the client cancels, at its own time limit, and goes on', async () => {
+      const c = await sosie.client({ requestTimeout: 500, cancelTimeout: 5000 })
+      const error = await failure('SELECT COUNT_BIG(*) AS n FROM sys.all_columns a CROSS JOIN sys.all_columns b CROSS JOIN sys.all_columns c', undefined, c)
+      expect(error.message).toMatch(/^Timeout: Request failed to complete in 500ms/)
+      expect(await rows('SELECT 1 AS one', undefined, c)).toEqual([{ one: 1 }])
+    })
   })
 
   describe('TLS', () => {

@@ -1400,8 +1400,11 @@ years): signed for `localhost`, `127.0.0.1`, `::1` and the host the endpoint lis
 month before it ends or when the host changes. Its keys are only their owner's to read.
 
 Requests: SQL batches, RPCs and transaction manager requests (begin, commit, roll back, save). A bulk load gets 3906;
-any other request, an error. An attention cancels the request running upstream, whose reply then ends with a DONE that
-says so; one between requests gets that DONE at once. A request with the reset bit (a pool's reset) resets the session
+any other request, an error. An attention cancels the request it follows: running upstream, it goes there; not yet
+sent, it goes with it; answered already, it is acknowledged at once. Drivers read one message for each they sent
+(tedious counts them), so the request's reply is one message and the acknowledgment, a DONE (never a DONEPROC) with
+`DONE_ATTN`, another after it; the server's own acknowledgment is not passed on. A message whose last packet says
+IGNORE, which a driver stopped sending, runs nothing and gets a DONE. A request with the reset bit (a pool's reset) resets the session
 upstream, with Sosie's settings set again, and the client gets the reset's acknowledgment: its prepared statements are
 gone.
 

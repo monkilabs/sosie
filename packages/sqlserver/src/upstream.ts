@@ -58,10 +58,12 @@ export interface Session {
 }
 
 export interface Reply {
-  /** Every token of the reply, an attention's acknowledgment among them. */
+  /** Every token of the reply; not an attention's acknowledgment, which answers the attention. */
   payload: Buffer
   /** Sosie stopped the request at its time limit: the reply's tokens are what the server sent before it stopped. */
   timedOut: boolean
+  /** An attention stopped the request, Sosie's or the client's, and the server acknowledged it. */
+  stopped?: boolean
 }
 
 export class UpstreamError extends Error {
@@ -143,11 +145,13 @@ export class Upstream {
 
   /**
    * Send a request and read its reply whole. Past `timeout`, Sosie sends an attention, as a driver's own timeout
-   * does, and the reply is what came before the server stopped.
+   * does, and the reply is what came before the server stopped. `cancel` stops it as soon as it is sent: the client
+   * cancelled it before it went. A reply an attention stopped comes without the server's acknowledgment.
    */
-  async request(type: number, payload: Buffer, { status = 0, timeout = 0 }: { status?: number; timeout?: number } = {}): Promise<Reply> {
+  async request(type: number, payload: Buffer, { status = 0, timeout = 0, cancel = false }: { status?: number; timeout?: number; cancel?: boolean } = {}): Promise<Reply> {
     if (this.#attention) await this.#acknowledged([])
     this.#write(packets(type, payload, this.session.packetSize, status & (STATUS.RESET | STATUS.RESET_SKIP_TRAN)))
+    if (cancel) this.attention()
     let timedOut = false
     const timer = timeout
       ? setTimeout(() => {
@@ -158,8 +162,11 @@ export class Upstream {
     try {
       const first = await this.#next()
       const parts = [first.payload]
-      if (this.#attention) await this.#acknowledged(parts)
-      return { payload: Buffer.concat(parts), timedOut }
+      if (!this.#attention) return { payload: first.payload, timedOut }
+      await this.#acknowledged(parts)
+      // The acknowledgment is the attention's answer, not the request's: its DONE is the last of what came.
+      const all = Buffer.concat(parts)
+      return { payload: all.subarray(0, all.length - DONE_LENGTH), timedOut, stopped: true }
     } finally {
       clearTimeout(timer)
     }
@@ -214,10 +221,13 @@ export class Upstream {
   }
 }
 
+/** A DONE token's length: its type, status, current command and row count. */
+const DONE_LENGTH = 13
+
 /** Whether a reply's last token is the DONE that acknowledges an attention. */
 function acknowledges(payload: Buffer | undefined): boolean {
-  if (!payload || payload.length < 13) return false
-  const at = payload.length - 13
+  if (!payload || payload.length < DONE_LENGTH) return false
+  const at = payload.length - DONE_LENGTH
   return payload[at] === TOKEN.DONE && (payload.readUInt16LE(at + 1) & DONE.ATTN) !== 0
 }
 
