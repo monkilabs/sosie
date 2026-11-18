@@ -124,8 +124,8 @@ to WebAssembly, before it goes anywhere. A statement it cannot parse is refused.
   whose code may write or read what Sosie cannot see; a statement in a string (`EXEC ('…')`); `OUTPUT` parameters;
   cursors; bulk loads; and distributed transactions.
 - **Refused catalog:** the dynamic management views (`sys.dm_*`: queries, sessions, addresses), password hashes
-  (`sys.sql_logins`), credentials, linked servers, where the files are (`sys.master_files`), `sysprocesses`, Query
-  Store's text and plans, and `msdb`.
+  (`sys.sql_logins`), credentials, linked servers, where the files are (`sys.master_files`, `sp_helpdb`),
+  `sysprocesses`, Query Store's text and plans, and `msdb`.
 - **Refused functions and settings:** `OPENROWSET`, `OPENQUERY`, `OPENDATASOURCE`, `OPENXML`, the transaction log
   (`fn_dblog`), audit and trace files; `@@SERVERNAME` and `SERVERPROPERTY` or `CONNECTIONPROPERTY` that say where the
   server is (`MachineName`, a default data path, an address). `SHOWPLAN_*` and `STATISTICS XML`, whose plans would

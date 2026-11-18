@@ -180,12 +180,15 @@ const SESSION_OPTIONS = new Set([
   'FMTONLY', 'NOEXEC', 'PARSEONLY', 'FORCEPLAN', 'CONCAT_NULL_YIELDS_NULL', 'ROWCOUNT',
 ])
 
-/** Catalog procedures: what they return is the schema, and passes. */
+/**
+ * Catalog procedures: what they return is the schema, and passes. Not sp_helpdb or sp_helpfile, whose result sets
+ * hold the paths of the database's files on the server.
+ */
 export const CATALOG_PROCEDURES = new Set([
   'sp_tables', 'sp_columns', 'sp_columns_100', 'sp_columns_managed', 'sp_pkeys', 'sp_fkeys', 'sp_statistics', 'sp_statistics_100',
   'sp_special_columns', 'sp_special_columns_100', 'sp_stored_procedures', 'sp_sproc_columns', 'sp_sproc_columns_100', 'sp_datatype_info',
   'sp_datatype_info_100', 'sp_server_info', 'sp_table_privileges', 'sp_column_privileges', 'sp_describe_first_result_set',
-  'sp_describe_undeclared_parameters', 'sp_help', 'sp_helpindex', 'sp_helpconstraint', 'sp_helptext', 'sp_helpdb', 'sp_databases',
+  'sp_describe_undeclared_parameters', 'sp_help', 'sp_helpindex', 'sp_helpconstraint', 'sp_helptext', 'sp_databases',
 ])
 
 /** Table hints that lock rows other sessions wait on. */

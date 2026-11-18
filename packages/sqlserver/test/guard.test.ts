@@ -74,6 +74,8 @@ describe('the guard', () => {
     ['SELECT email INTO #t FROM users', 229],
     ['SELECT email FROM users WITH (XLOCK)', 229],
     ['EXEC dbo.purge_everything', 50000],
+    // Its second result set holds the paths of the database's files.
+    ["EXEC sp_helpdb N'app'", 50000],
     ["EXEC ('SELECT 1')", 50000],
     ['EXEC sp_executesql N\'SELECT 1\'', 50000],
     ['SELECT @@SERVERNAME', 229],
