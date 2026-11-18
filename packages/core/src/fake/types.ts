@@ -138,15 +138,28 @@ function shiftTime(real: string, random: Random): string {
   if (m) {
     const at = Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[5]!, +m[6]!, +m[7]!) + days * 86_400_000 + seconds * 1000
     const d = new Date(at)
-    return `${formatDate(at, m[1]!.length)}${m[4]}${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}${m[8] ?? ''}${m[9] ?? ''}${m[10] ?? ''}`
+    return `${formatDate(at, m[1]!.length)}${m[4]}${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}${fraction(m[8], random)}${m[9] ?? ''}${m[10] ?? ''}`
   }
 
   m = TIME.exec(real)
   if (m) {
     const s = (+m[1]! * 3600 + +m[2]! * 60 + +m[3]! + seconds) % 86_400
-    return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}${m[4] ?? ''}${m[5] ?? ''}`
+    return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}${fraction(m[4], random)}${m[5] ?? ''}`
   }
   return shape(real, random)
+}
+
+/**
+ * A fraction of a second as long as the real one, its digits drawn but the last: seven of them (SQL Server's datetime2)
+ * can tell a row apart. The last is kept, so a fake reads back as it was written wherever the source rounds or writes
+ * a trailing zero: SQL Server's datetime keeps 1/300 of a second, whose fractions end in 0, 3 or 7, and a fraction that
+ * ends so is one. A fraction of zeros says only that the value has none, and stays.
+ */
+function fraction(real: string | undefined, random: Random): string {
+  if (!real || /^\.0*$/.test(real)) return real ?? ''
+  let digits = ''
+  for (let i = 2; i < real.length; i++) digits += String(random.int(0, 9))
+  return `.${digits}${real.at(-1)}`
 }
 
 function addDays(at: number, days: number): number {

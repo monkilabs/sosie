@@ -185,6 +185,14 @@ describe.skipIf(!upstream)('SQL Server through Sosie', () => {
       }
     })
 
+    it('turns a datetime fake back, its fraction of a second on SQL Server’s 1/300 of one', async () => {
+      // datetime keeps 1/300 of a second: a fake's fraction that is not one would come back rounded, and find nothing.
+      const [{ dt }] = (await rows('SELECT dt FROM kinds')) as [Row]
+      const [truth] = await real('SELECT dt FROM kinds')
+      expect((dt as Date).getTime()).not.toBe((truth!.dt as Date).getTime())
+      expect(await rows('SELECT COUNT(*) AS n FROM kinds WHERE dt = @dt', [['dt', TYPES.DateTime, dt]])).toEqual([{ n: 1 }])
+    })
+
     it('answers a prepared statement run again as SqlClient runs it, asking for no metadata, as the first time', async () => {
       // SqlClient sends every RPC with fNoMetaData; the server's answer then has no COLINFO to drop hidden keys by.
       const tds = await Upstream.open({ host: '127.0.0.1', port: sosie.port, database: sosie.database, user: 'kim', password: 'x', encrypt: 'on', verify: false, readOnlyIntent: false })

@@ -137,13 +137,28 @@ describe('fakes by type', async () => {
 
   it('datetimes, dates and times: shifted by up to a year, in the same format', () => {
     for (const [real, fake] of pairs('created_at')) {
-      expect(fake).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.589\+01$/)
+      expect(fake).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}\+01$/)
       const days = Math.abs(Date.parse((fake as string).replace(' ', 'T') + ':00') - Date.parse((real as string).replace(' ', 'T') + ':00')) / 86_400_000
       expect(days).toBeGreaterThan(0)
       expect(days).toBeLessThanOrEqual(367)
     }
     for (const [, fake] of pairs('born_on')) expect(fake).toMatch(/^\d{4}-\d\d-\d\d$/)
     for (const [, fake] of pairs('wakes_at')) expect(fake).toMatch(/^\d\d:\d\d:\d\d$/)
+  })
+
+  it('datetimes and times: a fraction of a second as long, its digits drawn, as they can tell a row apart', async () => {
+    const { faker } = await serve()
+    const fraction = (fake: unknown) => /\.(\d+)(?:[+-]|$)/.exec(fake as string)?.[1]
+    const drawn = Array.from({ length: 20 }, (_, i) => fraction(faker.computed(`2025-03-14 09:26:${10 + i}.5891234`, { kind: 'datetime' })))
+    // As many digits, the last kept: a fake then reads back as written, wherever the source rounds (SQL Server's
+    // datetime keeps 1/300 of a second, whose fractions end in 0, 3 or 7) or drops a trailing zero.
+    for (const digits of drawn) expect(digits).toMatch(/^\d{6}4$/)
+    expect(drawn.filter((digits) => digits === '5891234')).toEqual([])
+    for (let i = 0; i < 20; i++) expect(fraction(faker.computed(`2025-03-14 09:26:${10 + i}.997`, { kind: 'datetime' }))).toMatch(/^\d\d7$/)
+    expect(fraction(faker.computed('09:26:53.25', { kind: 'time' }))).toMatch(/^\d5$/)
+    // Zeros say only that the value has no fraction: they stay. The offset stays, as a datetimeoffset keeps its own.
+    expect(faker.computed('2025-03-14 09:26:53.000', { kind: 'datetime' })).toMatch(/\.000$/)
+    expect(faker.computed('2025-03-14 09:26:53.5891234+05:30', { kind: 'datetime' })).toMatch(/\.\d{7}\+05:30$/)
   })
 
   it('json: the same structure, every leaf faked', () => {
