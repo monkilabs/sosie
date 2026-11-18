@@ -541,8 +541,8 @@ Values a query computes fake in `computed:<type>`.
 | `objectid` | 24 hex digits: the first 8, its time in seconds, shifted by 1 to 365 days earlier or later; the rest random. Every field that holds one shares one domain, `objectid`, so a reference to a document is the fake of its `_id` |
 | `boolean` | Flipped or not, decided once per domain by its key |
 | `enum` | A label of the same enum, by a fixed shuffle per domain; the shuffle may leave a label in place |
-| `date`, `datetime` | Shifted by 1 to 365 days, earlier or later, a datetime by a time of day too; the same shift for the same value, in the same format. `infinity` stays |
-| `time` | Shifted by up to a day, wrapping at midnight |
+| `date`, `datetime` | Shifted by 1 to 365 days, earlier or later, a datetime by a time of day too; the same shift for the same value, in the same format. A fraction of a second keeps its length, its digits drawn but the last (seven of them can tell a row apart), which stays so the fake reads back as written where a source rounds it: SQL Server's `datetime` keeps 1/300 of a second, whose fractions end in 0, 3 or 7. A fraction of zeros stays, and so does a time zone's offset. `infinity` stays |
+| `time` | Shifted by up to a day, wrapping at midnight; its fraction of a second as a datetime's |
 | `bits` | As many bits, each drawn; a single bit is a flag, flipped or not once per domain, as a boolean is |
 | `interval` | Another duration in the same form: each number another of as many digits, zero only for zero, minutes and seconds under 60 and the months of a year-month under 12; its words and signs kept, so every `IntervalStyle` reads it. `infinity` stays |
 | A value its type's faker cannot change (`''` or `-` in a field without a format, `NaN` and `Infinity` in a number, `infinity` in a date) | Itself: there is nothing in it to fake. A field with a format draws its fake whatever the value, so even `-` in a `city` becomes a city |

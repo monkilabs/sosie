@@ -23,6 +23,10 @@ SQL Server, a source of its own, and the eighth package: `@sosie/sqlserver`, whi
 - Reviewed by a panel of three in three rounds before its release, which tried to get real values, writes and the
   server's whereabouts past it, and to break a driver's session, against SQL Server 2022: what it found is fixed, each
   with a test that failed before, and the last round passed.
+- Every source: a datetime's or a time's fraction of a second is faked too. It kept the real digits, which, seven of
+  them in SQL Server's `datetime2`, can tell a row apart; now its digits are drawn but the last, which stays so a fake
+  reads back as written where a source rounds it (SQL Server's `datetime`, to 1/300 of a second). A fraction of zeros
+  stays, as does a time zone's offset. A value the store has faked before keeps that fake.
 - A release now publishes eight packages: the npm token must be allowed to publish `@sosie/sqlserver`, a new package.
 
 ## 0.5.0, 14 November 2026
