@@ -135,8 +135,8 @@ export function rewriteReply(payload: Buffer, request: Request, ctx: ReplyContex
       const fake = ctx.faker.computed(text, { kind: 'json' }, sent()?.text ?? '', sent()?.scope)
       const faked = fake === null ? '' : String(fake)
       const chunks = faked.match(new RegExp(`[\\s\\S]{1,${JSON_CHUNK}}`, 'g')) ?? []
+      // The rows the server counted stand: the query's, not the chunks Sosie cut the JSON in.
       for (const chunk of chunks) out.push(row(set.shown, [{ bytes: Buffer.from(chunk, 'utf16le') }]))
-      rows = BigInt(chunks.length)
     } else if (set.capped) {
       rows = BigInt(ctx.maxRows)
       out.push(

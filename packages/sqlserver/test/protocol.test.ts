@@ -190,6 +190,14 @@ describe('a reply as the client gets it', () => {
     expect(tokens[1]!.kind === 'row' && tokens[1]!.values[0]!.bytes!.toString('utf16le')).toBe('fake kim@x.net')
   })
 
+  it('says a FOR JSON result has the rows the server counted, however Sosie cuts its JSON', () => {
+    const json = entry('JSON_F52E2B61-18A1-11d1-B105-00805F49916B', nvarchar)
+    const shaped = { catalogOnly: false, consts: [], params: new Map(), shapes: [{ targets: ['other' as const], json: true }] }
+    const payload = Buffer.concat([colMetadata([json]), row([json], [{ bytes: Buffer.from('[{"id":1},{"id":2},{"id":3}]', 'utf16le') }]), done(DONE.COUNT, 3)])
+    const rewritten = rewriteReply(payload, { analyses: [shaped], sent: [undefined], handles: [new Set()] }, { catalog, faker, maxRows: 100, database: 'app' })
+    expect([...readTokens(rewritten.payload)].find((t) => t.kind === 'done')).toMatchObject({ rows: 3n })
+  })
+
   it('says a result is ordered by no more than the columns before the first hidden key in ORDER', () => {
     // ORDER BY u.id, u.email: by email only within each id, which the client does not see.
     const email = entry('email', nvarchar)
