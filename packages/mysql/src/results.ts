@@ -35,6 +35,8 @@ export function planColumns(columns: Column[], analysis: Analysis, catalog: Cata
     // count(…) holds no value from a row: a BIGINT, from MySQL's own count. Nor does a literal the client wrote.
     if (target === 'count' && column.type === 8) return { pass: true }
     if (target === 'constant') return { pass: true }
+    // A path into a json column: that column's document from where the path leads, faked as the whole is.
+    if (typeof target === 'object') return { field: target }
     return { type: typeOfColumn(column.type, column.characterSet, column.flags, column.length) }
   })
 }

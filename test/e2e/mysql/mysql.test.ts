@@ -84,6 +84,22 @@ describe('reading through Sosie', () => {
     expect(typeof v).toBe('string')
   })
 
+  it('reads a path into a json column as the column: its keys stay, and its leaves are the column’s fakes', async () => {
+    // The whole column and paths into it, from one row: an id written in the query would be a fake's, turned back.
+    const [row] = await query(
+      "SELECT profile AS whole, profile->'$.address' AS address, JSON_EXTRACT(profile, '$.address') AS same, profile->'$' AS everything, profile->>'$.nickname' AS nickname, JSON_UNQUOTE(JSON_EXTRACT(profile, '$.address.city')) AS city FROM users WHERE profile->'$.address' IS NOT NULL ORDER BY id LIMIT 1",
+    )
+    const json = (v: unknown) => (typeof v === 'string' ? JSON.parse(v) : v)
+    const whole = json(row!.whole)
+    expect(json(row!.address)).toEqual(whole.address)
+    expect(json(row!.same)).toEqual(whole.address)
+    // Keys that look like words, which a json column keeps, a path into it keeps too.
+    expect(Object.keys(json(row!.everything)).sort()).toEqual(Object.keys(whole).sort())
+    expect(row!.nickname).toBe(whole.nickname)
+    expect(row!.city).toBe(whole.address.city)
+    expect(canariesIn(JSON.stringify(row))).toEqual([])
+  })
+
   it('fakes a UNION column, unless every branch has a count or a literal in its place', async () => {
     // MySQL names no table for a UNION's columns: a total row's literal must not let the cities through.
     const totals = await query("SELECT 'All' AS city, COUNT(*) AS n FROM users UNION ALL SELECT city, COUNT(*) FROM users GROUP BY city")
