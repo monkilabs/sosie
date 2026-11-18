@@ -48,6 +48,11 @@ async function standIn(): Promise<{ port: number; requests: string[]; transactio
           continue
         }
         if (m.type === PACKET.LOGIN7) {
+          if (m.payload.includes(Buffer.from('nowhere', 'utf16le'))) {
+            // As Azure SQL refuses a login: its message names the server.
+            socket.write(packets(PACKET.REPLY, Buffer.concat([message({ error: true, number: 40532, state: 1, severity: 20, text: "Cannot open server 'db-7.internal' requested by the login. The login failed.", server: 'db-7.internal', proc: '', line: 1 }), done(DONE.ERROR)])))
+            continue
+          }
           socket.write(packets(PACKET.REPLY, Buffer.concat([envText(ENV.DATABASE, 'app', 'master'), envBytes(ENV.COLLATION, Buffer.from([0x09, 0x04, 0xd0, 0x00, 0x34])), envText(ENV.LANGUAGE, 'us_english'), loginAck(0x74000004, 'Microsoft SQL Server', Buffer.from([16, 0, 0x0f, 0xa0])), envText(ENV.PACKET_SIZE, '4096', '4096'), done(0)])))
           continue
         }
@@ -114,7 +119,7 @@ const users = buildCatalog({
  * Sosie in front of the stand-in, every value passed as it is: these tests are about the protocol. Its one fake,
  * fake@x.net, stands for real@x.net in users.email's domain, and for nothing outside it.
  */
-async function sosie(upstream: number, { statementTimeout = 0 } = {}): Promise<number> {
+async function sosie(upstream: number, { statementTimeout = 0, log = (_line: string) => {} } = {}): Promise<number> {
   const catalog = users
   type Scope = { back: Map<string, string>; lookup: (text: string, near?: unknown) => string | undefined; scrub: (t: string) => string }
   // A scope knows the real values it turned back, and those of the scope it was made from; scrub turns them into fakes.
@@ -144,7 +149,7 @@ async function sosie(upstream: number, { statementTimeout = 0 } = {}): Promise<n
         throw new Error('no TLS here')
       },
       version: '16.0.4000',
-      log: () => {},
+      log,
     }).run()
   })
   return listen(server)
@@ -174,20 +179,32 @@ function run(c: Connection, sql: string): Promise<string | undefined> {
 }
 
 /** A client of TDS's own, which sends what drivers do not: an attention with its request, an ignored message. */
-async function raw(port: number): Promise<{ socket: Socket; messages: Messages }> {
+async function raw(port: number, database = 'app'): Promise<{ socket: Socket; messages: Messages; login: Message | null }> {
   const socket = dial(port, '127.0.0.1')
   closing.push(() => socket.destroy())
   await new Promise((resolve) => socket.once('connect', resolve))
   const messages = new Messages(socket)
   socket.write(packets(PACKET.PRELOGIN, prelogin([[OPTION.VERSION, versionBytes('16.0.0')], [OPTION.ENCRYPTION, Buffer.from([ENCRYPT.NOT_SUP])]])))
   await messages.next()
-  socket.write(packets(PACKET.LOGIN7, login7({ userName: 'kim', password: 'x', serverName: '127.0.0.1', database: 'app', appName: 'test', features: new Map() })))
-  await messages.next()
-  return { socket, messages }
+  socket.write(packets(PACKET.LOGIN7, login7({ userName: 'kim', password: 'x', serverName: '127.0.0.1', database, appName: 'test', features: new Map() })))
+  const login = await messages.next()
+  return { socket, messages, login }
 }
 
 const batch = (sql: string) => Buffer.concat([allHeaders(), Buffer.from(sql, 'utf16le')])
 const dones = (m: Message | null) => [...readTokens(m!.payload)].flatMap((t) => (t.kind === 'done' ? [t.status] : []))
+
+describe('logging in', () => {
+  it('says the upstream refused it by the message’s number, its words in Sosie’s terminal: they may name the server', async () => {
+    const up = await standIn()
+    const lines: string[] = []
+    const { login } = await raw(await sosie(up.port, { log: (line) => lines.push(line) }), 'nowhere')
+    const refusal = [...readTokens(login!.payload)].find((t) => t.kind === 'message')
+    expect(refusal).toMatchObject({ kind: 'message', error: true, number: 40532, server: 'Sosie' })
+    expect(refusal?.kind === 'message' && refusal.text).not.toContain('db-7.internal')
+    expect(lines.join('\n')).toContain("Cannot open server 'db-7.internal'")
+  })
+})
 
 describe('the session’s database', () => {
   it('moves with a USE in a statement Sosie stopped at its time limit, as the server’s does', async () => {

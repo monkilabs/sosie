@@ -170,8 +170,10 @@ export class Session {
       await this.#up.batch(this.#setup())
     } catch (error) {
       if (error instanceof UpstreamError && error.tds) {
-        // The upstream refused the login, or the database: said as it said it, its server's name aside.
-        this.#error([], error.tds.number, error.tds.text, error.tds.severity)
+        // The upstream refused the login, or the database: by its number. Its words go to the terminal, as they may name
+        // the server (Azure SQL's do) or Sosie's own login.
+        this.ctx.log(`The upstream refused Sosie's login: ${error.tds.number}, ${error.tds.text}`)
+        this.#error([], error.tds.number, `The upstream refused Sosie's login (message ${error.tds.number}). The terminal running Sosie says why.`, error.tds.severity)
       } else {
         this.ctx.log(`Cannot open an upstream session: ${(error as Error).message}`)
         this.#error([], 4060, UNREACHABLE, 11)

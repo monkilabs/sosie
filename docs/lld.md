@@ -1390,7 +1390,8 @@ TLS 1.2 at most, its handshake inside PRELOGIN packets, each flight one message;
 `tds/8.0`. One port serves both.
 
 LOGIN7 takes any user and password; integrated security (SSPI) and federated authentication (Entra) get 18456, as do
-TDS versions before 7.2. Sosie then logs in upstream, and answers the login itself: the database, collation and
+TDS versions before 7.2. Sosie then logs in upstream (a refusal reaches the client by its number, its words the
+terminal's, as Azure SQL's name the server), and answers the login itself: the database, collation and
 language as the upstream's session has them, a LOGINACK with the upstream's version, a FEATUREEXTACK for UTF-8 where
 the client asked, and the packet size the client asked for, from 512 to 32,767 bytes. Its address is
 `Server=127.0.0.1,<port>;Database=<database>;TrustServerCertificate=true`, a connection string drivers take as it is.
