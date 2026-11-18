@@ -153,10 +153,10 @@ the login the `read` role.
 
 A source with a `sqlserver://` connection string, or the one you have: an ADO.NET, ODBC, JDBC or Prisma connection
 string is read as one. `sqlcmd` and your app read through it with their own driver, ODBC Driver 18, JDBC, SqlClient or
-tedious: batches, parameters as `sp_executesql` and prepared statements send them, transactions, and pooled
-connections. SQL Server names the table and column of every value it returns, through views and synonyms, and Sosie
-fakes each by them. SQL Server 2019, 2022 and 2025 are tested; Azure SQL is not tried yet. Give the login
-`db_datareader`.
+tedious: batches, parameters as `sp_executesql` and prepared statements send them, transactions, pooled connections, and
+cancelling a running statement. SQL Server names the table and column of every value it returns, through views and
+synonyms, and Sosie fakes each by them. SQL Server 2019, 2022 and 2025 are tested; Azure SQL is not tried yet. Give the
+login `db_datareader`.
 
 The drivers ask for TLS, and Sosie serves it: the address it prints says `TrustServerCertificate=true`. A client that
 should check the certificate, as strict encryption (TDS 8) always does, trusts the CA Sosie made in

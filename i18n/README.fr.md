@@ -159,10 +159,10 @@ compte de connexion le rôle `read`.
 Une source avec une chaîne de connexion `sqlserver://`, ou celle que vous avez déjà : une chaîne de connexion ADO.NET,
 ODBC, JDBC ou Prisma est lue comme telle. `sqlcmd` et votre application lisent à travers elle avec leur propre pilote,
 ODBC Driver 18, JDBC, SqlClient ou tedious : des batchs, des paramètres tels que les envoient `sp_executesql` et les
-requêtes préparées, des transactions, et des connexions d'un pool. SQL Server nomme la table et la colonne de chaque
-valeur qu'il renvoie, à travers les vues et les synonymes aussi, et Sosie génère chaque valeur factice d'après elles.
-SQL Server 2019, 2022 et 2025 sont testés ; Azure SQL n'est pas encore essayé. Accordez au compte de connexion
-`db_datareader`.
+requêtes préparées, des transactions, des connexions d'un pool, et l'annulation d'une requête en cours. SQL Server nomme
+la table et la colonne de chaque valeur qu'il renvoie, à travers les vues et les synonymes aussi, et Sosie génère chaque
+valeur factice d'après elles. SQL Server 2019, 2022 et 2025 sont testés ; Azure SQL n'est pas encore essayé. Accordez au
+compte de connexion `db_datareader`.
 
 Les pilotes demandent TLS, et Sosie le sert : l'adresse qu'il affiche contient `TrustServerCertificate=true`. Un client
 qui doit vérifier le certificat, comme le fait toujours le chiffrement strict (TDS 8), fait confiance à l'autorité de

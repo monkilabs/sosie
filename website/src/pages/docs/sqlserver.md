@@ -93,13 +93,16 @@ Checked with ODBC Driver 18 (`sqlcmd`), JDBC 13.6, Microsoft.Data.SqlClient 7.1 
 - **Batches**, several statements to one, as SQL Server reads them: with or without semicolons between them. Each is
   checked before any runs, so one that Sosie refuses stops them all.
 - **Parameters**, as `sp_executesql` sends them (SqlClient, tedious, ODBC), and prepared statements, as `sp_prepexec`,
-  `sp_prepare` and `sp_execute` do (JDBC's `PreparedStatement`, tedious' `prepare`). Each statement is checked when it
-  is prepared, and each execution's parameters turned back.
+  `sp_prepare` and `sp_execute` do (JDBC's `PreparedStatement`, SqlClient's `Prepare()`, tedious' `prepare`). Each
+  statement is checked when it is prepared, and each execution's parameters turned back. SqlClient asks for no
+  metadata when it runs a prepared statement again: Sosie asks the server for it all the same, as it is how Sosie
+  knows each value's column.
 - **Transactions**, by statement (`BEGIN TRAN`, JDBC's `IF @@TRANCOUNT > 0 ROLLBACK TRAN`) or by the drivers' own
   requests (SqlClient's `BeginTransaction`).
 - **The catalog**, as the drivers read it: JDBC's `getTables` and `getColumns`, SqlClient's `GetSchema`.
 - **Pooled connections**: a pool's reset is done upstream, and Sosie's settings set again.
-- **Cancelling** a running statement, with an attention.
+- **Cancelling** a running statement, with an attention: the driver's own time limit, or its cancel. The session goes
+  on.
 
 Sosie opens no server cursors (`sp_cursoropen`): a forward-only, read-only result, every driver's default, gets the
 rows. MARS is off.
@@ -118,7 +121,8 @@ to WebAssembly, before it goes anywhere. A statement it cannot parse is refused.
   `HOLDLOCK`); `SET` of the session's own options (`NOCOUNT`, `ANSI_NULLS`, `TEXTSIZE`, the isolation level and the
   like); `USE`; `DECLARE`; transactions; `IF` and `ELSE`, each branch checked; and the catalog's procedures
   (`sp_tables`, `sp_columns`, `sp_pkeys`, `sp_help` and the like), by `EXEC` or as an RPC, a table variable filled
-  from one among them.
+  from one among them. Named in `sys`, `dbo` or no schema, as SQL Server finds its own: `app.sp_tables` is a
+  procedure of yours, and refused.
 - **Refused:** everything else. A statement that changes data gets error 3906, `This statement changes data. Sosie is
   read-only.` So do `PRINT`, `RAISERROR` and `THROW`, whose text Sosie cannot fake; `WHILE`; any other procedure,
   whose code may write or read what Sosie cannot see; a statement in a string (`EXEC ('…')`); `OUTPUT` parameters;
@@ -132,7 +136,7 @@ to WebAssembly, before it goes anywhere. A statement it cannot parse is refused.
   server is (`MachineName`, a default data path, an address). `SHOWPLAN_*` and `STATISTICS XML`, whose plans would
   show the real values Sosie puts in your query.
 - **Settings that keep the session safe** cannot be changed: `NO_BROWSETABLE`, and a `ROWCOUNT` of 0 or above one more
-  than `max-rows`.
+  than `max-rows`. `NOEXEC` and `PARSEONLY`, which skip statements without an error, are refused too.
 - **A function that is not SQL Server's own** may be one of yours, whose code reads rows: what it gives is faked.
 
 ## The session upstream
@@ -171,19 +175,22 @@ also adds each table's key as a hidden column, which Sosie drops, with the rest 
 only the columns it asked for.
 
 A column SQL Server marks an expression rests on how Sosie read the batch: it passes only when the batch reads no table
-of yours, or when it is a `COUNT(…)` or a literal the client wrote.
+of yours, or when it is a `COUNT(…)` or a literal the client wrote, and only until a statement of the batch fails, as
+the result sets after a failed one are not the ones Sosie counted: after an error, the batch's expressions are faked by
+their type.
 
 | The result column | Becomes |
 | --- | --- |
 | A table's column, through `SELECT *`, aliases, joins, views, synonyms and CTEs | A fake by its field |
 | `COUNT(…)`, `COUNT_BIG(…)`, and a literal the client wrote | Unchanged |
-| `sys` views, `INFORMATION_SCHEMA`, and the catalog's procedures | Unchanged |
+| `sys` views and `INFORMATION_SCHEMA`, in any database, and the catalog's procedures | Unchanged |
+| A table in `master` or `tempdb`, a global temp table among them | A fake by its type |
 | `FOR JSON` | JSON, faked as JSON, its keys as you wrote them |
 | A `UNION`'s column, and anything else a query computes (`UPPER(email)`, `MAX(id)`) | A fake by its type |
 | `xml`, `geography`, `geometry`, `hierarchyid`, `sql_variant` | `NULL` |
 
-A fake keeps its type: a `char(n)` is padded to its length, a `tinyint` stays from 0 to 255, a `decimal` within its
-precision, a `datetimeoffset` keeps its offset.
+A fake keeps its type: a `char(n)` is padded to its length, a `varchar` too long for its column is cut between
+characters, a `tinyint` stays from 0 to 255, a `decimal` within its precision, a `datetimeoffset` keeps its offset.
 
 ## Errors
 
@@ -193,6 +200,8 @@ precision, a `datetimeoffset` keeps its offset.
 - Any other message comes back as its number only: `Message 245: Sosie hides the rest of this message, which may
   quote a value from your rows.` A conversion's message quotes the value it could not convert.
 - Every message names its server as `Sosie`: never the real one.
+- A login the server refuses (a password, a database the login cannot open) comes back by its number only. Its words,
+  which may name the server, are in the terminal running Sosie.
 
 ## Limits
 

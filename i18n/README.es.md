@@ -156,9 +156,9 @@ colecciones siguen funcionando. Se prueba con MongoDB 6.0, 7.0 y 8.0. Dale al us
 Una fuente con una cadena de conexión `sqlserver://`, o con la que ya tienes: una cadena de conexión de ADO.NET, ODBC,
 JDBC o Prisma se lee como una de ellas. `sqlcmd` y tu app leen a través de ella con su propio driver, ODBC Driver 18,
 JDBC, SqlClient o tedious: batches, parámetros tal como los envían `sp_executesql` y las sentencias preparadas,
-transacciones y conexiones de un pool. SQL Server nombra la tabla y la columna de cada valor que devuelve, también a
-través de vistas y sinónimos, y Sosie genera cada valor falso según ellas. Se prueba con SQL Server 2019, 2022 y 2025; Azure
-SQL aún no se ha probado. Dale al usuario `db_datareader`.
+transacciones, conexiones de un pool y la cancelación de una sentencia en curso. SQL Server nombra la tabla y la columna
+de cada valor que devuelve, también a través de vistas y sinónimos, y Sosie genera cada valor falso según ellas. Se
+prueba con SQL Server 2019, 2022 y 2025; Azure SQL aún no se ha probado. Dale al usuario `db_datareader`.
 
 Los drivers piden TLS, y Sosie lo sirve: la dirección que muestra lleva `TrustServerCertificate=true`. Un cliente que
 deba comprobar el certificado, como hace siempre el cifrado estricto (TDS 8), confía en la CA que Sosie creó en

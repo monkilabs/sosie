@@ -85,6 +85,9 @@ This is how Sosie works, not a bug, and not a reason to work around it.
   `@@datadir`, `@@SERVERNAME`, `OPENROWSET` and `set_config` with a value from a row; JavaScript on a MongoDB server
   (`$where`, `$function`); and on SQL Server, every procedure but the catalog's (`sp_tables`, `sp_columns`), `PRINT`,
   and `FOR XML`.
+- **T-SQL that Sosie's parser would read apart from SQL Server**, refused as a syntax error: `TRY…CATCH`, `WHILE`,
+  `NOEXEC`, and a reserved word as an alias without brackets. Write `AS [key]`, not `AS key`, and send the statements
+  themselves.
 
 Do not look for a way around a refusal or a fake, and do not use filters or computed values to work out a real value.
 That defeats the reason the developer put Sosie there.

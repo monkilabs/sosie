@@ -117,7 +117,7 @@ GraphQL API 的用法相同，指向它的端点即可（`https://api.internal/g
 
 ### 代理 SQL Server
 
-数据源用 `sqlserver://` 连接字符串，或你已有的那种：ADO.NET、ODBC、JDBC 或 Prisma 的连接字符串都会被当作这样一个来读取。`sqlcmd` 和你的应用用它们自己的驱动通过它读取，无论是 ODBC Driver 18、JDBC、SqlClient 还是 tedious：支持批处理、`sp_executesql` 和预处理语句所发送的参数、事务，以及连接池中的连接。SQL Server 会为它返回的每个值指明表和列，经由视图和同义词也一样，Sosie 据此为每个值生成假值。已测试 SQL Server 2019、2022 和 2025；Azure SQL 尚未试过。给登录账号授予 `db_datareader`。
+数据源用 `sqlserver://` 连接字符串，或你已有的那种：ADO.NET、ODBC、JDBC 或 Prisma 的连接字符串都会被当作这样一个来读取。`sqlcmd` 和你的应用用它们自己的驱动通过它读取，无论是 ODBC Driver 18、JDBC、SqlClient 还是 tedious：支持批处理、`sp_executesql` 和预处理语句所发送的参数、事务、连接池中的连接，以及取消正在执行的语句。SQL Server 会为它返回的每个值指明表和列，经由视图和同义词也一样，Sosie 据此为每个值生成假值。已测试 SQL Server 2019、2022 和 2025；Azure SQL 尚未试过。给登录账号授予 `db_datareader`。
 
 驱动会要求 TLS，Sosie 也提供：它打印的地址中带有 `TrustServerCertificate=true`。需要校验证书的客户端（严格加密，即 TDS 8，总是会校验）信任 Sosie 在 `~/.sosie/tls/ca.pem` 中创建的 CA 即可。Sosie 无法为其生成假值的类型（`xml`、`geography`、`hierarchyid`、`sql_variant`）的值以 `NULL` 返回。
 

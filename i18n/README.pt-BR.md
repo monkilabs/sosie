@@ -156,10 +156,10 @@ coleções continuam funcionando. São testados o MongoDB 6.0, 7.0 e 8.0. Dê ao
 
 Uma fonte com uma string de conexão `sqlserver://`, ou com a que você já tem: uma string de conexão de ADO.NET, ODBC,
 JDBC ou Prisma é lida como uma delas. O `sqlcmd` e o seu app leem através dela com o próprio driver, ODBC Driver 18,
-JDBC, SqlClient ou tedious: batches, parâmetros como o `sp_executesql` e as instruções preparadas os enviam, transações
-e conexões de um pool. O SQL Server diz a tabela e a coluna de cada valor que devolve, também através de views e
-sinônimos, e o Sosie gera cada valor falso a partir delas. São testados o SQL Server 2019, 2022 e 2025; o Azure SQL
-ainda não foi testado. Dê ao login `db_datareader`.
+JDBC, SqlClient ou tedious: batches, parâmetros como o `sp_executesql` e as instruções preparadas os enviam, transações,
+conexões de um pool e o cancelamento de uma instrução em execução. O SQL Server diz a tabela e a coluna de cada valor
+que devolve, também através de views e sinônimos, e o Sosie gera cada valor falso a partir delas. São testados o SQL
+Server 2019, 2022 e 2025; o Azure SQL ainda não foi testado. Dê ao login `db_datareader`.
 
 Os drivers pedem TLS, e o Sosie o serve: o endereço que ele mostra traz `TrustServerCertificate=true`. Um cliente que
 precise verificar o certificado, como a criptografia estrita (TDS 8) sempre faz, confia na CA que o Sosie criou em

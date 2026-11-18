@@ -1986,10 +1986,17 @@ source learns. Format domains make a person's email the same fake from the datab
 - **SQL Server, end to end.** The server in `SOSIE_TEST_SQLSERVER_URL`, as `sa`, which makes its own database: no
   SQL Server runs without a container, so without one these tests are skipped. Seeded with the same canary people, a
   schema of its own, a view, and a table of every type SQL Server has; read by a `db_datareader` login. tedious reads
-  through Sosie (batches, `sp_executesql`, prepared statements, transactions, a reset, TLS 1.2, TDS 8 with the CA
-  trusted, and no TLS), and the built CLI starts in front of it, its `query` tool reading through that. Every answer
-  and error is searched for each canary. CI runs SQL Server 2019, 2022 and 2025. ODBC Driver 18 (`sqlcmd`), JDBC 13.6
-  and SqlClient 7.1 were checked by hand: metadata, prepared statements, transactions, a pool's reset.
+  through Sosie (batches, `sp_executesql`, prepared statements, transactions, a reset, a cancel at its own time limit,
+  TLS 1.2, TDS 8 with the CA trusted, and no TLS), and Sosie's own TDS client sends what SqlClient does (a prepared
+  statement run again, asking for no metadata); the built CLI starts in front of it, its `query` tool reading through
+  that. Every answer and error is searched for each canary. CI runs SQL Server 2019, 2022 and 2025. ODBC Driver 18
+  (`sqlcmd`), JDBC 13.6 and SqlClient 7.1 were checked by hand: metadata, prepared statements run twice, parameters
+  turned back, transactions, a pool's reset, and a timeout's cancel followed by the next query.
+- **SQL Server's session, without SQL Server.** In `packages/sqlserver/test/session.test.ts`, a stand-in server
+  answers a real `Session` as SQL Server would, and tedious, or a client of raw TDS, drives it: an attention's
+  acknowledgment and its order, an ignored message, a pool's reset in a transaction, a prepared statement's messages,
+  parameters widened, an RPC's options and procedure names, a login refused, and requests no driver sends. The guard,
+  the parser's reading of a batch, replies and types are tested on their own in the package's other tests.
 - **Postgres, end to end.** An embedded PostgreSQL 18, or the server in
   `SOSIE_TEST_DATABASE_URL`, seeded with canary values: unique emails, names,
   phone numbers, keys and numbers; values with nothing to fake (`''`, `-`,

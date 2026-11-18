@@ -155,10 +155,11 @@ zwischen Collections intakt. Getestet sind MongoDB 6.0, 7.0 und 8.0. Gib dem Dat
 
 Eine Quelle mit einem `sqlserver://`-Connection-String, oder dem, den du hast: Ein Connection-String für ADO.NET, ODBC,
 JDBC oder Prisma wird als einer gelesen. `sqlcmd` und deine App lesen darüber mit ihrem eigenen Treiber, ODBC Driver 18,
-JDBC, SqlClient oder tedious: Batches, Parameter, wie `sp_executesql` und Prepared Statements sie senden, Transaktionen
-und Verbindungen aus einem Pool. SQL Server nennt zu jedem Wert, den es zurückgibt, Tabelle und Spalte, auch durch Views
-und Synonyme hindurch, und Sosie erzeugt jeden Fake-Wert danach. Getestet sind SQL Server 2019, 2022 und 2025; Azure SQL
-ist noch nicht ausprobiert. Gib dem Datenbankbenutzer `db_datareader`.
+JDBC, SqlClient oder tedious: Batches, Parameter, wie `sp_executesql` und Prepared Statements sie senden, Transaktionen,
+Verbindungen aus einem Pool und das Abbrechen einer laufenden Anweisung. SQL Server nennt zu jedem Wert, den es
+zurückgibt, Tabelle und Spalte, auch durch Views und Synonyme hindurch, und Sosie erzeugt jeden Fake-Wert danach.
+Getestet sind SQL Server 2019, 2022 und 2025; Azure SQL ist noch nicht ausprobiert. Gib dem Datenbankbenutzer
+`db_datareader`.
 
 Die Treiber verlangen TLS, und Sosie bietet es an: Die Adresse, die es ausgibt, enthält `TrustServerCertificate=true`.
 Ein Client, der das Zertifikat prüfen soll, wie es die strikte Verschlüsselung (TDS 8) immer tut, vertraut der CA, die
