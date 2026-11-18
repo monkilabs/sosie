@@ -80,4 +80,17 @@ describe('collations', () => {
     expect(decodeText(encodeText('Žluťoučký', czech), czech)).toBe('Žluťoučký')
     expect(decodeText(encodeText('日本', LATIN1), LATIN1)).toBe('??')
   })
+
+  it('cuts a fake too long for its column between characters, never inside one', () => {
+    const utf8 = [0x09, 0x04, 0xd0, 0x04, 0x00]
+    // varchar(5): 'abcd' and ž's two bytes would be six.
+    const five = info(TYPE.BIGVARCHAR, 5, 0, ...utf8)
+    expect(textOf(five, bytesOf(five, 'abcdž')!)).toBe('abcd')
+    // Japanese_CI_AS, code page 932: a character of two bytes.
+    const japanese = info(TYPE.BIGVARCHAR, 3, 0, 0x11, 0x04, 0xd0, 0x00, 0x00)
+    expect(textOf(japanese, bytesOf(japanese, 'a日本')!)).toBe('a日')
+    // char(5) is padded after the cut.
+    const fixed = info(TYPE.BIGCHAR, 5, 0, ...utf8)
+    expect(textOf(fixed, bytesOf(fixed, 'abcdž')!)).toBe('abcd ')
+  })
 })

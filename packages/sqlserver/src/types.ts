@@ -435,7 +435,7 @@ export function bytesOf(t: TypeInfo, text: string, like?: Buffer): Buffer | unde
     case TYPE.BIGVARCHAR:
     case TYPE.BIGCHAR:
     case TYPE.TEXT:
-      return fit(t, encodeText(text, t.collation), like, 0x20)
+      return fit(t, encodeWithin(text, t), like, 0x20)
     case TYPE.NVARCHAR:
     case TYPE.NCHAR:
     case TYPE.NTEXT:
@@ -473,6 +473,24 @@ function fit(t: TypeInfo, b: Buffer, like: Buffer | undefined, pad: number): Buf
     b = b.subarray(0, length)
   }
   return b
+}
+
+/**
+ * Text in its column's code page, cut where it is too long between characters: a character of UTF-8 or of a
+ * double-byte page (932, 936, 949, 950) takes more than one byte, and cut inside, the client reads it as garbage.
+ */
+function encodeWithin(text: string, t: TypeInfo): Buffer {
+  const whole = encodeText(text, t.collation)
+  if (t.layout !== 'ushort' || whole.length <= t.length) return whole
+  const chars = [...text]
+  let lo = 0
+  let hi = chars.length
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (encodeText(chars.slice(0, mid).join(''), t.collation).length <= t.length) lo = mid
+    else hi = mid - 1
+  }
+  return encodeText(chars.slice(0, lo).join(''), t.collation)
 }
 
 function clamp(n: bigint, min: bigint, max: bigint): bigint {
