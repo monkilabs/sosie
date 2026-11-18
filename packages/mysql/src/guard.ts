@@ -40,8 +40,11 @@ export interface ConstRef {
   near: Near
 }
 
-/** An item of the select list: count(…), a *, a literal, or anything else. */
-export type Target = 'count' | 'star' | 'constant' | 'other'
+/**
+ * An item of the select list: count(…), a *, a literal, a path into a json column (its field, from where the path
+ * leads), or anything else.
+ */
+export type Target = 'count' | 'star' | 'constant' | 'other' | Field
 
 export interface Analysis {
   refusal?: Refusal
@@ -325,7 +328,7 @@ class Analyzer {
       for (const join of from.joins ?? []) this.#relation(join.relation, scope)
     }
     for (const from of select.from ?? []) for (const join of from.joins ?? []) this.#expr(join.join_operator, scope)
-    onTargets?.((select.projection ?? []).map(target))
+    onTargets?.((select.projection ?? []).map((item: Node) => this.#jsonPath(item.UnnamedExpr ?? item.ExprWithAlias?.expr, scope) ?? target(item)))
     onColumns?.(this.#columns(select.projection ?? [], scope))
     for (const hint of select.optimizer_hints ?? []) this.#hint(String(hint.text ?? ''))
     for (const [key, value] of Object.entries(select)) {
@@ -549,6 +552,35 @@ class Analyzer {
     if (span) this.#placeholders.push(this.#offset(span.start.line, span.start.column))
   }
 
+  /**
+   * A json column read along a path written in the query (profile->'$.address', JSON_EXTRACT(profile, '$.work[0]')):
+   * its field, with the path where the value is in the column's document. ->> and JSON_UNQUOTE give the path's text.
+   * A path with a wildcard, or one given as a parameter, is not followed.
+   */
+  #jsonPath(expr: Node | undefined, scope: Scope): Field | undefined {
+    let column: Node | undefined
+    let path: unknown
+    let text = false
+    const fn = expr?.Function
+    const name = String(fn?.name?.at(-1)?.Identifier?.value ?? '').toUpperCase()
+    const args = (fn?.args?.List?.args ?? []).map((a: Node) => a.Unnamed?.Expr)
+    if (expr?.BinaryOp && (expr.BinaryOp.op === 'Arrow' || expr.BinaryOp.op === 'LongArrow')) {
+      column = expr.BinaryOp.left
+      path = expr.BinaryOp.right?.Value?.value?.SingleQuotedString
+      text = expr.BinaryOp.op === 'LongArrow'
+    } else if (name === 'JSON_EXTRACT' && args.length === 2) {
+      ;[column, path] = [args[0], args[1]?.Value?.value?.SingleQuotedString]
+    } else if (name === 'JSON_UNQUOTE' && args.length === 1) {
+      const inner = this.#jsonPath(args[0], scope)
+      return inner?.type.kind === 'json' && !inner.type.text ? { ...inner, type: { ...inner.type, text: true } } : undefined
+    } else return undefined
+    const at = typeof path === 'string' ? jsonPathSteps(path) : undefined
+    if (at === undefined) return undefined
+    const field = this.#resolve(column, scope)
+    if (!field || field === 'catalog' || field.type.kind !== 'json' || field.type.at !== undefined) return undefined
+    return { ...field, type: { kind: 'json', at, ...(text && { text: true }) } }
+  }
+
   /** The field a column reference names; 'catalog' for MySQL's own; undefined for one Sosie cannot place; null for no column. */
   #resolve(node: Node | undefined, scope: Scope): Near | null {
     const ref = unwrapColumn(node)
@@ -681,6 +713,24 @@ function settingValue(node: Node | undefined): string | undefined {
     return inner === undefined ? undefined : `-${inner}`
   }
   return undefined
+}
+
+/**
+ * A MySQL json path ('$.work[0].name', '$."a key"') as the core writes one: `.key` for an object's key, `[]` for an
+ * array's element. Undefined for a wildcard (`*`, `**`) or anything not a path from the document's root.
+ */
+export function jsonPathSteps(path: string): string | undefined {
+  let rest = path.trim()
+  if (!rest.startsWith('$')) return undefined
+  rest = rest.slice(1)
+  let out = ''
+  while (rest) {
+    const step = /^\s*(?:\.([A-Za-z_$][\w$]*)|\."((?:[^"\\]|\\.)*)"|\[\s*(\d+|last)\s*\])/.exec(rest)
+    if (!step) return undefined
+    out += step[3] !== undefined ? '[]' : `.${step[1] ?? step[2]!.replace(/\\(.)/g, '$1')}`
+    rest = rest.slice(step[0].length)
+  }
+  return out
 }
 
 function target(item: Node): Target {

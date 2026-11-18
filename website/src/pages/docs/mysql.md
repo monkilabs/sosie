@@ -150,7 +150,8 @@ your data.
 | `COUNT(…)`, and a literal the client wrote | Unchanged |
 | A `UNION`'s column | A fake by its type, unless every branch has a `COUNT(…)` or a literal there |
 | `information_schema`, `SHOW` and `DESCRIBE` | Unchanged |
-| Anything else a query computes (`UPPER(email)`, `MAX(id)`) | A fake by its type |
+| A path into a json column (`profile->'$.address'`, `JSON_EXTRACT(profile, '$.work[0]')`, `profile->>'$.city'`) | The column's JSON from there: its word keys kept, its leaves the fakes they are in the whole column |
+| Anything else a query computes (`UPPER(email)`, `MAX(id)`, a path with a wildcard) | A fake by its type |
 
 A computed column's name is its text as you wrote it. MySQL names one by the text it received, with the real value
 in it where Sosie turned a fake back (`email = 'real@…'`), a derived table's column in its `org_name` too; Sosie takes

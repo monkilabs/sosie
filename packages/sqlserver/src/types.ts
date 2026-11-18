@@ -374,8 +374,10 @@ export function bytesOf(t: TypeInfo, text: string, like?: Buffer): Buffer | unde
       const size = t.id === TYPE.MONEYN ? (like?.length ?? t.length) : t.length
       const units = unscaled(text, 4)
       if (units === undefined) return undefined
-      if (size === 4) return i32le(Number(clamp(units, -(2n ** 31n), 2n ** 31n - 1n)))
-      const n = clamp(units, -(2n ** 63n), 2n ** 63n - 1n)
+      // A fake has as many digits as its real value, and may be past the type's range: wrapped back into it, as cut to
+      // its edge it would be the edge, which a real value at it is.
+      if (size === 4) return i32le(Number(wrap(units, -(2n ** 31n), 2n ** 31n - 1n)))
+      const n = wrap(units, -(2n ** 63n), 2n ** 63n - 1n)
       const out = Buffer.alloc(8)
       out.writeInt32LE(Number(n >> 32n), 0)
       out.writeUInt32LE(Number(n & 0xffffffffn), 4)
@@ -491,6 +493,13 @@ function encodeWithin(text: string, t: TypeInfo): Buffer {
     else hi = mid - 1
   }
   return encodeText(chars.slice(0, lo).join(''), t.collation)
+}
+
+/** A number past [min, max] wrapped back into it, its edges skipped, so it lands on neither: one within stays. */
+function wrap(n: bigint, min: bigint, max: bigint): bigint {
+  if (n >= min && n <= max) return n
+  const inner = max - min - 1n
+  return min + 1n + (((n - min - 1n) % inner) + inner) % inner
 }
 
 function clamp(n: bigint, min: bigint, max: bigint): bigint {

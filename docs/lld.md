@@ -546,7 +546,7 @@ Values a query computes fake in `computed:<type>`.
 | `bits` | As many bits, each drawn; a single bit is a flag, flipped or not once per domain, as a boolean is |
 | `interval` | Another duration in the same form: each number another of as many digits, zero only for zero, minutes and seconds under 60 and the months of a year-month under 12; its words and signs kept, so every `IntervalStyle` reads it. `infinity` stays |
 | A value its type's faker cannot change (`''` or `-` in a field without a format, `NaN` and `Infinity` in a number, `infinity` in a date) | Itself: there is nothing in it to fake. A field with a format draws its fake whatever the value, so even `-` in a `city` becomes a city |
-| `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. A path into a json column (Postgres's `->`, `#>`, and the text of `->>` and `#>>`, each with constants) is the column's JSON from there: the field, with `at`, the path, so its keys follow the column's rule and its leaves get the domains they have in the whole document. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked. Anywhere, a key that holds a value the request turned back from a fake (`quillon`, `quillon_profile`, `QuillonSettings`) is faked, however it looks: an answer that holds it is echoing what the client sent |
+| `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. A path into a json column (Postgres's `->`, `#>`, and the text of `->>` and `#>>`, each with constants; MySQL's `->` and `JSON_EXTRACT` with a path from `$` and no wildcard, and the text of `->>` and `JSON_UNQUOTE`) is the column's JSON from there: the field, with `at`, the path, so its keys follow the column's rule and its leaves get the domains they have in the whole document. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked. Anywhere, a key that holds a value the request turned back from a fake (`quillon`, `quillon_profile`, `QuillonSettings`) is faked, however it looks: an answer that holds it is echoing what the client sent |
 | `array` | Each element faked in the field's domain |
 | `range` | Each bound faked as its type, in the field's domain, then put in order; brackets, infinite bounds and `empty` kept, so the database reads it as a range again |
 | `ip` | An address from a documentation range |
@@ -597,6 +597,8 @@ CREATE TABLE value (
 ) WITHOUT ROWID;
 CREATE INDEX value_fake ON value (fake, domain);
 CREATE INDEX value_scan ON value (mac_ci) WHERE scannable = 1;
+-- Words a field's json document has for keys (`linkedin`), as scan compares them: structure, not looked for.
+CREATE TABLE word (mac_ci BLOB PRIMARY KEY) WITHOUT ROWID;
 ```
 
 - **Keys.** `~/.sosie/store/key` holds 32 random bytes, created on first start
@@ -633,8 +635,11 @@ findings. A line is one finding however many values it holds; a symbolic link in
 a fake is not counted: it is what the agent was shown. An API's own words in
 paths and query names are structure, and not looked for; nor is a JSON key a query built that looks like a word
 (`paid`, a key of `json_object_agg(status, n)`), nor a real value that is a name in the
-schema (a category `Data` beside a column `data`), which every transcript of a query on it holds. A key that is no
-word (an email, a name) is looked for. A real value that is
+schema (a category `Data` beside a column `data`), which every transcript of a query on it holds, nor one that is a
+word a field's json document has for a key (a network `LinkedIn`, beside a key `linkedin`), whichever Sosie met first:
+the store keeps those words' keyed hashes. A key of JSON a query built is the client's, and does not count. A key that
+is no word (an email, a name) is looked for. When Sosie starts with a field under `pass`, the values it was faked with
+before, in its own domain, are no longer looked for. A real value that is
 a common word held as text rather than an enum (a role `admin`, a status
 `paid`) is looked for like any other, so a transcript that uses the word is a
 finding: such a field belongs under `pass` in `sosie.yml`, and a field that
@@ -1519,7 +1524,8 @@ are faked by their type. `NOEXEC` and `PARSEONLY`, which skip statements without
 rows, at most 2,033 characters each, are joined, faked as one JSON value, and cut again.
 
 A value is faked as text and written back in its type: integers within their size (a `tinyint` from 0 to 255),
-decimals and money within their precision and scale, dates from 0001 to 9999, `datetimeoffset` with its offset,
+decimals and money within their precision and scale (a money fake past its type's range wrapped back into it, never
+onto its edge, which a real value at the edge is), dates from 0001 to 9999, `datetimeoffset` with its offset,
 `uniqueidentifier` with its first three groups little-endian, `char(n)` and `binary(n)` padded to their length, text in
 its collation's code page (UTF-8 for a `_UTF8` collation; a character the page has none for is `?`), cut where it is
 longer than its column between characters, never inside one of UTF-8's or a double-byte page's. `xml`, the CLR

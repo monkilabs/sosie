@@ -81,6 +81,17 @@ describe('collations', () => {
     expect(decodeText(encodeText('日本', LATIN1), LATIN1)).toBe('??')
   })
 
+  it('wraps a money fake past its type’s range back into it, never onto its edge, which a real value may be', () => {
+    // A fake of 214748.3647, smallmoney's largest, has as many digits: 999999.9999 would be cut to that very value.
+    const small = info(TYPE.MONEYN, 4)
+    for (const fake of ['999999.9999', '214748.3648', '-500000.0001']) {
+      const written = Number(textOf(small, bytesOf(small, fake)!))
+      expect(Math.abs(written)).toBeLessThanOrEqual(214748.3647)
+      expect([214748.3647, -214748.3648]).not.toContain(written)
+    }
+    expect(textOf(small, bytesOf(small, '12.5')!)).toBe('12.5000')
+  })
+
   it('cuts a fake too long for its column between characters, never inside one', () => {
     const utf8 = [0x09, 0x04, 0xd0, 0x04, 0x00]
     // varchar(5): 'abcd' and ž's two bytes would be six.

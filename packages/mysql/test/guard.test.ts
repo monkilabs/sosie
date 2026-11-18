@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { analyze, literalText, loadParser, parseStatements } from '../src/guard.js'
+import { analyze, jsonPathSteps, literalText, loadParser, parseStatements } from '../src/guard.js'
 import { buildCatalog } from '../src/schema.js'
 
 beforeAll(() => loadParser())
@@ -198,5 +198,18 @@ describe('the guard', () => {
       [1, 'users.email'],
       [2, 'users.id'],
     ])
+  })
+})
+
+describe('jsonPathSteps', () => {
+  it('reads a json path from the root as the core writes one, and no path with a wildcard', () => {
+    expect(jsonPathSteps('$')).toBe('')
+    expect(jsonPathSteps('$.address.city')).toBe('.address.city')
+    expect(jsonPathSteps('$.work[0].name')).toBe('.work[].name')
+    expect(jsonPathSteps('$.work[last]')).toBe('.work[]')
+    expect(jsonPathSteps('$."postal code"')).toBe('.postal code')
+    expect(jsonPathSteps('$.*')).toBeUndefined()
+    expect(jsonPathSteps('$**.city')).toBeUndefined()
+    expect(jsonPathSteps('address')).toBeUndefined()
   })
 })
