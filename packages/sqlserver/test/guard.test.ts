@@ -138,6 +138,15 @@ describe('the guard', () => {
     expect(() => parseBatch('WHILE 1 = 1 SELECT 1')).toThrow()
   })
 
+  it('throws where sqlparser reads a reserved word as a name, which SQL Server reads as a statement', () => {
+    // sqlparser: SELECT 1 AS REVOKE; SELECT ON AS users FROM public. SQL Server: SELECT 1, then the REVOKE.
+    expect(() => parseBatch('SELECT 1 REVOKE SELECT ON users FROM public')).toThrow()
+    expect(() => parseBatch('SELECT email FROM users REVOKE SELECT ON users FROM public')).toThrow()
+    expect(() => parseBatch('SELECT 1 AS revoke')).toThrow()
+    // A reserved word in brackets is a name to SQL Server too; DISK and the like, reserved on paper, it takes as one.
+    expect(parseBatch('SELECT 1 AS [revoke], 2 AS disk, 3 AS x FROM users AS [public]')).toHaveLength(1)
+  })
+
   it('throws where sqlparser stops at an END before the batch does, rather than let the rest go unread', () => {
     // sqlparser ends a list of statements at an END where one could end, without an error: SQL Server reads on.
     expect(() => parseBatch('BEGIN TRY SELECT 1 END TRY BEGIN CATCH DELETE FROM users END CATCH')).toThrow()

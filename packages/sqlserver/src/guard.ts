@@ -17,6 +17,55 @@ export async function loadParser(): Promise<void> {
 }
 
 /**
+ * T-SQL's reserved words that SQL Server takes as no name unless in brackets or quotes: each was tried as an alias
+ * against SQL Server 2022 (DISK, DUMP, LOAD, PRECISION and SECURITYAUDIT, reserved on paper, are taken, and are not here).
+ */
+const RESERVED = new Set([
+  'ADD', 'ALL', 'ALTER', 'AND', 'ANY', 'AS', 'ASC', 'AUTHORIZATION', 'BACKUP', 'BEGIN', 'BETWEEN', 'BREAK', 'BROWSE',
+  'BULK', 'BY', 'CASCADE', 'CASE', 'CHECK', 'CHECKPOINT', 'CLOSE', 'CLUSTERED', 'COALESCE', 'COLLATE', 'COLUMN',
+  'COMMIT', 'COMPUTE', 'CONSTRAINT', 'CONTAINS', 'CONTAINSTABLE', 'CONTINUE', 'CONVERT', 'CREATE', 'CROSS', 'CURRENT',
+  'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'CURRENT_USER', 'CURSOR', 'DATABASE', 'DBCC', 'DEALLOCATE',
+  'DECLARE', 'DEFAULT', 'DELETE', 'DENY', 'DESC', 'DISTINCT', 'DISTRIBUTED', 'DOUBLE', 'DROP', 'ELSE', 'END', 'ERRLVL',
+  'ESCAPE', 'EXCEPT', 'EXEC', 'EXECUTE', 'EXISTS', 'EXIT', 'EXTERNAL', 'FETCH', 'FILE', 'FILLFACTOR', 'FOR', 'FOREIGN',
+  'FREETEXT', 'FREETEXTTABLE', 'FROM', 'FULL', 'FUNCTION', 'GOTO', 'GRANT', 'GROUP', 'HAVING', 'HOLDLOCK', 'IDENTITY',
+  'IDENTITY_INSERT', 'IDENTITYCOL', 'IF', 'IN', 'INDEX', 'INNER', 'INSERT', 'INTERSECT', 'INTO', 'IS', 'JOIN', 'KEY',
+  'KILL', 'LEFT', 'LIKE', 'LINENO', 'MERGE', 'NATIONAL', 'NOCHECK', 'NONCLUSTERED', 'NOT', 'NULL', 'NULLIF', 'OF',
+  'OFF', 'OFFSETS', 'ON', 'OPEN', 'OPENDATASOURCE', 'OPENQUERY', 'OPENROWSET', 'OPENXML', 'OPTION', 'OR', 'ORDER',
+  'OUTER', 'OVER', 'PERCENT', 'PIVOT', 'PLAN', 'PRIMARY', 'PRINT', 'PROC', 'PROCEDURE', 'PUBLIC', 'RAISERROR', 'READ',
+  'READTEXT', 'RECONFIGURE', 'REFERENCES', 'REPLICATION', 'RESTORE', 'RESTRICT', 'RETURN', 'REVERT', 'REVOKE', 'RIGHT',
+  'ROLLBACK', 'ROWCOUNT', 'ROWGUIDCOL', 'RULE', 'SAVE', 'SCHEMA', 'SELECT', 'SEMANTICKEYPHRASETABLE',
+  'SEMANTICSIMILARITYDETAILSTABLE', 'SEMANTICSIMILARITYTABLE', 'SESSION_USER', 'SET', 'SETUSER', 'SHUTDOWN', 'SOME',
+  'STATISTICS', 'SYSTEM_USER', 'TABLE', 'TABLESAMPLE', 'TEXTSIZE', 'THEN', 'TO', 'TOP', 'TRAN', 'TRANSACTION',
+  'TRIGGER', 'TRUNCATE', 'TRY_CONVERT', 'TSEQUAL', 'UNION', 'UNIQUE', 'UNPIVOT', 'UPDATE', 'UPDATETEXT', 'USE', 'USER',
+  'VALUES', 'VARYING', 'VIEW', 'WAITFOR', 'WHEN', 'WHERE', 'WHILE', 'WITH', 'WRITETEXT',
+])
+
+/**
+ * A reserved word sqlparser took as a name where SQL Server takes none: an alias, written bare. sqlparser reads
+ * SELECT 1 REVOKE SELECT ON users FROM public as SELECT 1 AS REVOKE and a second SELECT; SQL Server reads SELECT 1,
+ * then the REVOKE. Where the two read a batch apart, the batch is refused.
+ */
+function reservedName(node: unknown): string | undefined {
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = reservedName(item)
+      if (found) return found
+    }
+    return undefined
+  }
+  if (!node || typeof node !== 'object') return undefined
+  for (const [key, value] of Object.entries(node as Node)) {
+    if (key === 'alias' && value && typeof value === 'object') {
+      const ident = (value as Node).name ?? value
+      if (typeof ident?.value === 'string' && ident.quote_style == null && RESERVED.has(ident.value.toUpperCase())) return ident.value
+    }
+    const found = reservedName(value)
+    if (found) return found
+  }
+  return undefined
+}
+
+/**
  * The statements of `text`, every one of them. sqlparser ends a list of statements, without an error, at an END where
  * one could end (END TRY, END CATCH, END CONVERSATION): SQL Server reads on, and what follows would go to it unread. So
  * a statement of Sosie's own goes last, with a mark the client cannot know, and a parse that does not reach it throws.
@@ -31,6 +80,8 @@ function parse(text: string): Node[] {
   if (!last || JSON.stringify(read).includes(mark)) {
     throw new Error('sql parser error: Sosie reads no END TRY, END CATCH or END CONVERSATION, and would not see what follows it.')
   }
+  const reserved = reservedName(read)
+  if (reserved) throw new Error(`sql parser error: ${reserved} is a reserved word, which SQL Server reads as the start of a statement or a keyword, not as a name: put a name that is one in brackets, [${reserved}].`)
   return read
 }
 

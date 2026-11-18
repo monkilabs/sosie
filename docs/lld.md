@@ -1441,8 +1441,11 @@ A batch is parsed by sqlparser's T-SQL dialect. T-SQL needs no semicolon between
 without one: where it stops at a word a statement starts with, the batch is read on from there. Anything else it cannot
 read is a syntax error, 102. sqlparser also stops, without an error, at an END where a statement could end (`END TRY`,
 `END CATCH`, `END CONVERSATION`), where SQL Server reads on: so each piece is parsed with a last statement of Sosie's
-own, a `SELECT` of a mark made for that parse, and a parse that does not end with it is a syntax error too. Every
-statement is checked before any runs.
+own, a `SELECT` of a mark made for that parse, and a parse that does not end with it is a syntax error too. And
+sqlparser takes a reserved word for an alias where SQL Server takes none (`SELECT 1 REVOKE SELECT ON users FROM
+public` is to it `SELECT 1 AS REVOKE` and a second `SELECT`, to SQL Server a `SELECT` and a `REVOKE`): a bare alias
+that is one of the 179 words SQL Server 2022 refuses as one is a syntax error, `[revoke]` a name. Every statement is
+checked before any runs.
 
 Allowed: `SELECT` and `WITH`, without `INTO`, `FOR XML` or a hint that locks rows; `SET` of the session's options
 (`NOCOUNT`, the `ANSI_*` and `ARITH*` ones, `QUOTED_IDENTIFIER`, `TEXTSIZE`, `LANGUAGE`, `DATEFORMAT`, `LOCK_TIMEOUT`,
