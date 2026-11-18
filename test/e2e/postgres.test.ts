@@ -238,10 +238,11 @@ describe('reading through Sosie', () => {
   })
 
   it('reads a path into a json column as the column: its keys stay, and its leaves are the column’s fakes', async () => {
-    const [whole] = await query('SELECT profile FROM users WHERE id = 1')
+    // The whole column and paths into it, from one row: an id written in the query would be a fake's, turned back.
     const [part] = await query(
-      "SELECT profile->'address' AS address, profile #> '{address}' AS same, profile #> '{}' AS all, profile->>'nickname' AS nickname, profile->'address'->>'city' AS city FROM users WHERE id = 1",
+      "SELECT profile AS whole, profile->'address' AS address, profile #> '{address}' AS same, profile #> '{}' AS all, profile->>'nickname' AS nickname, profile->'address'->>'city' AS city FROM users WHERE profile->'address' IS NOT NULL ORDER BY id LIMIT 1",
     )
+    const whole = { profile: part.whole }
     expect(part.address).toEqual(whole.profile.address)
     expect(part.same).toEqual(whole.profile.address)
     // Keys that look like words, which a json column keeps, a path into it keeps too.
