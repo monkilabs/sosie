@@ -1524,7 +1524,8 @@ are faked by their type. `NOEXEC` and `PARSEONLY`, which skip statements without
 rows, at most 2,033 characters each, are joined, faked as one JSON value, and cut again.
 
 A value is faked as text and written back in its type: integers within their size (a `tinyint` from 0 to 255),
-decimals and money within their precision and scale, dates from 0001 to 9999, `datetimeoffset` with its offset,
+decimals and money within their precision and scale (a money fake past its type's range wrapped back into it, never
+onto its edge, which a real value at the edge is), dates from 0001 to 9999, `datetimeoffset` with its offset,
 `uniqueidentifier` with its first three groups little-endian, `char(n)` and `binary(n)` padded to their length, text in
 its collation's code page (UTF-8 for a `_UTF8` collation; a character the page has none for is `?`), cut where it is
 longer than its column between characters, never inside one of UTF-8's or a double-byte page's. `xml`, the CLR
