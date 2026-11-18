@@ -36,6 +36,12 @@ SQL Server, a source of its own, and the eighth package: `@sosie/sqlserver`, whi
     shape, into months that do not exist (`7408-37`).
   - `sosie scan` no longer looks for a JSON key that looks like a word, nor for a value that is a name in the schema.
     On clean output, it found 50 such "real values".
+  - MySQL: a path into a json column (`profile->'$.address'`, `JSON_EXTRACT`, and `->>`'s text) is faked as the
+    column from there, as in Postgres.
+  - `sosie scan` no longer looks for a value that a json document has for a key (`LinkedIn`, beside a key
+    `linkedin`), nor for the values a field was faked with before it was put under `pass`.
+- SQL Server: a `money` or `smallmoney` fake past its type's range is wrapped back into it: cut to the edge, it was the
+  edge, which a real value at the edge is.
 - A release now publishes eight packages: the npm token must be allowed to publish `@sosie/sqlserver`, a new package.
 
 ## 0.5.0, 14 November 2026
