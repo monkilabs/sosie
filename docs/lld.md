@@ -1468,7 +1468,8 @@ fails, leaves the session where it was.
 
 RPCs: `sp_executesql` (10), `sp_prepare` (11), `sp_execute` (12), `sp_prepexec` (13) and `sp_unprepare` (15), by number
 or by name. The statement is checked as a batch; sp_prepare's and sp_prepexec's handle is the upstream's, returned to
-the client, and kept with its statement's reading, so each sp_execute's parameters are turned back by it. Cursors (1 to
+the client, and kept with its statement's reading and the scope that turned its fakes back, so each sp_execute's
+parameters are turned back by it, and a message that quotes a real value the prepare put in shows its fake. Cursors (1 to
 9) and sp_prepexecrpc are refused.
 
 ### Rewriting

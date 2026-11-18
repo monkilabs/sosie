@@ -7,7 +7,7 @@ import { ENCRYPT, login7, OPTION, prelogin, versionBytes } from '../src/login.js
 import { buildCatalog } from '../src/schema.js'
 import { Session } from '../src/session.js'
 import { allHeaders, Messages, PACKET, packets, STATUS, type Message } from '../src/tds.js'
-import { DONE, done, ENV, envBytes, envText, loginAck, readTokens, TOKEN } from '../src/tokens.js'
+import { DONE, done, ENV, envBytes, envText, loginAck, message, readTokens, TOKEN } from '../src/tokens.js'
 
 beforeAll(() => loadParser())
 
@@ -26,6 +26,7 @@ async function standIn(): Promise<{ port: number; requests: string[] }> {
     socket.on('error', () => {})
     const messages = new Messages(socket)
     let held: (() => void) | undefined
+    let prepared = ''
     const attention = () => {
       held?.()
       held = undefined
@@ -48,6 +49,19 @@ async function standIn(): Promise<{ port: number; requests: string[] }> {
         if (m.type === PACKET.BATCH) requests.push(text)
         const says = (word: string) => m.payload.includes(Buffer.from(word, 'utf16le'))
         const token = m.type === PACKET.RPC ? TOKEN.DONEPROC : TOKEN.DONE
+        const proc = m.type === PACKET.RPC ? m.payload.readUInt16LE(m.payload.readUInt32LE(0) + 2) : undefined
+        if (proc === 11) {
+          // sp_prepare: the statement kept, and its handle, 7, as the output parameter at ordinal 0.
+          prepared = says('real@x.net') ? 'real@x.net' : 'fake@x.net'
+          const handle = Buffer.concat([Buffer.from([TOKEN.RETURNVALUE, 0, 0, 7]), Buffer.from('@handle', 'utf16le'), Buffer.from([1, 0, 0, 0, 0, 0, 0, 0x26, 4, 4, 7, 0, 0, 0])])
+          socket.write(packets(PACKET.REPLY, Buffer.concat([handle, done(0, 0, TOKEN.DONEPROC)])))
+          continue
+        }
+        if (proc === 12) {
+          // sp_execute, answered with a message that quotes the prepared statement's value, as a syntax error's does.
+          socket.write(packets(PACKET.REPLY, Buffer.concat([message({ error: true, number: 102, state: 1, severity: 15, text: `Incorrect syntax near '${prepared}'.`, server: 'db1', proc: '', line: 1 }), done(DONE.ERROR, 0, TOKEN.DONEPROC)])))
+          continue
+        }
         if (says('many')) {
           // One int column, many rows: a reply a client reads while it comes.
           const column = Buffer.concat([Buffer.from([TOKEN.COLMETADATA, 1, 0, 0, 0, 0, 0, 0, 0, 0x38, 4]), Buffer.from('many', 'utf16le')])
@@ -84,8 +98,21 @@ const users = buildCatalog({
  */
 async function sosie(upstream: number, { statementTimeout = 0 } = {}): Promise<number> {
   const catalog = users
-  const scope = { lookup: (text: string, near?: unknown) => (text === 'fake@x.net' && near ? 'real@x.net' : undefined), scrub: (t: string) => t }
-  const faker = { request: () => scope, value: (v: string) => v, computed: (v: string) => v } as unknown as Faker
+  type Scope = { back: Map<string, string>; lookup: (text: string, near?: unknown) => string | undefined; scrub: (t: string) => string }
+  // A scope knows the real values it turned back, and those of the scope it was made from; scrub turns them into fakes.
+  const request = (_sent?: string, from?: Scope): Scope => {
+    const back = new Map(from?.back ?? [])
+    return {
+      back,
+      lookup: (text, near) => {
+        if (text !== 'fake@x.net' || !near) return undefined
+        back.set('real@x.net', 'fake@x.net')
+        return 'real@x.net'
+      },
+      scrub: (t) => [...back].reduce((out, [real, fake]) => out.split(real).join(fake), t),
+    }
+  }
+  const faker = { request, value: (v: string) => v, computed: (v: string) => v } as unknown as Faker
   const server = createServer((socket) => {
     socket.on('error', () => {})
     void new Session(socket, {
@@ -153,6 +180,25 @@ describe('the session’s database', () => {
     socket.write(packets(PACKET.BATCH, batch("SELECT email FROM users WHERE email = N'fake@x.net'")))
     await messages.next()
     expect(up.requests.at(-1)).toBe("SELECT email FROM users WHERE email = N'fake@x.net'")
+  })
+})
+
+describe('prepared statements', () => {
+  it('scrub a message at each execution as their prepare would: the real values it put in turned back into fakes', async () => {
+    const up = await standIn()
+    const c = await tedious(await sosie(up.port))
+    const r = new Request("SELECT email FROM users WHERE email = N'fake@x.net' AND 1 = @x", () => {})
+    r.addParameter('x', TYPES.Int)
+    await new Promise<void>((resolve) => {
+      r.once('prepared', () => resolve())
+      c.prepare(r)
+    })
+    const error = await new Promise<string | undefined>((resolve) => {
+      r.once('requestCompleted', () => resolve(undefined))
+      r.callback = (e) => resolve(e?.message)
+      c.execute(r, { x: 1 })
+    })
+    expect(error).toBe("Incorrect syntax near 'fake@x.net'.")
   })
 })
 

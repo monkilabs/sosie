@@ -35,6 +35,13 @@ interface Prepared {
   /** The statement as Sosie sent it, and its declaration, for an execution that must widen a parameter. */
   statement: string
   declarations: string
+  /**
+   * The statement as the client wrote it, where Sosie turned fakes back in it, and the scope that did: each execution's
+   * messages are scrubbed as the prepare's would be, the real values in the statement turned back into fakes.
+   */
+  text: string
+  edits: Sent['edits']
+  scope: Sent['scope']
 }
 
 const NO_ANALYSIS: Analysis = { catalogOnly: true, consts: [], params: new Map() }
@@ -320,10 +327,10 @@ export class Session {
         const handle = params[0]?.value.bytes?.readInt32LE()
         const prepared = handle === undefined ? undefined : this.#prepared.get(handle)
         if (!prepared) return { refusal: { number: 8179, message: `Could not find prepared statement with handle ${handle ?? '(none)'}: Sosie checks each statement it runs, so prepare it through Sosie.` } }
-        const scope = this.ctx.faker.request([prepared.statement, ...valueTexts(params.slice(1))].join('\n'))
+        const scope = this.ctx.faker.request([prepared.text, ...valueTexts(params.slice(1))].join('\n'), prepared.scope)
         const declared = readDeclarations(prepared.declarations)
         const widened = this.#turnBack(params, 1, declared, prepared.analysis, scope)
-        const sent: Sent = { text: prepared.statement, sql: prepared.statement, edits: [], scope }
+        const sent: Sent = { text: prepared.text, sql: prepared.statement, edits: prepared.edits, scope }
         if (!widened.size) return { call: { ...call, params }, analysis: prepared.analysis, sent, handles: new Set() }
         // A real value longer than the prepared parameter's type: run as sp_executesql, its declaration widened.
         const statement = withText(params[0]!, prepared.statement)
@@ -387,7 +394,7 @@ export class Session {
     if (widened.size && params[at.declarations]) params[at.declarations] = withText(params[at.declarations]!, widen(declarations, declared, widened))
     const sent: Sent = { text, sql: rewritten?.sql ?? text, edits: rewritten?.edits ?? [], scope }
     const handles = at.handle === undefined ? new Set<number>() : new Set([at.handle])
-    const prepared = at.handle === undefined ? undefined : { analysis, statement: rewritten?.sql ?? text, declarations: widened.size ? widen(declarations, declared, widened) : declarations }
+    const prepared = at.handle === undefined ? undefined : { analysis, statement: sent.sql, declarations: widened.size ? widen(declarations, declared, widened) : declarations, text, edits: sent.edits, scope }
     return { call: { ...call, params }, analysis, sent, handles, ...(prepared && { prepared }) }
   }
 
