@@ -1,4 +1,4 @@
-import { bvarchar, Cursor, u16, u8, usvarchar } from './tds.js'
+import { bvarchar, Cursor, u16, u32, u8, usvarchar } from './tds.js'
 import { encodeText, readTypeInfo, readValue, TYPE, writeValue, type RawValue, type TypeInfo } from './types.js'
 
 /** The procedures an RPC names by number (MS-TDS 2.2.6.6). */
@@ -79,7 +79,7 @@ export function readRpc(payload: Buffer, headersLength: number): Rpc {
       const name = c.bvarchar()
       const status = c.u8()
       const type = readTypeInfo(c)
-      params.push({ name, status, type, value: readValue(c, type) })
+      params.push({ name, status, type, value: readParamValue(c, type) })
     }
     calls.push({ proc, options, params })
     if (!c.done()) separators.push(c.u8())
@@ -87,12 +87,29 @@ export function readRpc(payload: Buffer, headersLength: number): Rpc {
   return { headers: payload.subarray(0, headersLength), calls, separators }
 }
 
+/**
+ * A parameter's value. Text, ntext and image come as a row does not send them: a four-byte length (all ones for null)
+ * and their bytes, with no text pointer or timestamp before them.
+ */
+function readParamValue(c: Cursor, type: TypeInfo): RawValue {
+  if (type.layout !== 'text') return readValue(c, type)
+  const length = c.u32()
+  return length === NULL_LONG ? { bytes: null } : { bytes: c.bytes(length) }
+}
+
+function writeParamValue(type: TypeInfo, value: RawValue): Buffer {
+  if (type.layout !== 'text') return writeValue(type, value)
+  return value.bytes === null ? u32(NULL_LONG) : Buffer.concat([u32(value.bytes.length), value.bytes])
+}
+
+const NULL_LONG = 0xffffffff
+
 export function writeRpc(rpc: Rpc): Buffer {
   const parts: Buffer[] = [rpc.headers]
   rpc.calls.forEach((call, i) => {
     if (i > 0) parts.push(u8(rpc.separators[i - 1] ?? 0x80))
     parts.push(typeof call.proc === 'number' ? Buffer.concat([u16(0xffff), u16(call.proc)]) : usvarchar(call.proc), u16(call.options))
-    for (const p of call.params) parts.push(bvarchar(p.name), u8(p.status), p.type.raw, writeValue(p.type, p.value))
+    for (const p of call.params) parts.push(bvarchar(p.name), u8(p.status), p.type.raw, writeParamValue(p.type, p.value))
   })
   if (rpc.separators.length >= rpc.calls.length) parts.push(u8(rpc.separators.at(-1)!))
   return Buffer.concat(parts)

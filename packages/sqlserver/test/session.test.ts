@@ -252,6 +252,19 @@ describe('parameters', () => {
     expect(textParam(params[1])).toBe('@b decimal(38,2)')
     expect(textOf(params[2]!.type, params[2]!.value.bytes!)).toBe('1234.56')
   })
+
+  it('read text, ntext and image as an RPC sends them, and turn them back', async () => {
+    const up = await standIn()
+    const c = await tedious(await sosie(up.port))
+    const error = await new Promise<string | undefined>((resolve) => {
+      const r = new Request('SELECT email FROM users WHERE email = @e', (e) => resolve(e?.message))
+      r.addParameter('e', TYPES.NText, 'fake@x.net')
+      c.execSql(r)
+    })
+    expect(error).toBeUndefined()
+    const [{ params }] = readRpc(up.rpcs.at(-1)!, up.rpcs.at(-1)!.readUInt32LE(0)).calls as [Call]
+    expect(params[2]!.value.bytes!.toString('utf16le')).toBe('real@x.net')
+  })
 })
 
 describe('a pool’s reset', () => {
