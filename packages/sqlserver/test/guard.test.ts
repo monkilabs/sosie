@@ -202,7 +202,7 @@ describe('the guard', () => {
     expect(check('USE model; SELECT UPPER(email) FROM users').catalogOnly).toBe(false)
     // Tables in the system databases hold rows like any other: another session's global temp table among them.
     expect(check('SELECT * FROM tempdb..##staging').catalogOnly).toBe(false)
-    expect(check('SELECT * FROM master.dbo.app_settings').catalogOnly).toBe(false)
+    expect(check('SELECT * FROM master.dbo.inventory').catalogOnly).toBe(false)
     expect(check('SELECT name FROM master.sys.databases').catalogOnly).toBe(true)
     expect(check('USE master; SELECT name FROM sys.objects').catalogOnly).toBe(true)
   })

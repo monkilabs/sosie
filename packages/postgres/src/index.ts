@@ -39,7 +39,7 @@ export const postgres: Source = {
         // Answers with no rows, or fewer, would look like the data: said once, here.
         ...(catalog.rowSecurity.hidden
           ? [
-              `Row security hides every row of ${tables(catalog.rowSecurity.hidden)} from the login: ${catalog.rowSecurity.hidden === 1 ? 'it has' : 'they have'} no policy, as a Supabase table has none until it is given one. Give the login BYPASSRLS, or a policy that lets it read.`,
+              `Row security hides every row of ${tables(catalog.rowSecurity.hidden)} from the login: ${catalog.rowSecurity.hidden === 1 ? 'it has' : 'they have'} no policy. Give the login BYPASSRLS, or a policy that lets it read.`,
             ]
           : []),
         ...(catalog.rowSecurity.limited

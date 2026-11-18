@@ -50,8 +50,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO sosie_reader
 > empty table:
 >
 > ```
->   ! app: Row security hides every row of 6 tables from the login: they have no policy, as a Supabase table has none
->     until it is given one. Give the login BYPASSRLS, or a policy that lets it read.
+>   ! app: Row security hides every row of 6 tables from the login: they have no policy. Give the login BYPASSRLS, or
+>     a policy that lets it read.
 > ```
 
 ## Clients

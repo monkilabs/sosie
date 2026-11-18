@@ -412,7 +412,7 @@ describe('the guard', () => {
     await writer.close()
   })
 
-  it('says when row security hides rows from its login, as a Supabase table with no policy hides them all', async () => {
+  it('says when row security hides rows from its login, as a table with no policy hides them all', async () => {
     const { default: Pg } = await import('pg')
     const admin = new URL(inject('admin'))
     const reader = decodeURIComponent(new URL(inject('upstream')).username)
@@ -427,14 +427,14 @@ describe('the guard', () => {
     await owner.connect()
     try {
       await owner.query(`
-        CREATE TABLE profiles (id int); ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-        CREATE TABLE ai_calls (id int); ALTER TABLE ai_calls ENABLE ROW LEVEL SECURITY;
+        CREATE TABLE documents (id int); ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+        CREATE TABLE events (id int); ALTER TABLE events ENABLE ROW LEVEL SECURITY;
         CREATE TABLE notes (id int); ALTER TABLE notes ENABLE ROW LEVEL SECURITY; CREATE POLICY mine ON notes USING (true);
         CREATE TABLE countries (code text);
         GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${reader};`)
       const limited = await startSosie({ upstream: at(new URL(inject('upstream'))) })
       expect(limited.warnings).toEqual([
-        'Row security hides every row of 2 tables from the login: they have no policy, as a Supabase table has none until it is given one. Give the login BYPASSRLS, or a policy that lets it read.',
+        'Row security hides every row of 2 tables from the login: they have no policy. Give the login BYPASSRLS, or a policy that lets it read.',
         "Row security shows the login only the rows its policies allow in 1 table: Sosie's answers leave the rest out.",
       ])
       await limited.close()

@@ -381,7 +381,7 @@ describe('sosie, in front of an API without a document, with rules for fields no
     const api = await startApi()
     const home = mkdtempSync(join(tmpdir(), 'sosie-cli-unmet-'))
     const why =
-      "  ! app: A rule not known yet applies once an answer's path names its entity: /users and /users/87 name user. Under a record, only a list under a plural name does (/spaces/87/accounts); /spaces/87/account and /spaces/87/accounts/5 name none, so no rule applies to their answers. Give the source a schema, the API's OpenAPI document, to name every field from it.\n"
+      "  ! app: A rule not known yet applies once an answer's path names its entity: /users and /users/87 name user. Under a record, only a list under a plural name does (/teams/87/members); /teams/87/billing and /teams/87/members/5 name none, so no rule applies to their answers. Give the source a schema, the API's OpenAPI document, to name every field from it.\n"
     for (const rules of ['    pass: [account.status]\n', '', 'pass: [account.status]\n']) {
       const top = rules.startsWith('pass') ? rules : ''
       const own = rules.startsWith(' ') ? rules : ''

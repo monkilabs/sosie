@@ -823,8 +823,8 @@ settings in the connection string itself (`statement_timeout`,
 after Sosie's, are dropped.
 
 At start, the terminal is told what of the login would mislead: a superuser or replication login, a login that can
-write, and row security. A table with row security on and no policy shows a login subject to it no row at all, which
-is a Supabase table's default (the app reads with a key that bypasses it): its answers would look like an empty
+write, and row security. A table with row security on and no policy shows a login subject to it no row at all (common
+where an app reads with a role or key that bypasses it, as on Supabase): its answers would look like an empty
 table, so Sosie says how many such tables there are, and how many show only the rows their policies allow. The owner,
 a superuser and a login with `BYPASSRLS` are not subject to it.
 
