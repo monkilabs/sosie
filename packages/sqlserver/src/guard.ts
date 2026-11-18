@@ -139,7 +139,6 @@ const QUERIES = 'holds queries with the real values in them'
 
 /** Databases Sosie never reads: msdb holds jobs' commands, backups' paths and mail. */
 const REFUSED_DATABASES: Record<string, string> = { msdb: "holds jobs' commands, backups' paths and mail" }
-const SYSTEM_DATABASES = new Set(['master', 'model', 'tempdb', 'msdb'])
 
 /**
  * Objects of SQL Server's catalog that hold values, queries, credentials, or where the database is; the rest is the
@@ -470,11 +469,9 @@ class Analyzer {
         if (this.#system(name, parts)) scope.relations.push({ alias, system: true })
         return
       }
-      if (SYSTEM_DATABASES.has(db)) {
-        scope.relations.push({ alias, system: true })
-        return
-      }
-      // A table Sosie knows, or one it does not (made since it started, a temp table): either way, data.
+      // A table Sosie knows, or one it does not (made since it started, a temp table, one in master or tempdb): either
+      // way, data. Only sys and INFORMATION_SCHEMA are the catalog: which database the session is in is the server's
+      // to say, and a USE in a branch that never runs, or one that fails, leaves it where it was.
       this.#data = true
       const known = name.startsWith('#') || db !== this.catalog.database.toLowerCase() ? undefined : this.#known(schema, name)
       scope.relations.push({ alias, ...(known && { byName: known.byName }) })

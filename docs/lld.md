@@ -1454,7 +1454,10 @@ replicas, `sysprocesses`, Query Store's text and plans, `msdb`, and a four-part 
 `OPENQUERY`, `OPENDATASOURCE`, `OPENXML`, `fn_dblog` and its kind, `fn_get_audit_file`, `fn_xe_file_target_read_file`,
 `fn_trace_gettable`; `SERVERPROPERTY` and `CONNECTIONPROPERTY` of the machine, the instance, a path or an address;
 `@@SERVERNAME`, `@@SERVICENAME`. A query that reads only the catalog, or no table, reads no data; one that calls a
-function not SQL Server's own, or reads a variable, does.
+function not SQL Server's own, or reads a variable, does. The catalog is `sys` and `INFORMATION_SCHEMA`, in any
+database: a table in `master` or `tempdb` (a global temp table among them) holds rows like any other. Which database
+the session is in does not decide it, as the server says which: a `USE` in a branch that never runs, or one that
+fails, leaves the session where it was.
 
 RPCs: `sp_executesql` (10), `sp_prepare` (11), `sp_execute` (12), `sp_prepexec` (13) and `sp_unprepare` (15), by number
 or by name. The statement is checked as a batch; sp_prepare's and sp_prepexec's handle is the upstream's, returned to
@@ -1477,7 +1480,8 @@ whether it is an expression or a hidden key (COLINFO). A column of a table Sosie
 resolved as the text that named it wrote it (`users`, `dbo.users`, `app.dbo.users`): a bare name is the one schema's
 that has a table of that name, or the login's default schema's. Browse mode's hidden keys are dropped from the
 metadata, every row and ORDER (an ORDER left empty is dropped), and TABNAME and COLINFO with them. A column of the
-catalog passes; an expression is faked by its type, unless the batch reads no data, or the guard read it as a
+catalog (`sys`, `INFORMATION_SCHEMA`) passes, and one of a table Sosie cannot find is faked by its type: from `master`, a
+view of yours names its table as its text wrote it (`dbo.users`), which is no table of master's; an expression is faked by its type, unless the batch reads no data, or the guard read it as a
 `COUNT(…)` or a literal in the select list, matched to the result sets the batch gives in order. A `FOR JSON` result's
 rows, at most 2,033 characters each, are joined, faked as one JSON value, and cut again.
 

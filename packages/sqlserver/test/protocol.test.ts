@@ -160,4 +160,22 @@ describe('a reply as the client gets it', () => {
     expect(tokens[0]!.kind === 'colmetadata' && tokens[0]!.columns!.map((c) => c.name)).toEqual(['email'])
     expect(tokens[1]!.kind === 'row' && tokens[1]!.values[0]!.bytes!.toString('utf16le')).toBe('fake kim@x.net')
   })
+
+  it('fakes a column whose table it cannot find, in whichever database the session is', () => {
+    // From master, a view of app names its table as the view's text wrote it: dbo.users, which is not master's.
+    const email = entry('email', nvarchar)
+    const name = (parts: string[]) => Buffer.concat([Buffer.from([parts.length]), ...parts.map((p) => Buffer.concat([Buffer.from([p.length, 0]), Buffer.from(p, 'utf16le')]))])
+    const tables = name(['dbo', 'users'])
+    const payload = Buffer.concat([
+      colMetadata([email]),
+      Buffer.from([TOKEN.TABNAME, tables.length, 0]),
+      tables,
+      Buffer.from([TOKEN.COLINFO, 3, 0, 1, 1, 0]),
+      row([email], [{ bytes: Buffer.from('kim@x.net', 'utf16le') }]),
+      done(DONE.COUNT, 1),
+    ])
+    const rewritten = rewriteReply(payload, { analyses: [analysis], sent: [undefined], handles: [new Set()] }, { catalog, faker, maxRows: 100, database: 'master' })
+    const value = [...readTokens(rewritten.payload)].find((t) => t.kind === 'row')
+    expect(value?.kind === 'row' && value.values[0]!.bytes!.toString('utf16le')).not.toBe('kim@x.net')
+  })
 })

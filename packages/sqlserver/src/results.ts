@@ -37,7 +37,6 @@ const PASSED_ENV = new Set<number>([
 ])
 
 const SYSTEM_SCHEMAS = new Set(['sys', 'information_schema'])
-const SYSTEM_DATABASES = new Set(['master', 'msdb', 'model', 'tempdb'])
 
 export interface Request {
   /** One per RPC call, or one for a batch: each applies to the result sets until its call's DONEPROC. */
@@ -235,7 +234,7 @@ function plan(set: ResultSet, i: number, target: Target | undefined, json: boole
     const relation = resolveTable(parts, ctx.catalog, database)
     const field = relation?.byName.get((info.name ?? column.name).toLowerCase())
     if (field) return { field }
-    if (isSystem(parts, database) || analysis.catalogOnly) return { pass: true }
+    if (isSystem(parts) || analysis.catalogOnly) return { pass: true }
     return { type: fieldTypeOf(column.type) }
   }
   if (analysis.catalogOnly) return { pass: true }
@@ -246,10 +245,12 @@ function plan(set: ResultSet, i: number, target: Target | undefined, json: boole
   return { type: fieldTypeOf(column.type) }
 }
 
-function isSystem(parts: readonly string[], database: string): boolean {
-  const schema = (parts.length >= 2 ? parts.at(-2)! : '').toLowerCase()
-  const db = (parts.length >= 3 ? parts.at(-3)! : database).toLowerCase()
-  return SYSTEM_SCHEMAS.has(schema) || (SYSTEM_DATABASES.has(db) && !parts.at(-1)?.startsWith('#'))
+/**
+ * SQL Server's catalog, by its schema: sys and INFORMATION_SCHEMA, in any database. Not by database: browse mode names
+ * a view's table as the view's text wrote it (dbo.users), so from master a table of yours would look like master's.
+ */
+function isSystem(parts: readonly string[]): boolean {
+  return SYSTEM_SCHEMAS.has((parts.length >= 2 ? parts.at(-2)! : '').toLowerCase())
 }
 
 /** The select list matched to result columns; one * may stand for several. */

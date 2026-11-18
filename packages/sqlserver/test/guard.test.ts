@@ -156,6 +156,18 @@ describe('the guard', () => {
     expect(check('DECLARE @x nvarchar(9); SELECT @x').catalogOnly).toBe(false)
   })
 
+  it('reads as the catalog only sys and INFORMATION_SCHEMA, whichever database the session is in', () => {
+    // A USE in a branch that never runs leaves the session where it was: users is still yours.
+    expect(check('IF 1 = 0 USE master; SELECT UPPER(email) FROM users').catalogOnly).toBe(false)
+    // So does a USE the login has no access to, which fails and lets the batch go on.
+    expect(check('USE model; SELECT UPPER(email) FROM users').catalogOnly).toBe(false)
+    // Tables in the system databases hold rows like any other: another session's global temp table among them.
+    expect(check('SELECT * FROM tempdb..##staging').catalogOnly).toBe(false)
+    expect(check('SELECT * FROM master.dbo.app_settings').catalogOnly).toBe(false)
+    expect(check('SELECT name FROM master.sys.databases').catalogOnly).toBe(true)
+    expect(check('USE master; SELECT name FROM sys.objects').catalogOnly).toBe(true)
+  })
+
   it('says what each result set is: a count, a literal, FOR JSON; none for a SELECT that sets a variable', () => {
     const shapes = check("SELECT COUNT(*), 'x', email FROM users; SELECT @x = email FROM users; SELECT id FROM users FOR JSON PATH").shapes
     expect(shapes).toEqual([
