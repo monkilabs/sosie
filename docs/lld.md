@@ -1497,7 +1497,8 @@ Browse mode sends, after a result's metadata, its tables (TABNAME) and, for each
 whether it is an expression or a hidden key (COLINFO). A column of a table Sosie knows is faked by its field, the table
 resolved as the text that named it wrote it (`users`, `dbo.users`, `app.dbo.users`): a bare name is the one schema's
 that has a table of that name, or the login's default schema's. Browse mode's hidden keys are dropped from the
-metadata, every row and ORDER (an ORDER left empty is dropped), and TABNAME and COLINFO with them. A column of the
+metadata, every row and ORDER (which keeps the columns before the first hidden key, and is dropped when none is
+left), and TABNAME and COLINFO with them. A column of the
 catalog (`sys`, `INFORMATION_SCHEMA`) passes, and one of a table Sosie cannot find is faked by its type: from `master`, a
 view of yours names its table as its text wrote it (`dbo.users`), which is no table of master's; an expression is faked by its type, unless the batch reads no data, or the guard read it as a
 `COUNT(…)` or a literal in the select list, matched to the result sets the batch gives in order. A statement that fails

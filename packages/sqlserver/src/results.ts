@@ -118,8 +118,10 @@ export function rewriteReply(payload: Buffer, request: Request, ctx: ReplyContex
     out.push(colMetadata(set.shown))
     if (set.ordered) {
       const ordinal = new Map(set.visible.map((i, at) => [i + 1, at + 1]))
-      const kept = set.ordered.map((n) => ordinal.get(n)).filter((n): n is number => n !== undefined)
-      // ORDER BY a hidden key only: no ORDER at all, as ODBC reads an empty one as a broken stream.
+      // The rows are ordered by the columns before the first hidden one: after it, only within each of its values.
+      const hidden = set.ordered.findIndex((n) => !ordinal.has(n))
+      const kept = set.ordered.slice(0, hidden < 0 ? undefined : hidden).map((n) => ordinal.get(n)!)
+      // ORDER BY a hidden key first: no ORDER at all, as ODBC reads an empty one as a broken stream.
       if (kept.length) out.push(order(kept))
     }
   }

@@ -190,6 +190,18 @@ describe('a reply as the client gets it', () => {
     expect(tokens[1]!.kind === 'row' && tokens[1]!.values[0]!.bytes!.toString('utf16le')).toBe('fake kim@x.net')
   })
 
+  it('says a result is ordered by no more than the columns before the first hidden key in ORDER', () => {
+    // ORDER BY u.id, u.email: by email only within each id, which the client does not see.
+    const email = entry('email', nvarchar)
+    const id = entry('id', int)
+    const tabname = Buffer.concat([Buffer.from([TOKEN.TABNAME]), Buffer.from([13, 0, 1, 5, 0]), Buffer.from('users', 'utf16le')])
+    const colinfo = Buffer.from([TOKEN.COLINFO, 6, 0, 1, 1, 0, 2, 1, COLINFO.HIDDEN | COLINFO.KEY])
+    const reply = (ordered: number[]) => Buffer.concat([colMetadata([email, id]), order(ordered), tabname, colinfo, row([email, id], [{ bytes: Buffer.from('kim@x.net', 'utf16le') }, { bytes: Buffer.from([7, 0, 0, 0]) }]), done(DONE.COUNT, 1)])
+    const orders = (ordered: number[]) => [...readTokens(rewriteReply(reply(ordered), { analyses: [analysis], sent: [undefined], handles: [new Set()] }, { catalog, faker, maxRows: 100, database: 'app' }).payload)].flatMap((t) => (t.kind === 'order' ? [t.columns] : []))
+    expect(orders([2, 1])).toEqual([])
+    expect(orders([1, 2])).toEqual([[1]])
+  })
+
   it('fakes a column whose table it cannot find, in whichever database the session is', () => {
     // From master, a view of app names its table as the view's text wrote it: dbo.users, which is not master's.
     const email = entry('email', nvarchar)
