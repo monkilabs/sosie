@@ -264,6 +264,15 @@ describe('parameters', () => {
     expect(readRpc(up.rpcs.at(-1)!, up.rpcs.at(-1)!.readUInt32LE(0)).calls[0]!.options).toBe(0x01)
   })
 
+  it('call no procedure of yours that is named like the catalog’s', async () => {
+    const up = await standIn()
+    const c = await tedious(await sosie(up.port))
+    const before = up.rpcs.length
+    const error = await new Promise<string | undefined>((resolve) => c.callProcedure(new Request('app.sp_tables', (e) => resolve(e?.message))))
+    expect(error).toMatch(/^Sosie runs no procedures but the catalog's/)
+    expect(up.rpcs.length).toBe(before)
+  })
+
   it('read text, ntext and image as an RPC sends them, and turn them back', async () => {
     const up = await standIn()
     const c = await tedious(await sosie(up.port))

@@ -115,12 +115,22 @@ export function writeRpc(rpc: Rpc): Buffer {
   return Buffer.concat(parts)
 }
 
-/** The procedure a call names, as a number where it is one of the special procedures: sys.sp_executesql is 10. */
+/**
+ * The procedure a call names, as a number where it is one of the special procedures: sys.sp_executesql is 10. Only
+ * a name in sys or dbo, or in no schema, is SQL Server's own: dbo.sp_pkeys is the system's even where a dbo.sp_pkeys
+ * of yours exists, but app.sp_tables is yours, and on a linked server (four parts) another server's. Those keep
+ * their whole name, which is no procedure Sosie runs.
+ */
 export function procOf(call: Call): number | string {
   if (typeof call.proc === 'number') return call.proc
-  const name = call.proc.replace(/[[\]]/g, '').split('.').at(-1)!.toLowerCase()
+  const parts = call.proc.replace(/[[\]]/g, '').split('.').map((p) => p.toLowerCase())
+  const name = parts.at(-1)!
+  if (parts.length > 3 || !SYSTEM_SCHEMAS.has(parts.length > 1 ? parts.at(-2)! : '')) return parts.join('.')
   return BY_NAME[name] ?? name
 }
+
+/** The schemas SQL Server finds its own procedures from, and none, as the guard reads an EXEC. */
+const SYSTEM_SCHEMAS: ReadonlySet<string> = new Set(['', 'sys', 'dbo'])
 
 /** A parameter's text value: the statement, a declaration. */
 export function textParam(p: Param | undefined): string | undefined {

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { endpointCertificate } from '../src/certificate.js'
 import { FEATURE, login7, readLogin7, TDS } from '../src/login.js'
-import { readDeclarations, readRpc, widen, widerFor, writeRpc } from '../src/rpc.js'
+import { procOf, PROC, readDeclarations, readRpc, widen, widerFor, writeRpc } from '../src/rpc.js'
 import { allHeaders, Cursor, Messages, packets, PACKET } from '../src/tds.js'
 import { readTokens, row, colMetadata, done, message, order, DONE, TOKEN, COLINFO } from '../src/tokens.js'
 import { rewriteReply } from '../src/results.js'
@@ -75,6 +75,19 @@ describe('RPC', () => {
     const wider = widerFor(five, 'abcdef')!
     expect(wider.layout).toBe('plp')
     expect(widen('@p0 nvarchar(5),@p1 decimal(10, 2)', declared, new Map([['@p0', wider]]))).toBe('@p0 nvarchar(max),@p1 decimal(10, 2)')
+  })
+
+  it('names a special or catalog procedure only in sys or dbo: in a schema of yours, it is a procedure of yours', () => {
+    const named = (proc: string) => procOf({ proc, options: 0, params: [] })
+    expect(named('sp_tables')).toBe('sp_tables')
+    expect(named('dbo.sp_tables')).toBe('sp_tables')
+    expect(named('[sys].[sp_executesql]')).toBe(PROC.EXECUTESQL)
+    expect(named('otherdb..sp_columns')).toBe('sp_columns')
+    expect(named('app.sp_tables')).toBe('app.sp_tables')
+    expect(named('[app].[sp_executesql]')).toBe('app.sp_executesql')
+    expect(named('otherdb.app.sp_tables')).toBe('otherdb.app.sp_tables')
+    // A linked server's.
+    expect(named('remote.master.dbo.sp_tables')).toBe('remote.master.dbo.sp_tables')
   })
 
   it('widens a number whose real value its parameter, sized to the fake, would cut', () => {

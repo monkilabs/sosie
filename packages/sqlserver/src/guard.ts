@@ -376,7 +376,9 @@ class Analyzer {
     const name = parts.at(-1) ?? ''
     if (body.immediate || !parts.length) return this.#refuse(unsupported('Sosie does not run a statement held in a string: send the statement itself.'))
     if (name === 'sp_executesql') return this.#refuse(unsupported('Sosie runs sp_executesql as drivers send it, as an RPC: send the statement and its parameters that way, or send the statement itself.'))
-    if (!CATALOG_PROCEDURES.has(name) || (parts.length > 1 && !['sys', 'dbo', 'master', ''].includes(parts.at(-2)!))) {
+    // SQL Server's own procedures, in sys or dbo or no schema (master..sp_tables): one in a schema of yours is yours, and
+    // one of four parts a linked server's.
+    if (!CATALOG_PROCEDURES.has(name) || parts.length > 3 || (parts.length > 1 && !['sys', 'dbo', ''].includes(parts.at(-2)!))) {
       return this.#refuse(unsupported(`Sosie runs no procedures but the catalog's (sp_tables, sp_columns): ${name || 'this one'} may change data, or read rows Sosie cannot see.`))
     }
     // A catalog procedure returns the schema, whatever its arguments are: parameters (@P0) read no row.

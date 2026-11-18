@@ -79,6 +79,10 @@ describe('the guard', () => {
     ['END CATCH', 50000],
     // Its second result set holds the paths of the database's files.
     ["EXEC sp_helpdb N'app'", 50000],
+    // A procedure of yours named like the catalog's, and a linked server's.
+    ['EXEC app.sp_tables', 50000],
+    ['EXEC app.master.sp_tables', 50000],
+    ['EXEC remote.master.dbo.sp_tables', 50000],
     ["EXEC ('SELECT 1')", 50000],
     ['EXEC sp_executesql N\'SELECT 1\'', 50000],
     ['SELECT @@SERVERNAME', 229],
