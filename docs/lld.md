@@ -1457,9 +1457,10 @@ Refused, 3906 for a write, 229 for what would show what Sosie must not, 50000 fo
 any other procedure; `EXEC` of a string, and `EXEC sp_executesql` in a batch; `PRINT`, `RAISERROR`, `THROW`; `WHILE`;
 cursors; `OUTPUT` and Always Encrypted parameters; `NO_BROWSETABLE`, `SHOWPLAN_*`, `STATISTICS XML` and `PROFILE`,
 `IDENTITY_INSERT`. Catalog: `sys.dm_*`, `sys.sql_logins` and the compatibility views of logins, credentials, linked
-servers (`sys.servers`), files (`sys.master_files`, `sys.database_files`, `sp_helpdb`), traces, audits, mirroring and availability
-replicas, `sysprocesses`, Query Store's text and plans, `msdb`, and a four-part name. Functions: `OPENROWSET`,
-`OPENQUERY`, `OPENDATASOURCE`, `OPENXML`, `fn_dblog` and its kind, `fn_get_audit_file`, `fn_xe_file_target_read_file`,
+servers (`sys.servers`, their logins, external data sources), files (`sys.master_files`, `sys.database_files`,
+`sysdatabases`, `sp_helpdb`), the listener's address (`sys.tcp_endpoints`), Service Broker's queue of messages, traces,
+event sessions' files, audits, mirroring and availability replicas, `sysprocesses`, Query Store's text and plans,
+`msdb`, and a four-part name. Functions: `OPENROWSET`, `OPENQUERY`, `OPENDATASOURCE`, `OPENXML`, `fn_dblog` and its kind, `fn_get_audit_file`, `fn_xe_file_target_read_file`,
 `fn_trace_gettable`; `SERVERPROPERTY` and `CONNECTIONPROPERTY` of the machine, the instance, a path or an address;
 `@@SERVERNAME`, `@@SERVICENAME`. A query that reads only the catalog, or no table, reads no data; one that calls a
 function not SQL Server's own, or reads a variable, does. The catalog is `sys` and `INFORMATION_SCHEMA`, in any

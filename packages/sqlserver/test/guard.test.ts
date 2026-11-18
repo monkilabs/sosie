@@ -88,6 +88,13 @@ describe('the guard', () => {
     ['SELECT * FROM sys.dm_exec_sql_text(0x01)', 229],
     ['SELECT * FROM sys.sql_logins', 229],
     ['SELECT * FROM sysprocesses', 229],
+    // Where the files are, the listener's address, other servers, and messages' bodies.
+    ['SELECT filename FROM sys.sysdatabases', 229],
+    ['SELECT ip_address, port FROM sys.tcp_endpoints', 229],
+    ['SELECT location FROM sys.external_data_sources', 229],
+    ['SELECT value FROM sys.server_event_session_fields', 229],
+    ['SELECT * FROM sys.linked_logins', 229],
+    ['SELECT message_body FROM sys.transmission_queue', 229],
     ['SELECT * FROM msdb.dbo.backupset', 229],
     ['USE msdb', 229],
     ["SELECT * FROM OPENROWSET('MSOLEDBSQL', 'Server=x', 'SELECT 1') AS t", 229],
