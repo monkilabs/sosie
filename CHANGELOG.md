@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.6.0, 18 November 2026
 
-SQL Server, a source of its own, and the eighth package: `@sosie/sqlserver`, which `@sosie/cli` depends on.
+SQL Server, a source of its own, and the eighth package: `@sosie/sqlserver`, which `@sosie/cli` depends on. All
+eight packages move to 0.6.0 together; nothing in `sosie.yml` needs changing.
 
 - SQL Server 2019 and later, from a `sqlserver://` connection string or the one a developer has: ADO.NET's, ODBC's,
   JDBC's and Prisma's are read as one. `sqlcmd`, ODBC Driver 18, JDBC, SqlClient and tedious read through it, with
