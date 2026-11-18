@@ -27,6 +27,15 @@ SQL Server, a source of its own, and the eighth package: `@sosie/sqlserver`, whi
   them in SQL Server's `datetime2`, can tell a row apart; now its digits are drawn but the last, which stays so a fake
   reads back as written where a source rounds it (SQL Server's `datetime`, to 1/300 of a second). A fraction of zeros
   stays, as does a time zone's offset. A value the store has faked before keeps that fake.
+- From trying Sosie on a Supabase app's database, whose CVs are JSON:
+  - Postgres: the terminal says at start how many tables row security hides rows of from the login. A Supabase table
+    has none until it is given a policy, so through a plain reader login every answer was empty, and nothing said why.
+  - Postgres: a path into a json column (`profile->'address'`, `#>`, and `->>`'s text) is faked as the column from
+    there, its word keys kept and its leaves the same fakes as in the whole document. Its keys came back faked.
+  - A month in text, `2019-03`, as JSON Resume writes a job's dates, is shifted by 1 to 12 months: it was faked by its
+    shape, into months that do not exist (`7408-37`).
+  - `sosie scan` no longer looks for a JSON key that looks like a word, nor for a value that is a name in the schema.
+    On clean output, it found 50 such "real values".
 - A release now publishes eight packages: the npm token must be allowed to publish `@sosie/sqlserver`, a new package.
 
 ## 0.5.0, 14 November 2026

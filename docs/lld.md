@@ -534,7 +534,7 @@ Values a query computes fake in `computed:<type>`.
 
 | Neutral type | Fake |
 | --- | --- |
-| `string` | The field's format when known. Otherwise shaped like the value: an email stays an email, a date a date, a number a number, a code like `AB-1234` keeps its letters, digits and punctuation, a word becomes a word of about the same length, and text becomes words of about the same length. Within `maxLength` |
+| `string` | The field's format when known. Otherwise shaped like the value: an email stays an email, a date a date, a month (`2019-03`, as JSON Resume writes a job's start) a month 1 to 12 months off, a number a number, a code like `AB-1234` keeps its letters, digits and punctuation, a word becomes a word of about the same length, and text becomes words of about the same length. Within `maxLength` |
 | `integer` | A number with the same sign and number of digits; never zero for a value that is not zero; within the column's size. A key whose digit range is crowded gets a digit more (see the store), and past the column's size, any number within it |
 | `decimal` | Digits replaced: the same sign, digits and scale. `NaN` and `Infinity` stay; other text is shaped |
 | `uuid` | A random UUID |
@@ -546,7 +546,7 @@ Values a query computes fake in `computed:<type>`.
 | `bits` | As many bits, each drawn; a single bit is a flag, flipped or not once per domain, as a boolean is |
 | `interval` | Another duration in the same form: each number another of as many digits, zero only for zero, minutes and seconds under 60 and the months of a year-month under 12; its words and signs kept, so every `IntervalStyle` reads it. `infinity` stays |
 | A value its type's faker cannot change (`''` or `-` in a field without a format, `NaN` and `Infinity` in a number, `infinity` in a date) | Itself: there is nothing in it to fake. A field with a format draws its fake whatever the value, so even `-` in a `city` becomes a city |
-| `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked. Anywhere, a key that holds a value the request turned back from a fake (`quillon`, `quillon_profile`, `QuillonSettings`) is faked, however it looks: an answer that holds it is echoing what the client sent |
+| `json` | Same structure; each leaf faked by its JSON type, in the domain `field.$path`, or the format its key names (an `email` leaf shares `format:email`). Keys: in a json column, a key that looks like a word (`city`, `createdAt`, `address_line1`) stays, and any other (a name, an email, a code) is faked. A path into a json column (Postgres's `->`, `#>`, and the text of `->>` and `#>>`, each with constants) is the column's JSON from there: the field, with `at`, the path, so its keys follow the column's rule and its leaves get the domains they have in the whole document. In JSON a query builds (`json_object_agg`, `jsonb_build_object`, `row_to_json`), a key stays only when it names a column or the client wrote it in the query; keys made from values are faked. Anywhere, a key that holds a value the request turned back from a fake (`quillon`, `quillon_profile`, `QuillonSettings`) is faked, however it looks: an answer that holds it is echoing what the client sent |
 | `array` | Each element faked in the field's domain |
 | `range` | Each bound faked as its type, in the field's domain, then put in order; brackets, infinite bounds and `empty` kept, so the database reads it as a range again |
 | `ip` | An address from a documentation range |
@@ -631,7 +631,10 @@ for: values of text, numbers, uuids, IP addresses and ObjectIds (never a boolean
 words and at least four characters, and numbers of six digits or more, so years, ports and line numbers are not
 findings. A line is one finding however many values it holds; a symbolic link inside a folder is not followed. A run that is also
 a fake is not counted: it is what the agent was shown. An API's own words in
-paths and query names are structure, and not looked for. A real value that is
+paths and query names are structure, and not looked for; nor is a JSON key a query built that looks like a word
+(`paid`, a key of `json_object_agg(status, n)`), nor a real value that is a name in the
+schema (a category `Data` beside a column `data`), which every transcript of a query on it holds. A key that is no
+word (an email, a name) is looked for. A real value that is
 a common word held as text rather than an enum (a role `admin`, a status
 `paid`) is looked for like any other, so a transcript that uses the word is a
 finding: such a field belongs under `pass` in `sosie.yml`, and a field that
@@ -813,6 +816,12 @@ a role's or database's defaults, are overridden: Sosie's come last. Start-up
 settings in the connection string itself (`statement_timeout`,
 `client_encoding`, `replication` and the like), which Postgres would apply
 after Sosie's, are dropped.
+
+At start, the terminal is told what of the login would mislead: a superuser or replication login, a login that can
+write, and row security. A table with row security on and no policy shows a login subject to it no row at all, which
+is a Supabase table's default (the app reads with a key that bypasses it): its answers would look like an empty
+table, so Sosie says how many such tables there are, and how many show only the rows their policies allow. The owner,
+a superuser and a login with `BYPASSRLS` are not subject to it.
 
 A simple query is run upstream with the extended protocol, statement by
 statement, executing at most `max-rows` + 1 rows: a result cut at the cap

@@ -18,6 +18,7 @@ export const catalog = buildCatalog({
     col(100, 3, 'status', 'mood', -1, { typtype: 'e', enumtypid: 900 }),
     col(100, 4, 'tags', '_text', -1, { typcategory: 'A', element: 'text', element_type: 'b' }),
     col(100, 5, 'code', 'short_code', -1, { typtype: 'd', basetype: 'varchar' }),
+    col(100, 6, 'profile', 'jsonb'),
     col(101, 1, 'id', 'int8'),
     col(101, 2, 'user_id', 'int4'),
     col(102, 1, 'id', 'int8'),

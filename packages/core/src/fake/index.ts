@@ -213,6 +213,8 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
   const names = new Set(
     schema.entities.flatMap((e) => [e.id, e.name, ...e.fields.flatMap((f) => [f.id, f.name, `${e.name}.${f.name}`])]),
   )
+  /** The schema's names lowercased, as sosie scan compares. */
+  const schemaNames = new Set([...names].map((n) => n.toLowerCase()))
   /** A name in the schema, or alias.column as Postgres hints it, when the client wrote that alias. */
   const named = (text: string, sent: string) => {
     if (names.has(text)) return true
@@ -248,7 +250,10 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
     }
     // Bytes can be large and are never looked up: derived, not stored.
     if (type.kind === 'bytes') return draw(store.seed(domain, real), 0)
-    return store.fake(domain, real, { unique: plan.unique, scannable: SCANNABLE.has(type.kind) && !plan.words }, draw)
+    // A value that is a name in the schema (a category `Data`, beside a column `data`) is in every transcript of a
+    // query on it: sosie scan does not look for it, or it would find it everywhere.
+    const scannable = SCANNABLE.has(type.kind) && !plan.words && !schemaNames.has(real.toLowerCase())
+    return store.fake(domain, real, { unique: plan.unique, scannable }, draw)
   }
 
   /**
@@ -256,12 +261,14 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
    * column, structure is a key that looks like a word. In JSON a query builds (json_object_agg,
    * jsonb_build_object, row_to_json), structure is a name in the schema or a key the client wrote.
    */
-  function* json(real: string, domain: string, structure: (key: string) => boolean): Steps<string> {
+  function* json(real: string, domain: string, structure: (key: string) => boolean, at = '', text = false): Steps<string> {
     let doc: unknown
     try {
       doc = JSON.parse(real)
     } catch {
-      return scalar(real, { kind: 'string' }, domain, { unique: false })
+      // A path's text (->>) of a string leaf is the string, unquoted.
+      if (!text) return scalar(real, { kind: 'string' }, domain, { unique: false })
+      doc = real
     }
     function* walk(node: unknown, path: string, key: string): Steps<unknown> {
       if (node === null) return null
@@ -274,7 +281,9 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
         const out: [string, unknown][] = []
         for (const [k, v] of Object.entries(node)) {
           if (structure(k)) out.push([k, yield* walk(v, `${path}.${k}`, k)])
-          else out.push([scalar(k, { kind: 'string' }, `${domain}.$${path}.*key`, { unique: true }), yield* walk(v, `${path}.*`, '')])
+          // A key faked as a value: one that looks like a word is the query's structure, which sosie scan does not
+          // look for in transcripts; any other (an email, a name) it does.
+          else out.push([scalar(k, { kind: 'string' }, `${domain}.$${path}.*key`, { unique: true, words: KEY_WORD.test(k) }), yield* walk(v, `${path}.*`, '')])
         }
         return Object.fromEntries(out)
       }
@@ -290,7 +299,10 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
       if (typeof node === 'boolean') return flips(leafDomain) ? !node : node
       return null
     }
-    return JSON.stringify(yield* walk(doc, '', ''))
+    // From where the value is in its document: a path's leaves get the domains, and the formats their keys name, that
+    // they have in the whole document.
+    const out = yield* walk(doc, at, /([^.[\]]+)(?:\[\])*$/.exec(at)?.[1] ?? '')
+    return text && typeof out === 'string' ? out : JSON.stringify(out)
   }
 
   function* fake(
@@ -316,7 +328,7 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
         return at >= 0 ? labels[at]! : new Random(store.seed(domain, value)).pick(labels)
       }
       case 'json':
-        return yield* json(value, domain, structure)
+        return yield* json(value, domain, structure, type.at, type.text)
       case 'bits':
         // One bit is a flag: flipped or not, once per domain, as a boolean is, so two values never share a fake.
         return value === '0' || value === '1' ? flip(value, domain) : scalar(value, type, domain, plan)
@@ -371,7 +383,9 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
       if (shown !== undefined) return shown
       return yield* fake(value, field.type, `computed:${field.type.kind}`, { unique: false }, (k) => names.has(k) && !echoed(scope, k))
     }
-    const out = yield* fake(value, plan.type ?? field.type, plan.domain, plan, (k) => (KEY_WORD.test(k) || names.has(k)) && !echoed(scope, k))
+    // A path into a json field says where its value is: faked in the field's domain, from there.
+    const type = field.type.kind === 'json' && (field.type.at || field.type.text) ? field.type : (plan.type ?? field.type)
+    const out = yield* fake(value, type, plan.domain, plan, (k) => (KEY_WORD.test(k) || names.has(k)) && !echoed(scope, k))
     // A domain shared by fields of different lengths may hold a longer fake than this field takes.
     const max = field.type.kind === 'string' ? field.type.maxLength : undefined
     return max && typeof out === 'string' && out.length > max ? out.slice(0, max) : out

@@ -161,6 +161,38 @@ describe('fakes by type', async () => {
     expect(faker.computed('2025-03-14 09:26:53.5891234+05:30', { kind: 'datetime' })).toMatch(/\.\d{7}\+05:30$/)
   })
 
+  it('months as JSON Resume writes them, YYYY-MM: shifted by whole months, still a month', async () => {
+    const { faker } = await serve()
+    const months = (text: string) => Number(text.slice(0, 4)) * 12 + Number(text.slice(5, 7))
+    for (const real of ['2019-03', '2015-12', '2020-01', '1999-07']) {
+      const fake = faker.computed(real, { kind: 'string' }) as string
+      expect(fake).toMatch(/^\d{4}-(0[1-9]|1[0-2])$/)
+      expect(fake).not.toBe(real)
+      expect(Math.abs(months(fake) - months(real))).toBeLessThanOrEqual(12)
+    }
+    // As a CV's work history holds them, in a json column; a month that is none stays shaped.
+    const profile: Field = { id: 'users.profile', name: 'profile', type: { kind: 'json' } }
+    const work = JSON.parse(faker.value('{"startDate": "2019-03", "endDate": "2023-11"}', profile) as string)
+    expect(work.startDate).toMatch(/^\d{4}-(0[1-9]|1[0-2])$/)
+    expect(work.endDate).toMatch(/^\d{4}-(0[1-9]|1[0-2])$/)
+    expect(faker.computed('2019-13', { kind: 'string' })).toMatch(/^\d{4}-\d{2}$/)
+  })
+
+  it('looks in transcripts for real values, not for structure: no key that looks like a word, no name in the schema', async () => {
+    const { faker, store } = await serve()
+    // A key a query built: a word is the query's structure, an email is a value.
+    faker.computed('{"label": "Quillon", "quill.vantablack@canary-mail.test": 1}', { kind: 'json' })
+    const city = data.schema.entities[0]!.fields.find((f) => f.name === 'city')!
+    // A real value that is a table's name, which any transcript of a query on it holds.
+    faker.value('Orders', city)
+    faker.value('Vantaville', city)
+    const index = store.scanIndex()
+    expect(index.find('label')).toBeUndefined()
+    expect(index.find('quill.vantablack@canary-mail.test')).toBeDefined()
+    expect(index.find('orders')).toBeUndefined()
+    expect(index.find('vantaville')).toBeDefined()
+  })
+
   it('json: the same structure, every leaf faked', () => {
     for (const [real, fake] of pairs('profile')) {
       const r = JSON.parse(real as string)

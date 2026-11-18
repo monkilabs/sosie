@@ -679,6 +679,10 @@ class Analyzer {
     // "public"."users"."role"::text, as Prisma selects enums: Postgres reports a computed column, but its values
     // are the field's. Only a column named in full, of a table named in full with no alias: anything shorter
     // could mean another column (search_path, an alias's column list), and the field's rules would apply to it.
+    // A path into a json column (profile->'address', profile #> '{work,0}', profile->>'nickname'): the column's
+    // document from there, faked as the whole is, its word keys kept and its leaves the same fakes.
+    const path = this.#jsonPath(value, scope)
+    if (path) return path
     const names = value?.TypeCast ? column(value)?.map((f: Node) => f.String?.sval as string | undefined) : undefined
     if (names?.length === 3 && names.every(Boolean)) {
       const [schema, table, name] = names as [string, string, string]
@@ -689,6 +693,29 @@ class Analyzer {
       }
     }
     return 'other'
+  }
+
+  /**
+   * A json column read along a path of constants: its field, with the path where the value is in the column's
+   * document. `->>` and `#>>` give the path's text. Anything else (a parameter, a computed key) is not a path.
+   */
+  #jsonPath(value: Node | undefined, scope: Scope): Field | undefined {
+    const expr = value?.A_Expr
+    if (expr?.kind !== 'AEXPR_OP') return undefined
+    const op = (expr.name ?? []).map((n: Node) => n.String?.sval).join('')
+    if (!['->', '->>', '#>', '#>>'].includes(op)) return undefined
+    let base: Field | undefined
+    if (expr.lexpr?.ColumnRef) {
+      const near = this.#resolve(expr.lexpr.ColumnRef.fields ?? [], scope)
+      if (near && near !== 'catalog' && near.type.kind === 'json' && !near.type.at) base = near
+    } else {
+      const inner = this.#jsonPath(expr.lexpr, scope)
+      if (inner?.type.kind === 'json' && !inner.type.text) base = inner
+    }
+    if (!base || base.type.kind !== 'json') return undefined
+    const step = jsonStep(op, expr.rexpr)
+    if (step === undefined) return undefined
+    return { ...base, type: { kind: 'json', at: `${base.type.at ?? ''}${step}`, ...(op.endsWith('>>') && { text: true }) } }
   }
 
   #record(node: Node, near: Near, array: boolean): void {
@@ -756,4 +783,22 @@ function milliseconds(node: Node | undefined): number | undefined {
   if (!m) return undefined
   const unit = { us: 0.001, ms: 1, s: 1000, min: 60_000, h: 3_600_000, d: 86_400_000 }[m[2] ?? 'ms']!
   return Number(m[1]) * unit
+}
+
+/**
+ * One step of a json path as the core writes it: `.key` for an object's key, `[]` for an array's element. `->` takes
+ * one key or index; `#>` a text array of them ('{work,0,name}'), each a number as an index.
+ */
+function jsonStep(op: string, rexpr: Node | undefined): string | undefined {
+  const value = rexpr?.A_Const
+  if (!value || value.isnull) return undefined
+  if (op === '->' || op === '->>') {
+    if ('ival' in value) return '[]'
+    const key = value.sval?.sval
+    return typeof key === 'string' ? `.${key}` : undefined
+  }
+  const text = value.sval?.sval
+  if (typeof text !== 'string' || !/^\{[^"\\]*\}$/.test(text.trim())) return undefined
+  const items = text.trim().slice(1, -1).split(',').map((item) => item.trim()).filter(Boolean)
+  return items.map((item) => (/^-?\d+$/.test(item) ? '[]' : `.${item}`)).join('')
 }

@@ -237,6 +237,21 @@ describe('reading through Sosie', () => {
     expect(canariesIn(JSON.stringify([built, profiles]))).toEqual([])
   })
 
+  it('reads a path into a json column as the column: its keys stay, and its leaves are the column’s fakes', async () => {
+    // The whole column and paths into it, from one row: an id written in the query would be a fake's, turned back.
+    const [part] = await query(
+      "SELECT profile AS whole, profile->'address' AS address, profile #> '{address}' AS same, profile #> '{}' AS all, profile->>'nickname' AS nickname, profile->'address'->>'city' AS city FROM users WHERE profile->'address' IS NOT NULL ORDER BY id LIMIT 1",
+    )
+    const whole = { profile: part.whole }
+    expect(part.address).toEqual(whole.profile.address)
+    expect(part.same).toEqual(whole.profile.address)
+    // Keys that look like words, which a json column keeps, a path into it keeps too.
+    expect(Object.keys(part.all).sort()).toEqual(Object.keys(whole.profile).sort())
+    expect(part.nickname).toBe(whole.profile.nickname)
+    expect(part.city).toBe(whole.profile.address.city)
+    expect(canariesIn(JSON.stringify(part))).toEqual([])
+  })
+
   it('fakes what user-defined operators return', async () => {
     const [{ e }] = await query('SELECT 1 ### 2 AS e')
     expect(e).not.toBe('quill.vantablack@canary-mail.test')
@@ -395,6 +410,43 @@ describe('the guard', () => {
     }
     expect(sosie.warnings).toEqual([])
     await writer.close()
+  })
+
+  it('says when row security hides rows from its login, as a Supabase table with no policy hides them all', async () => {
+    const { default: Pg } = await import('pg')
+    const admin = new URL(inject('admin'))
+    const reader = decodeURIComponent(new URL(inject('upstream')).username)
+    const name = `sosie_rls_${process.pid}`
+    const server = new URL(admin.href)
+    server.pathname = '/postgres'
+    const root = new Pg.Client({ connectionString: server.href })
+    await root.connect()
+    await root.query(`CREATE DATABASE ${name}`)
+    const at = (user: URL) => Object.assign(new URL(user.href), { pathname: `/${name}` })
+    const owner = new Pg.Client({ connectionString: at(admin).href })
+    await owner.connect()
+    try {
+      await owner.query(`
+        CREATE TABLE profiles (id int); ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+        CREATE TABLE ai_calls (id int); ALTER TABLE ai_calls ENABLE ROW LEVEL SECURITY;
+        CREATE TABLE notes (id int); ALTER TABLE notes ENABLE ROW LEVEL SECURITY; CREATE POLICY mine ON notes USING (true);
+        CREATE TABLE countries (code text);
+        GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${reader};`)
+      const limited = await startSosie({ upstream: at(new URL(inject('upstream'))) })
+      expect(limited.warnings).toEqual([
+        'Row security hides every row of 2 tables from the login: they have no policy, as a Supabase table has none until it is given one. Give the login BYPASSRLS, or a policy that lets it read.',
+        "Row security shows the login only the rows its policies allow in 1 table: Sosie's answers leave the rest out.",
+      ])
+      await limited.close()
+      // A login that bypasses it, as the owner and a superuser do, sees every row.
+      const bypassing = await startSosie({ upstream: at(admin) })
+      expect(bypassing.warnings.filter((w) => w.startsWith('Row security'))).toEqual([])
+      await bypassing.close()
+    } finally {
+      await owner.end()
+      await root.query(`DROP DATABASE ${name} WITH (FORCE)`)
+      await root.end()
+    }
   })
 
   it('keeps no cursor past its transaction, whose query would run at COMMIT', async () => {

@@ -36,6 +36,15 @@ export const postgres: Source = {
         ...(catalog.writable
           ? [`The login can write to ${catalog.writable} ${catalog.writable === 1 ? 'table' : 'tables'}. Sosie's session is read-only, but a read-only login is safer.`]
           : []),
+        // Answers with no rows, or fewer, would look like the data: said once, here.
+        ...(catalog.rowSecurity.hidden
+          ? [
+              `Row security hides every row of ${tables(catalog.rowSecurity.hidden)} from the login: ${catalog.rowSecurity.hidden === 1 ? 'it has' : 'they have'} no policy, as a Supabase table has none until it is given one. Give the login BYPASSRLS, or a policy that lets it read.`,
+            ]
+          : []),
+        ...(catalog.rowSecurity.limited
+          ? [`Row security shows the login only the rows its policies allow in ${tables(catalog.rowSecurity.limited)}: Sosie's answers leave the rest out.`]
+          : []),
       ],
       serve: (listen, faker) =>
         startEndpoint(listen, database, {
@@ -50,6 +59,10 @@ export const postgres: Source = {
     }
   },
   tools: [queryTool],
+}
+
+function tables(n: number): string {
+  return `${n} ${n === 1 ? 'table' : 'tables'}`
 }
 
 export { parseArray, serializeArray } from './arrays.js'
