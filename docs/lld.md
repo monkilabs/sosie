@@ -597,6 +597,8 @@ CREATE TABLE value (
 ) WITHOUT ROWID;
 CREATE INDEX value_fake ON value (fake, domain);
 CREATE INDEX value_scan ON value (mac_ci) WHERE scannable = 1;
+-- Words a field's json document has for keys (`linkedin`), as scan compares them: structure, not looked for.
+CREATE TABLE word (mac_ci BLOB PRIMARY KEY) WITHOUT ROWID;
 ```
 
 - **Keys.** `~/.sosie/store/key` holds 32 random bytes, created on first start
@@ -633,8 +635,11 @@ findings. A line is one finding however many values it holds; a symbolic link in
 a fake is not counted: it is what the agent was shown. An API's own words in
 paths and query names are structure, and not looked for; nor is a JSON key a query built that looks like a word
 (`paid`, a key of `json_object_agg(status, n)`), nor a real value that is a name in the
-schema (a category `Data` beside a column `data`), which every transcript of a query on it holds. A key that is no
-word (an email, a name) is looked for. A real value that is
+schema (a category `Data` beside a column `data`), which every transcript of a query on it holds, nor one that is a
+word a field's json document has for a key (a network `LinkedIn`, beside a key `linkedin`), whichever Sosie met first:
+the store keeps those words' keyed hashes. A key of JSON a query built is the client's, and does not count. A key that
+is no word (an email, a name) is looked for. When Sosie starts with a field under `pass`, the values it was faked with
+before, in its own domain, are no longer looked for. A real value that is
 a common word held as text rather than an enum (a role `admin`, a status
 `paid`) is looked for like any other, so a transcript that uses the word is a
 finding: such a field belongs under `pass` in `sosie.yml`, and a field that

@@ -57,6 +57,10 @@ export class Store {
   readonly #insert: StatementSync
   readonly #byFake: StatementSync
   readonly #byFakeIn: StatementSync
+  readonly #word: StatementSync
+  readonly #unscan: StatementSync
+  /** Keys already kept as words this run: each is written once. */
+  readonly #words = new Set<string>()
 
   private constructor(readonly dir: string, db: DatabaseSync, key: Buffer) {
     this.#db = db
@@ -71,6 +75,8 @@ export class Store {
     )
     this.#byFake = db.prepare('SELECT sealed FROM value WHERE fake = ?')
     this.#byFakeIn = db.prepare('SELECT sealed FROM value WHERE fake = ? AND domain = ?')
+    this.#word = db.prepare('INSERT OR IGNORE INTO word (mac_ci) VALUES (?)')
+    this.#unscan = db.prepare('UPDATE value SET scannable = 0 WHERE domain = ? AND scannable = 1')
   }
 
   /** Open a store, creating its folder, key and tables on first use. Several Sosies may open one at once. */
@@ -112,6 +118,8 @@ export class Store {
       ) WITHOUT ROWID;
       CREATE INDEX IF NOT EXISTS value_fake ON value (fake, domain);
       CREATE INDEX IF NOT EXISTS value_scan ON value (mac_ci) WHERE scannable = 1;
+      -- Words a json document has for keys, by keyed hash: structure, which sosie scan does not look for.
+      CREATE TABLE IF NOT EXISTS word (mac_ci BLOB PRIMARY KEY) WITHOUT ROWID;
       COMMIT;
     `)
     // Readable by the owner only, like the key; the folder already is. Another Sosie may remove the WAL files meanwhile.
@@ -152,12 +160,30 @@ export class Store {
     return [...new Set(rows.map((r) => this.#unseal(r.sealed)))]
   }
 
+  /**
+   * A word a json document has for a key (`linkedin`): structure, in every transcript that shows the document. A real
+   * value that is the same word (a network `LinkedIn`) is not looked for, whichever was met first.
+   */
+  keyWord(key: string): void {
+    if (this.#words.has(key)) return
+    this.#words.add(key)
+    this.#word.run(this.#macCi(key))
+  }
+
+  /** Values of a domain no longer looked for: its field passes now, and shows them by the developer's choice. */
+  unscan(domain: string): void {
+    this.#unscan.run(domain)
+  }
+
   /** What `sosie scan` compares against: keyed hashes of distinctive real values, and every fake. */
   scanIndex(): ScanIndex {
+    const words = new Set<string>()
+    for (const row of this.#db.prepare('SELECT mac_ci FROM word').iterate()) words.add(Buffer.from((row as { mac_ci: Uint8Array }).mac_ci).toString('base64'))
     const reals = new Map<string, string>()
     for (const row of this.#db.prepare('SELECT mac_ci, domain FROM value WHERE scannable = 1').iterate()) {
       const { mac_ci, domain } = row as { mac_ci: Uint8Array; domain: string }
-      reals.set(Buffer.from(mac_ci).toString('base64'), domain)
+      const mac = Buffer.from(mac_ci).toString('base64')
+      if (!words.has(mac)) reals.set(mac, domain)
     }
     const fakes = new Set<string>()
     for (const row of this.#db.prepare('SELECT fake_ci FROM value').iterate()) fakes.add((row as { fake_ci: string }).fake_ci)

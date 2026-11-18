@@ -209,6 +209,9 @@ class Echoes {
 /** The core's Faker: every value a source returns goes through it, and every fake a client sends comes back through it. */
 export function createFaker({ schema, rules, store }: { schema: Schema; rules: Rules; store: Store }): Faker {
   const planOf = planner(schema, rules)
+  // A field that passes now shows its values by the developer's choice: those it was faked with before its rule, in
+  // its own domain, are no longer looked for in transcripts. A shared domain (format:email) is other fields' too.
+  for (const field of schema.entities.flatMap((e) => e.fields)) if (planOf(field).domain === null) store.unscan(field.id)
   /** Names of entities and fields: an error quoting one quotes structure, not a value. */
   const names = new Set(
     schema.entities.flatMap((e) => [e.id, e.name, ...e.fields.flatMap((f) => [f.id, f.name, `${e.name}.${f.name}`])]),
@@ -280,7 +283,12 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
       if (typeof node === 'object') {
         const out: [string, unknown][] = []
         for (const [k, v] of Object.entries(node)) {
-          if (structure(k)) out.push([k, yield* walk(v, `${path}.${k}`, k)])
+          if (structure(k)) {
+            // A field's document keyed by a word: structure every transcript of it shows. Not a key of JSON a query
+            // built, which the client may have written, or one word typed in a query would stop a value being looked for.
+            if (!domain.startsWith('computed:') && KEY_WORD.test(k)) store.keyWord(k)
+            out.push([k, yield* walk(v, `${path}.${k}`, k)])
+          }
           // A key faked as a value: one that looks like a word is the query's structure, which sosie scan does not
           // look for in transcripts; any other (an email, a name) it does.
           else out.push([scalar(k, { kind: 'string' }, `${domain}.$${path}.*key`, { unique: true, words: KEY_WORD.test(k) }), yield* walk(v, `${path}.*`, '')])

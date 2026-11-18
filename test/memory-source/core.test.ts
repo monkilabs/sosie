@@ -193,6 +193,25 @@ describe('fakes by type', async () => {
     expect(index.find('vantaville')).toBeDefined()
   })
 
+  it('looks in transcripts for no value a json document has for a key, nor one of a field that passes now', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'sosie-core-'))
+    const { faker, store } = await serve('', home)
+    const account = data.schema.entities[0]!.fields.find((f) => f.name === 'account')!
+    const profile = data.schema.entities[0]!.fields.find((f) => f.name === 'profile')!
+    // A value first, then a document that has the same word as a key, which every transcript of it shows.
+    faker.value('LinkedIn', account)
+    faker.value('{"linkedin": "https://www.linkedin.com/in/quillon"}', profile)
+    faker.value('Orrowmoorish', account)
+    expect(store.scanIndex().find('linkedin')).toBeUndefined()
+    expect(store.scanIndex().find('orrowmoorish')).toBeDefined()
+    // A key written in a query is the client's, not a document's: it stops no value being looked for.
+    faker.computed('{"orrowmoorish": 1}', { kind: 'json' }, `SELECT jsonb_build_object('orrowmoorish', 1)`)
+    expect(store.scanIndex().find('orrowmoorish')).toBeDefined()
+    // The field passes from now on: the values it was faked with before are not looked for.
+    const later = await serve('pass:\n  - users.account\n', home)
+    expect(later.store.scanIndex().find('orrowmoorish')).toBeUndefined()
+  })
+
   it('json: the same structure, every leaf faked', () => {
     for (const [real, fake] of pairs('profile')) {
       const r = JSON.parse(real as string)
