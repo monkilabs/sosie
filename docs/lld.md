@@ -1433,7 +1433,10 @@ default schema, `schema.table` in another. `HAS_PERMS_BY_NAME`, `IS_SRVROLEMEMBE
 
 A batch is parsed by sqlparser's T-SQL dialect. T-SQL needs no semicolon between statements and sqlparser reads none
 without one: where it stops at a word a statement starts with, the batch is read on from there. Anything else it cannot
-read is a syntax error, 102. Every statement is checked before any runs.
+read is a syntax error, 102. sqlparser also stops, without an error, at an END where a statement could end (`END TRY`,
+`END CATCH`, `END CONVERSATION`), where SQL Server reads on: so each piece is parsed with a last statement of Sosie's
+own, a `SELECT` of a mark made for that parse, and a parse that does not end with it is a syntax error too. Every
+statement is checked before any runs.
 
 Allowed: `SELECT` and `WITH`, without `INTO`, `FOR XML` or a hint that locks rows; `SET` of the session's options
 (`NOCOUNT`, the `ANSI_*` and `ARITH*` ones, `QUOTED_IDENTIFIER`, `TEXTSIZE`, `LANGUAGE`, `DATEFORMAT`, `LOCK_TIMEOUT`,

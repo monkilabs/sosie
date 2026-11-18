@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import * as sqlparser from '@guanmingchiu/sqlparser-ts'
 import type { Field } from '@sosie/core'
 import { LOCATION_PROPERTIES, NATIVE_FUNCTIONS, REFUSED_FUNCTIONS } from './functions.js'
@@ -15,9 +16,22 @@ export async function loadParser(): Promise<void> {
   dialect ??= new sqlparser.MsSqlDialect()
 }
 
+/**
+ * The statements of `text`, every one of them. sqlparser ends a list of statements, without an error, at an END where
+ * one could end (END TRY, END CATCH, END CONVERSATION): SQL Server reads on, and what follows would go to it unread. So
+ * a statement of Sosie's own goes last, with a mark the client cannot know, and a parse that does not reach it throws.
+ */
 function parse(text: string): Node[] {
   if (!dialect) throw new Error('The T-SQL parser is not loaded.')
-  return sqlparser.parse(text, dialect) as Node[]
+  const mark = `sosie:${randomUUID()}`
+  const stmts = sqlparser.parse(`${text}\n;SELECT '${mark}'`, dialect) as Node[]
+  const projection = stmts.at(-1)?.Query?.body?.Select?.projection
+  const last = projection?.length === 1 && projection[0]?.UnnamedExpr?.Value?.value?.SingleQuotedString === mark
+  const read = stmts.slice(0, -1)
+  if (!last || JSON.stringify(read).includes(mark)) {
+    throw new Error('sql parser error: Sosie reads no END TRY, END CATCH or END CONVERSATION, and would not see what follows it.')
+  }
+  return read
 }
 
 /** One statement of a batch, and where its text's lines and columns are in the batch. */
@@ -283,10 +297,14 @@ class Analyzer {
         return
       }
       case 'StartTransaction':
+        // BEGIN TRY and BEGIN CATCH, which sqlparser reads as BEGIN TRANSACTION.
+        if (body.modifier === 'Try' || body.modifier === 'Catch') return this.#refuse(unsupported('Sosie does not run TRY…CATCH: send the statements themselves.'))
         if ((body.statements ?? []).length) for (const inner of body.statements) this.#statement(inner)
         if ((body.modes ?? []).some((m: Node) => m.AccessMode === 'ReadWrite')) this.#refuse(WRITE)
         return
       case 'Commit':
+        if (body.modifier === 'Try' || body.modifier === 'Catch') return this.#refuse(unsupported('Sosie does not run TRY…CATCH: send the statements themselves.'))
+        return
       case 'Rollback':
         return
       case 'Declare':

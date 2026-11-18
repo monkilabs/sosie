@@ -203,4 +203,5 @@ precision, a `datetimeoffset` keeps its offset.
 - `FOR JSON` fakes its values by their type, not their column: an email is the same fake as in its column, a number is
   not.
 - A table named without its schema, where two schemas have one of that name, is read in the login's default schema.
-- T-SQL that sqlparser does not read is refused as a syntax error: `DELETE` without `FROM`, `WHILE`, `SAVE TRANSACTION`.
+- T-SQL that sqlparser does not read is refused as a syntax error: `DELETE` without `FROM`, `WHILE`, `SAVE TRANSACTION`,
+  `TRY…CATCH`, `END CONVERSATION`.

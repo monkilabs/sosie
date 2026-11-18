@@ -74,6 +74,9 @@ describe('the guard', () => {
     ['SELECT email INTO #t FROM users', 229],
     ['SELECT email FROM users WITH (XLOCK)', 229],
     ['EXEC dbo.purge_everything', 50000],
+    // BEGIN TRY, which sqlparser reads as BEGIN TRANSACTION.
+    ['BEGIN TRY', 50000],
+    ['END CATCH', 50000],
     // Its second result set holds the paths of the database's files.
     ["EXEC sp_helpdb N'app'", 50000],
     ["EXEC ('SELECT 1')", 50000],
@@ -119,6 +122,17 @@ describe('the guard', () => {
     // T-SQL's DELETE without FROM, which sqlparser does not read: refused all the same.
     expect(() => parseBatch('DELETE users')).toThrow()
     expect(() => parseBatch('WHILE 1 = 1 SELECT 1')).toThrow()
+  })
+
+  it('throws where sqlparser stops at an END before the batch does, rather than let the rest go unread', () => {
+    // sqlparser ends a list of statements at an END where one could end, without an error: SQL Server reads on.
+    expect(() => parseBatch('BEGIN TRY SELECT 1 END TRY BEGIN CATCH DELETE FROM users END CATCH')).toThrow()
+    expect(() => parseBatch('BEGIN TRY SELECT 1 END TRY BEGIN CATCH SELECT 1 END CATCH; SELECT UPPER(email) FROM users')).toThrow()
+    expect(() => parseBatch('DECLARE @h uniqueidentifier; SELECT 1 END CONVERSATION @h; DELETE FROM users')).toThrow()
+    // A mark of the client's cannot stand for Sosie's own.
+    expect(() => parseBatch("SELECT 'sosie:end' END CONVERSATION @h; DELETE FROM users")).toThrow()
+    // What sqlparser reads to its end is as before.
+    expect(parseBatch('SELECT CASE WHEN id = 1 THEN 1 END FROM users; IF 1 = 1 BEGIN SELECT 1; END').map((s) => Object.keys(s.stmt)[0])).toEqual(['Query', 'If'])
   })
 
   it('keeps each literal compared with a column, where it is in the text, N and all', () => {
