@@ -198,6 +198,10 @@ describe('the guard', () => {
     expect(check('USE master; SELECT name FROM sys.objects').catalogOnly).toBe(true)
   })
 
+  it('reads a function of yours named count as one of yours, not a count: SQL Server’s takes no schema', () => {
+    expect(check('SELECT dbo.count(id), COUNT(*) FROM users').shapes).toEqual([{ targets: ['other', 'count'], json: false }])
+  })
+
   it('says what each result set is: a count, a literal, FOR JSON; none for a SELECT that sets a variable', () => {
     const shapes = check("SELECT COUNT(*), 'x', email FROM users; SELECT @x = email FROM users; SELECT id FROM users FOR JSON PATH").shapes
     expect(shapes).toEqual([

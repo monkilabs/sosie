@@ -761,7 +761,9 @@ function target(item: Node): Target {
   if (!expr) return 'other'
   if (unwrapLiteral(expr)) return 'constant'
   const fn = expr.Function
-  const name = String(fn?.name?.at(-1)?.Identifier?.value ?? fn?.name?.at(-1)?.value ?? '').toLowerCase()
+  // SQL Server's COUNT takes no schema: dbo.count(x) is a function of yours, whatever it returns.
+  if (fn?.name?.length !== 1) return 'other'
+  const name = String(fn.name[0]?.Identifier?.value ?? fn.name[0]?.value ?? '').toLowerCase()
   if (name === 'count' || name === 'count_big') return 'count'
   return 'other'
 }
