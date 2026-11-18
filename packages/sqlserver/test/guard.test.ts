@@ -98,6 +98,9 @@ describe('the guard', () => {
     ['SET NO_BROWSETABLE OFF', 229],
     ['SET SHOWPLAN_XML ON', 229],
     ['SET STATISTICS XML ON', 229],
+    // A statement they skip gives no result set, and no error: the sets after it would not be the ones Sosie counted.
+    ['SET NOEXEC ON', 50000],
+    ['SET PARSEONLY ON', 50000],
     ['SET ROWCOUNT 0', 229],
     ['SET ROWCOUNT 5000', 229],
     ['SET IDENTITY_INSERT users ON', 50000],

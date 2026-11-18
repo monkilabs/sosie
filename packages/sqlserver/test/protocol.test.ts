@@ -178,4 +178,21 @@ describe('a reply as the client gets it', () => {
     const value = [...readTokens(rewritten.payload)].find((t) => t.kind === 'row')
     expect(value?.kind === 'row' && value.values[0]!.bytes!.toString('utf16le')).not.toBe('kim@x.net')
   })
+
+  it('reads no result set as the guard said once a statement failed: the sets after it may not be the ones it counted', () => {
+    // SELECT 1 AS n FROM denied; SELECT salary + 0 AS n FROM emp: the first fails, and the second's set comes first.
+    const n = entry('n', int)
+    const counted = { catalogOnly: false, consts: [], params: new Map(), shapes: [{ targets: ['constant' as const], json: false }, { targets: ['other' as const], json: false }] }
+    const payload = Buffer.concat([
+      message({ error: true, number: 229, state: 5, severity: 14, text: "The SELECT permission was denied on the object 'denied'.", server: 'db1', proc: '', line: 1 }),
+      done(DONE.ERROR | DONE.MORE),
+      colMetadata([n]),
+      Buffer.from([TOKEN.COLINFO, 3, 0, 1, 0, COLINFO.EXPRESSION]),
+      row([n], [{ bytes: Buffer.from([0x40, 0xe2, 0x01, 0x00]) }]),
+      done(DONE.COUNT, 1),
+    ])
+    const rewritten = rewriteReply(payload, { analyses: [counted], sent: [undefined], handles: [new Set()] }, { catalog, faker, maxRows: 100, database: 'app' })
+    const value = [...readTokens(rewritten.payload)].find((t) => t.kind === 'row')
+    expect(value?.kind === 'row' && value.values[0]!.bytes?.readInt32LE()).not.toBe(123456)
+  })
 })

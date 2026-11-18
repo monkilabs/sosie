@@ -186,12 +186,16 @@ const REFUSED_CATALOG: Record<string, string> = {
   query_store_runtime_stats: QUERIES,
 }
 
-/** SET options a session may set: none of them changes data, or shows a plan with the real values Sosie put in a query. */
+/**
+ * SET options a session may set: none of them changes data, or shows a plan with the real values Sosie put in a query.
+ * Not NOEXEC or PARSEONLY: a statement they skip gives no result set and no error, so the sets after it would not be
+ * the ones the guard counted.
+ */
 const SESSION_OPTIONS = new Set([
   'NOCOUNT', 'ANSI_NULLS', 'ANSI_NULL_DFLT_ON', 'ANSI_NULL_DFLT_OFF', 'ANSI_PADDING', 'ANSI_WARNINGS', 'ANSI_DEFAULTS', 'ARITHABORT',
   'ARITHIGNORE', 'CONCAT_NULL_YIELDS_NULL', 'NUMERIC_ROUNDABORT', 'QUOTED_IDENTIFIER', 'CURSOR_CLOSE_ON_COMMIT', 'IMPLICIT_TRANSACTIONS',
   'XACT_ABORT', 'TEXTSIZE', 'LANGUAGE', 'DATEFORMAT', 'DATEFIRST', 'DEADLOCK_PRIORITY', 'LOCK_TIMEOUT', 'QUERY_GOVERNOR_COST_LIMIT',
-  'FMTONLY', 'NOEXEC', 'PARSEONLY', 'FORCEPLAN', 'CONCAT_NULL_YIELDS_NULL', 'ROWCOUNT',
+  'FMTONLY', 'FORCEPLAN', 'CONCAT_NULL_YIELDS_NULL', 'ROWCOUNT',
 ])
 
 /**

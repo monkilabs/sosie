@@ -88,6 +88,12 @@ export function rewriteReply(payload: Buffer, request: Request, ctx: ReplyContex
   const handles = new Map<number, number>()
   let call = 0
   let shapeAt = 0
+  /**
+   * The guard counted the result sets its statements give, in order. A statement that fails gives none, and the sets
+   * after it would take the shapes of the ones before: a computed value read as a count or a literal. So once a call
+   * has an error, its sets are faked as though the guard had said nothing.
+   */
+  let lost = false
   let database: string | undefined
   let set: ResultSet | undefined
   let columns = previous
@@ -99,7 +105,7 @@ export function rewriteReply(payload: Buffer, request: Request, ctx: ReplyContex
     set.started = true
     const hidden = new Set((set.infos ?? []).filter((i) => i.status & COLINFO.HIDDEN).map((i) => i.column - 1))
     set.visible = set.columns.map((_, i) => i).filter((i) => !hidden.has(i))
-    const shape = analysis().shapes?.[shapeAt++]
+    const shape = lost ? undefined : analysis().shapes?.[shapeAt++]
     const targets = expand(shape?.targets, set.visible.length)
     set.plans = set.visible.map((i, at) => plan(set!, i, targets?.[at], shape?.json ?? false, analysis(), ctx, database ?? ctx.database))
     // A column faked as null says it may be null, whatever the table says.
@@ -186,9 +192,11 @@ export function rewriteReply(payload: Buffer, request: Request, ctx: ReplyContex
         if (t.token === TOKEN.DONEPROC) {
           call++
           shapeAt = 0
+          lost = false
         }
         break
       case 'message':
+        if (t.error) lost = true
         out.push(
           message({
             ...t,

@@ -1485,7 +1485,9 @@ that has a table of that name, or the login's default schema's. Browse mode's hi
 metadata, every row and ORDER (an ORDER left empty is dropped), and TABNAME and COLINFO with them. A column of the
 catalog (`sys`, `INFORMATION_SCHEMA`) passes, and one of a table Sosie cannot find is faked by its type: from `master`, a
 view of yours names its table as its text wrote it (`dbo.users`), which is no table of master's; an expression is faked by its type, unless the batch reads no data, or the guard read it as a
-`COUNT(…)` or a literal in the select list, matched to the result sets the batch gives in order. A `FOR JSON` result's
+`COUNT(…)` or a literal in the select list, matched to the result sets the batch gives in order. A statement that fails
+gives no result set, and those after it would take the places of the ones before: after an error, a call's expressions
+are faked by their type. `NOEXEC` and `PARSEONLY`, which skip statements without an error, are refused. A `FOR JSON` result's
 rows, at most 2,033 characters each, are joined, faked as one JSON value, and cut again.
 
 A value is faked as text and written back in its type: integers within their size (a `tinyint` from 0 to 255),
