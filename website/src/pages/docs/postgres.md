@@ -120,7 +120,8 @@ SELECT o.id, o.total FROM orders o JOIN users u ON u.id = o.user_id WHERE u.emai
 | `count(…)` over rows from tables | Unchanged: it holds no value from a row |
 | A constant the client wrote | Unchanged |
 | A system catalog's column | Unchanged |
-| Anything else a query computes (`length(email)`, `max(id)`, `data->>'city'`) | A fake by its type |
+| A path into a json column (`profile->'address'`, `profile #> '{work,0}'`, `profile->>'city'`) | The column's JSON from there: its word keys kept, its leaves the fakes they are in the whole column |
+| Anything else a query computes (`length(email)`, `max(id)`, `profile->$1`) | A fake by its type |
 
 ## Errors
 

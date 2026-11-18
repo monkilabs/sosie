@@ -161,6 +161,21 @@ describe('the guard', () => {
     expect(check("SELECT 'sad'::mood").catalogOnly).toBe(false)
   })
 
+  it('reads a path into a json column as the column, from where the path leads', () => {
+    const at = (sql: string) => check(sql).targets?.map((t) => (typeof t === 'object' && t.type.kind === 'json' ? [t.id, t.type.at, !!t.type.text] : t))
+    expect(at("SELECT profile->'address', u.profile->'work'->0->'name', profile #> '{work,0,name}' FROM users u")).toEqual([
+      ['users.profile', '.address', false],
+      ['users.profile', '.work[].name', false],
+      ['users.profile', '.work[].name', false],
+    ])
+    expect(at("SELECT profile->>'nickname', profile #>> '{address,city}' FROM users")).toEqual([
+      ['users.profile', '.nickname', true],
+      ['users.profile', '.address.city', true],
+    ])
+    // A key given by a parameter, or the text of a path read on, is no path Sosie can follow: computed.
+    expect(at("SELECT profile->$1, (profile->>'address')::jsonb->'city', email->'x' FROM users")).toEqual(['other', 'other', 'other'])
+  })
+
   it('reads the select list, to tell count(…) from values', () => {
     expect(check('SELECT count(*), u.*, id + 1 FROM users u').targets).toEqual(['count', 'star', 'other'])
     // A set operation's columns have no source Postgres reports, and its arms differ: no select list speaks for them.

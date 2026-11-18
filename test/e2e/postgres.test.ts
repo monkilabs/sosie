@@ -237,6 +237,20 @@ describe('reading through Sosie', () => {
     expect(canariesIn(JSON.stringify([built, profiles]))).toEqual([])
   })
 
+  it('reads a path into a json column as the column: its keys stay, and its leaves are the column’s fakes', async () => {
+    const [whole] = await query('SELECT profile FROM users WHERE id = 1')
+    const [part] = await query(
+      "SELECT profile->'address' AS address, profile #> '{address}' AS same, profile #> '{}' AS all, profile->>'nickname' AS nickname, profile->'address'->>'city' AS city FROM users WHERE id = 1",
+    )
+    expect(part.address).toEqual(whole.profile.address)
+    expect(part.same).toEqual(whole.profile.address)
+    // Keys that look like words, which a json column keeps, a path into it keeps too.
+    expect(Object.keys(part.all).sort()).toEqual(Object.keys(whole.profile).sort())
+    expect(part.nickname).toBe(whole.profile.nickname)
+    expect(part.city).toBe(whole.profile.address.city)
+    expect(canariesIn(JSON.stringify(part))).toEqual([])
+  })
+
   it('fakes what user-defined operators return', async () => {
     const [{ e }] = await query('SELECT 1 ### 2 AS e')
     expect(e).not.toBe('quill.vantablack@canary-mail.test')

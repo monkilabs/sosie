@@ -55,7 +55,12 @@ export type FieldType =
   | { kind: 'bits'; length?: number }
   /** objectid: MongoDB's 12-byte id, as 24 hex digits. */
   | { kind: 'uuid' | 'bytes' | 'ip' | 'objectid' }
-  | { kind: 'json' }
+  /**
+   * JSON. `at`, a path into a json field's document where this value is (`.address`, `.work[]`, `.work[].name`), as a
+   * source reads `profile->'address'`: its keys and leaves are faked as they are in the whole document. `text`, the
+   * value is that path's text (`->>`), a string leaf unquoted.
+   */
+  | { kind: 'json'; at?: string; text?: boolean }
   | { kind: 'array'; of: FieldType }
   /** A range of a type, and its bounds of that type: Postgres's ranges and multiranges. Each bound is faked as `of`. */
   | { kind: 'range'; of: FieldType }
