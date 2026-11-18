@@ -10,7 +10,7 @@ import { RefusedPath, RestUpstream } from './upstream.js'
  * says so, which a singular name under a record never does.
  */
 const WHY_UNMET =
-  'A rule not known yet applies once an answer\'s path names its entity: /users and /users/87 name user. Under a record, only a list under a plural name does (/spaces/87/accounts); /spaces/87/account and /spaces/87/accounts/5 name none, so no rule applies to their answers. Give the source a schema, the API\'s OpenAPI document, to name every field from it.'
+  'A rule not known yet applies once an answer\'s path names its entity: /users and /users/87 name user. Under a record, only a list under a plural name does (/teams/87/members); /teams/87/billing and /teams/87/members/5 name none, so no rule applies to their answers. Give the source a schema, the API\'s OpenAPI document, to name every field from it.'
 
 /** Where an API usually serves its OpenAPI document, relative to its base. */
 const DISCOVER = ['openapi.json', 'openapi.yaml', 'swagger.json', 'v3/api-docs', 'api-docs', 'docs/openapi.json']

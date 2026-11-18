@@ -28,7 +28,7 @@ eight packages move to 0.6.0 together; nothing in `sosie.yml` needs changing.
   them in SQL Server's `datetime2`, can tell a row apart; now its digits are drawn but the last, which stays so a fake
   reads back as written where a source rounds it (SQL Server's `datetime`, to 1/300 of a second). A fraction of zeros
   stays, as does a time zone's offset. A value the store has faked before keeps that fake.
-- From trying Sosie on a Supabase app's database, whose CVs are JSON:
+- From a trial in front of a Postgres database on Supabase, its documents in json columns:
   - Postgres: the terminal says at start how many tables row security hides rows of from the login. A Supabase table
     has none until it is given a policy, so through a plain reader login every answer was empty, and nothing said why.
   - Postgres: a path into a json column (`profile->'address'`, `#>`, and `->>`'s text) is faked as the column from
@@ -69,7 +69,7 @@ seven packages move to 0.5.0 together; nothing in `sosie.yml` needs changing.
   nothing is asked, as before.
 - REST: without a document, a rule for a field not met yet said only that it
   applies once Sosie meets it, though under a record a singular name
-  (`/spaces/87/account`) names no entity, so it may never apply. The banner
+  (`/teams/87/billing`) names no entity, so it may never apply. The banner
   says why once, after such rules, for each source that holds one: an
   answer's path must name the entity, which under a record only a list under a
   plural name does; and that a `schema` names every field from the document.

@@ -32,8 +32,8 @@ export interface Catalog {
   /** Whether the login is a superuser or may replicate. */
   admin: boolean
   /**
-   * Tables whose row security the login is subject to: `hidden`, with no policy at all, of which it sees no row (a
-   * Supabase table's default); `limited`, with policies, of which it sees the rows they allow.
+   * Tables whose row security the login is subject to: `hidden`, with no policy at all, of which it sees no row (row
+   * security on and no policy); `limited`, with policies, of which it sees the rows they allow.
    */
   rowSecurity: { hidden: number; limited: number }
 }
