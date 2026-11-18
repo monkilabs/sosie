@@ -343,7 +343,7 @@ export class Session {
       case PROC.PREPARE:
         return this.#statementCall(call, params, { handle: 0, declarations: 1, statement: 2, values: params.length })
       case PROC.EXECUTE: {
-        const handle = params[0]?.value.bytes?.readInt32LE()
+        const handle = handleOf(params[0])
         const prepared = handle === undefined ? undefined : this.#prepared.get(handle)
         if (!prepared) return { refusal: { number: 8179, message: `Could not find prepared statement with handle ${handle ?? '(none)'}: Sosie checks each statement it runs, so prepare it through Sosie.` } }
         const scope = this.ctx.faker.request([prepared.text, ...valueTexts(params.slice(1))].join('\n'), prepared.scope)
@@ -362,7 +362,7 @@ export class Session {
         }
       }
       case PROC.UNPREPARE: {
-        const handle = params[0]?.value.bytes?.readInt32LE()
+        const handle = handleOf(params[0])
         if (handle !== undefined) this.#prepared.delete(handle)
         return { call, analysis: NO_ANALYSIS, sent: undefined, handles: new Set() }
       }
@@ -444,7 +444,9 @@ export class Session {
   }
 
   async #transaction(payload: Buffer, prefix: Buffer[]): Promise<void> {
-    const kind = payload.readUInt16LE(headersEnd(payload))
+    const at = headersEnd(payload)
+    if (payload.length < at + 2) throw new TruncatedError()
+    const kind = payload.readUInt16LE(at)
     if (!TRANSACTION_REQUESTS.has(kind)) return this.#refused(prefix, { number: 50000, message: 'Sosie runs no distributed transactions.' })
     await this.#send(PACKET.TRANSACTION, payload, { analyses: [NO_ANALYSIS], sent: [undefined], handles: [new Set()] }, prefix)
   }
@@ -498,6 +500,11 @@ export class Session {
     if (!this.#io.writable) return
     this.#io.write(packets(PACKET.REPLY, payload, this.#packetSize))
   }
+}
+
+/** A statement's handle, an int: a parameter of any other length holds none. */
+function handleOf(p: Param | undefined): number | undefined {
+  return p?.value.bytes?.length === 4 ? p.value.bytes.readInt32LE() : undefined
 }
 
 /** The database a reply leaves the session in, where it changes it. */

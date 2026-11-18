@@ -273,6 +273,23 @@ describe('parameters', () => {
     expect(up.rpcs.length).toBe(before)
   })
 
+  it('answer a handle no driver sends, one byte long, with an error, and go on', async () => {
+    const up = await standIn()
+    const { socket, messages } = await raw(await sosie(up.port))
+    const tinyint = readTypeInfo(new Cursor(Buffer.from([TYPE.INTN, 1])))
+    const call = (proc: number) => packets(PACKET.RPC, writeRpc({ headers: allHeaders(), calls: [{ proc, options: 0, params: [{ name: '', status: 0, type: tinyint, value: { bytes: Buffer.from([7]) } }] }], separators: [] }))
+    // sp_execute of no statement Sosie prepared is refused; sp_unprepare of one goes upstream, which answers it.
+    socket.write(call(PROC.EXECUTE))
+    expect([...readTokens((await messages.next())!.payload)].some((t) => t.kind === 'message' && t.error && t.number === 8179)).toBe(true)
+    socket.write(call(PROC.UNPREPARE))
+    expect(await messages.next()).not.toBeNull()
+    // A transaction request too short to say what it is.
+    socket.write(packets(PACKET.TRANSACTION, allHeaders()))
+    expect([...readTokens((await messages.next())!.payload)].some((t) => t.kind === 'message' && t.error)).toBe(true)
+    socket.write(packets(PACKET.BATCH, batch('SELECT 1 AS one')))
+    expect(dones(await messages.next())).toEqual([DONE.FINAL])
+  })
+
   it('read text, ntext and image as an RPC sends them, and turn them back', async () => {
     const up = await standIn()
     const c = await tedious(await sosie(up.port))
