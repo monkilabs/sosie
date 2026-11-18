@@ -5,13 +5,13 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { endpointCertificate } from '../src/certificate.js'
 import { FEATURE, login7, readLogin7, TDS } from '../src/login.js'
-import { fits, maxOf, readDeclarations, readRpc, widen, writeRpc } from '../src/rpc.js'
+import { readDeclarations, readRpc, widen, widerFor, writeRpc } from '../src/rpc.js'
 import { allHeaders, Cursor, Messages, packets, PACKET } from '../src/tds.js'
 import { readTokens, row, colMetadata, done, message, order, DONE, TOKEN, COLINFO } from '../src/tokens.js'
 import { rewriteReply } from '../src/results.js'
 import { buildCatalog } from '../src/schema.js'
 import type { Faker } from '@sosie/core'
-import { readTypeInfo, TYPE } from '../src/types.js'
+import { bytesOf, readTypeInfo, textOf, TYPE } from '../src/types.js'
 import { PassThrough } from 'node:stream'
 
 describe('packets and messages', () => {
@@ -70,11 +70,27 @@ describe('RPC', () => {
       ['@p1', 'decimal(10, 2)', false],
       ['@p2', 'int', true],
     ])
-    expect(widen('@p0 nvarchar(5),@p1 decimal(10, 2)', declared, new Set(['@p0']))).toBe('@p0 nvarchar(max),@p1 decimal(10, 2)')
     const five = readTypeInfo(new Cursor(Buffer.from([TYPE.NVARCHAR, 10, 0, 0x09, 0x04, 0xd0, 0x00, 0x34])))
-    expect(fits(five, 'abcde')).toBe(true)
-    expect(fits(five, 'abcdef')).toBe(false)
-    expect(maxOf(five).layout).toBe('plp')
+    expect(widerFor(five, 'abcde')).toBeUndefined()
+    const wider = widerFor(five, 'abcdef')!
+    expect(wider.layout).toBe('plp')
+    expect(widen('@p0 nvarchar(5),@p1 decimal(10, 2)', declared, new Map([['@p0', wider]]))).toBe('@p0 nvarchar(max),@p1 decimal(10, 2)')
+  })
+
+  it('widens a number whose real value its parameter, sized to the fake, would cut', () => {
+    // SqlClient sizes a decimal to its value: 12.5 is decimal(3,1), which would cut 1234.56 to 99.9.
+    const small = readTypeInfo(new Cursor(Buffer.from([TYPE.DECIMALN, 5, 3, 1])))
+    expect(widerFor(small, '12.5')).toBeUndefined()
+    const decimal = widerFor(small, '1234.56')!
+    expect([decimal.precision, decimal.scale]).toEqual([38, 2])
+    expect(textOf(decimal, bytesOf(decimal, '1234.56')!)).toBe('1234.56')
+    expect(widen('@p0 decimal(3,1)', readDeclarations('@p0 decimal(3,1)'), new Map([['@p0', decimal]]))).toBe('@p0 decimal(38,2)')
+    // An int compared with a bigint column: a real value past an int's range goes as a bigint.
+    const int = readTypeInfo(new Cursor(Buffer.from([TYPE.INTN, 4])))
+    expect(widerFor(int, '2147483647')).toBeUndefined()
+    const big = widerFor(int, '9000000000')!
+    expect(textOf(big, bytesOf(big, '9000000000')!)).toBe('9000000000')
+    expect(widen('@p0 int', readDeclarations('@p0 int'), new Map([['@p0', big]]))).toBe('@p0 bigint')
   })
 })
 

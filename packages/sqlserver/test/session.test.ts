@@ -5,7 +5,9 @@ import type { Faker } from '@sosie/core'
 import { loadParser } from '../src/guard.js'
 import { ENCRYPT, login7, OPTION, prelogin, versionBytes } from '../src/login.js'
 import { buildCatalog } from '../src/schema.js'
+import { readRpc, textParam, type Call } from '../src/rpc.js'
 import { Session } from '../src/session.js'
+import { textOf } from '../src/types.js'
 import { allHeaders, Messages, PACKET, packets, STATUS, type Message } from '../src/tds.js'
 import { DONE, done, ENV, envBytes, envText, loginAck, message, readTokens, TOKEN } from '../src/tokens.js'
 
@@ -20,10 +22,12 @@ afterEach(() => {
  * A stand-in for SQL Server, as it answers what these tests send. A request whose text says "slow" is held until an
  * attention; an attention is acknowledged in a message of its own, after the reply to the request it stops.
  */
-async function standIn(): Promise<{ port: number; requests: string[]; transactions: string[] }> {
+async function standIn(): Promise<{ port: number; requests: string[]; transactions: string[]; rpcs: Buffer[] }> {
   const requests: string[] = []
   /** Each batch's transaction descriptor, from its ALL_HEADERS, as hex. */
   const transactions: string[] = []
+  /** Each RPC as it came. */
+  const rpcs: Buffer[] = []
   const server = createServer((socket) => {
     socket.on('error', () => {})
     const messages = new Messages(socket)
@@ -60,6 +64,7 @@ async function standIn(): Promise<{ port: number; requests: string[]; transactio
         const says = (word: string) => m.payload.includes(Buffer.from(word, 'utf16le'))
         const token = m.type === PACKET.RPC ? TOKEN.DONEPROC : TOKEN.DONE
         const proc = m.type === PACKET.RPC ? m.payload.readUInt16LE(m.payload.readUInt32LE(0) + 2) : undefined
+        if (m.type === PACKET.RPC) rpcs.push(m.payload)
         if (proc === 11) {
           // sp_prepare: the statement kept, and its handle, 7, as the output parameter at ordinal 0.
           prepared = says('real@x.net') ? 'real@x.net' : 'fake@x.net'
@@ -89,12 +94,15 @@ async function standIn(): Promise<{ port: number; requests: string[]; transactio
     })()
   })
   const port = await listen(server)
-  return { port, requests, transactions }
+  return { port, requests, transactions, rpcs }
 }
 
 const users = buildCatalog({
   tables: [{ schema: 'dbo', name: 'users', kind: 'U' }],
-  columns: [{ schema: 'dbo', table: 'users', name: 'email', type: 'nvarchar', maxLength: 240 }],
+  columns: [
+    { schema: 'dbo', table: 'users', name: 'email', type: 'nvarchar', maxLength: 240 },
+    { schema: 'dbo', table: 'users', name: 'balance', type: 'decimal', maxLength: 9 },
+  ],
   primary: [],
   unique: [{ schema: 'dbo', table: 'users', column: 'email' }],
   references: [],
@@ -115,9 +123,10 @@ async function sosie(upstream: number, { statementTimeout = 0 } = {}): Promise<n
     return {
       back,
       lookup: (text, near) => {
-        if (text !== 'fake@x.net' || !near) return undefined
-        back.set('real@x.net', 'fake@x.net')
-        return 'real@x.net'
+        // Two fakes: an email, and a balance SqlClient would send as decimal(3,1).
+        const real = near ? { 'fake@x.net': 'real@x.net', '12.5': '1234.56' }[text] : undefined
+        if (real) back.set(real, text)
+        return real
       },
       scrub: (t) => [...back].reduce((out, [real, fake]) => out.split(real).join(fake), t),
     }
@@ -209,6 +218,22 @@ describe('prepared statements', () => {
       c.execute(r, { x: 1 })
     })
     expect(error).toBe("Incorrect syntax near 'fake@x.net'.")
+  })
+})
+
+describe('parameters', () => {
+  it('go upstream in a type that holds the real value, where the one sized to the fake would cut it', async () => {
+    const up = await standIn()
+    const c = await tedious(await sosie(up.port))
+    await new Promise<void>((resolve) => {
+      const r = new Request('SELECT email FROM users WHERE balance = @b', () => resolve())
+      // decimal(3,1), as SqlClient sizes 12.5.
+      r.addParameter('b', TYPES.Decimal, 12.5, { precision: 3, scale: 1 })
+      c.execSql(r)
+    })
+    const [{ params }] = readRpc(up.rpcs.at(-1)!, up.rpcs.at(-1)!.readUInt32LE(0)).calls as [Call]
+    expect(textParam(params[1])).toBe('@b decimal(38,2)')
+    expect(textOf(params[2]!.type, params[2]!.value.bytes!)).toBe('1234.56')
   })
 })
 

@@ -7,12 +7,12 @@ import { analyze, CATALOG_PROCEDURES, parseBatch, type Analysis, type Refusal } 
 import { ENCRYPT, FEATURE, INTEGRATED_SECURITY, OPTION, prelogin, readLogin7, readPrelogin, TDS, tdsRank, versionBytes, type Prelogin } from './login.js'
 import { rewriteReply, SERVER_NAME, type Request } from './results.js'
 import { constSubstitutions, substitute } from './rewrite.js'
-import { fits, maxOf, PARAM, PROC, procOf, readDeclarations, readRpc, textParam, widen, withText, writeRpc, type Call, type Param } from './rpc.js'
+import { PARAM, PROC, procOf, readDeclarations, readRpc, textParam, widen, widerFor, withText, writeRpc, type Call, type Param } from './rpc.js'
 import type { Catalog } from './schema.js'
 import { headersEnd, HEADER, INITIAL_PACKET_SIZE, Messages, MessageTooLarge, PACKET, packets, STATUS, TruncatedError, type Message } from './tds.js'
 import { acceptTls } from './tls.js'
 import { DONE, done, ENV, envBytes, envText, loginAck, message, readTokens, TOKEN, type Column } from './tokens.js'
-import { bytesOf, textOf, UnknownTypeError } from './types.js'
+import { bytesOf, textOf, UnknownTypeError, type TypeInfo } from './types.js'
 import { Upstream, UpstreamError, type Target } from './upstream.js'
 
 export interface SessionContext {
@@ -413,8 +413,8 @@ export class Session {
    * Each value compared with a column, from `from` on, turned back where it is a fake: in its own type, at its max
    * where the real value is longer. The names of those widened, for the declaration.
    */
-  #turnBack(params: Param[], from: number, declared: ReturnType<typeof readDeclarations>, analysis: Analysis, scope: ReturnType<Faker['request']>): Set<string> {
-    const widened = new Set<string>()
+  #turnBack(params: Param[], from: number, declared: ReturnType<typeof readDeclarations>, analysis: Analysis, scope: ReturnType<Faker['request']>): Map<string, TypeInfo> {
+    const widened = new Map<string, TypeInfo>()
     if (analysis.catalogOnly) return widened
     for (let k = from; k < params.length; k++) {
       const p = params[k]!
@@ -426,12 +426,10 @@ export class Session {
       if (text === undefined) continue
       const real = scope.lookup(text, near)
       if (real === undefined || real === text) continue
-      let type = p.type
-      if (!fits(type, real)) {
-        type = maxOf(type)
-        widened.add(name)
-      }
-      const bytes = bytesOf(type, real, type.layout === 'plp' ? undefined : p.value.bytes)
+      const wider = widerFor(p.type, real)
+      const type = wider ?? p.type
+      if (wider) widened.set(name, wider)
+      const bytes = bytesOf(type, real, wider || type.layout === 'plp' ? undefined : p.value.bytes)
       if (bytes) params[k] = { ...p, type, value: { bytes } }
     }
     return widened

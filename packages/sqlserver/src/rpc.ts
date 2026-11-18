@@ -131,11 +131,49 @@ export function maxOf(t: TypeInfo): TypeInfo {
 }
 
 /** Whether a value's bytes fit its parameter's type, or need it at its max. */
-export function fits(t: TypeInfo, text: string): boolean {
+function fits(t: TypeInfo, text: string): boolean {
   if (t.layout !== 'ushort') return true
   if (t.id === TYPE.NVARCHAR || t.id === TYPE.NCHAR) return Buffer.byteLength(text, 'utf16le') <= t.length
   if (t.id === TYPE.BIGVARCHAR || t.id === TYPE.BIGCHAR) return encodeText(text, t.collation).length <= t.length
   return true
+}
+
+/**
+ * A type that holds a real value its parameter's would cut, the parameter having been sized to the fake (SqlClient
+ * sizes a string or a decimal to its value: 12.5 is decimal(3,1)); undefined where it fits. Text and bytes go at
+ * their max, a decimal at precision 38 with the scale it needs, an integer as a bigint.
+ */
+export function widerFor(t: TypeInfo, real: string): TypeInfo | undefined {
+  if (t.id === TYPE.DECIMALN || t.id === TYPE.NUMERICN) {
+    const m = /^[+-]?0*(\d*)(?:\.(\d*?)0*)?$/.exec(real.trim())
+    if (!m) return undefined
+    const whole = m[1]!.length
+    const fraction = (m[2] ?? '').length
+    const scale = t.scale ?? 0
+    if (whole <= (t.precision ?? 18) - scale && fraction <= scale) return undefined
+    if (whole > 38) return undefined
+    const wider = Math.min(Math.max(scale, fraction), 38 - whole)
+    return { id: t.id, layout: 'bytelen', length: 17, precision: 38, scale: wider, raw: Buffer.from([t.id, 17, 38, wider]) }
+  }
+  if (t.id === TYPE.INTN && t.length < 8) {
+    if (!/^-?\d+$/.test(real)) return undefined
+    const n = BigInt(real)
+    const max = t.length === 1 ? 255n : (1n << BigInt(t.length * 8 - 1)) - 1n
+    const min = t.length === 1 ? 0n : -max - 1n
+    return n >= min && n <= max ? undefined : { id: TYPE.INTN, layout: 'bytelen', length: 8, raw: Buffer.from([TYPE.INTN, 8]) }
+  }
+  return fits(t, real) ? undefined : maxOf(t)
+}
+
+/** A type as a declaration writes it: the wider types widerFor gives. */
+function declared(t: TypeInfo): string | undefined {
+  if (t.id === TYPE.NVARCHAR && t.layout === 'plp') return 'nvarchar(max)'
+  if (t.id === TYPE.BIGVARCHAR && t.layout === 'plp') return 'varchar(max)'
+  if (t.id === TYPE.BIGVARBINARY && t.layout === 'plp') return 'varbinary(max)'
+  if (t.id === TYPE.DECIMALN) return `decimal(${t.precision},${t.scale})`
+  if (t.id === TYPE.NUMERICN) return `numeric(${t.precision},${t.scale})`
+  if (t.id === TYPE.INTN && t.length === 8) return 'bigint'
+  return undefined
 }
 
 /** One parameter of a declaration: @p1 nvarchar(4000) OUTPUT. */
@@ -175,14 +213,16 @@ export function readDeclarations(text: string): Declared[] {
   return out
 }
 
-/** A declaration with these parameters' types at their max: varchar(5) becomes varchar(max), so a real value is not cut. */
-export function widen(text: string, declared: readonly Declared[], names: ReadonlySet<string>): string {
+/**
+ * A declaration with these parameters in their wider types, as widerFor gave them: varchar(5) becomes varchar(max),
+ * decimal(3,1) decimal(38,2), so a real value is not cut.
+ */
+export function widen(text: string, parameters: readonly Declared[], wider: ReadonlyMap<string, TypeInfo>): string {
   let out = text
-  for (const d of [...declared].sort((a, b) => b.typeStart - a.typeStart)) {
-    if (!names.has(d.name)) continue
-    const base = d.type.trim().toLowerCase().replace(/\s*\(.*$/, '')
-    const max = base === 'nchar' || base === 'nvarchar' || base === 'ntext' ? 'nvarchar(max)' : base === 'char' || base === 'varchar' || base === 'text' ? 'varchar(max)' : base === 'binary' || base === 'varbinary' ? 'varbinary(max)' : undefined
-    if (max) out = out.slice(0, d.typeStart) + max + out.slice(d.typeEnd)
+  for (const d of [...parameters].sort((a, b) => b.typeStart - a.typeStart)) {
+    const type = wider.get(d.name)
+    const written = type && declared(type)
+    if (written) out = out.slice(0, d.typeStart) + written + out.slice(d.typeEnd)
   }
   return out
 }

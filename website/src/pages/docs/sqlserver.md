@@ -158,9 +158,9 @@ it.
 SELECT o.id, o.total FROM orders o JOIN users u ON u.id = o.user_id WHERE u.email = N'van29@example.com';
 ```
 
-A parameter compared the same way (`WHERE email = @email`) is turned back in its own type. Where the real value is
-longer than the parameter's type, as SqlClient sizes one to the fake (`nvarchar(17)`), the parameter and its
-declaration go as `nvarchar(max)`, so the real value is not cut.
+A parameter compared the same way (`WHERE email = @email`) is turned back in its own type. Where the real value does
+not fit the parameter's type, as SqlClient sizes one to the fake (`nvarchar(17)`, `decimal(3,1)`), the parameter and
+its declaration go in a type that holds it (`nvarchar(max)`, `decimal(38,2)`), so the real value is not cut.
 
 ## What each result column becomes
 

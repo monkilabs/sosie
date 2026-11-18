@@ -1478,9 +1478,11 @@ parameters are turned back by it, and a message that quotes a real value the pre
 A literal compared with a column (`=`, `<>`, `IN`) is looked up in that column's domain, through aliases, schemas,
 views, subqueries, derived tables, CTEs and `APPLY`, and turned back where it is a fake, `N'…'` as the client wrote it.
 A parameter compared the same way (`@P1`, by its name, or by its place in the declaration) is turned back in its own
-type. Where the real value is longer than the parameter's type, as SqlClient sizes one to its value, the parameter goes
-as `nvarchar(max)` (or `varchar(max)`, `varbinary(max)`), and its declaration with it; an sp_execute whose parameter
-must widen runs as sp_executesql, its statement and declaration kept from its prepare.
+type. Where the real value does not fit the parameter's type, as SqlClient sizes one to its value, the parameter goes
+in a type that holds it, and its declaration with it: text as `nvarchar(max)` (or `varchar(max)`), a decimal at
+precision 38 with the scale it needs (12.5 is `decimal(3,1)`, 1234.56 goes as `decimal(38,2)`), an integer past its
+size as `bigint`. An sp_execute whose parameter must widen runs as sp_executesql, its statement and declaration kept
+from its prepare.
 
 ### Faking
 
