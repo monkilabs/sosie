@@ -31,6 +31,11 @@ export interface Catalog {
   writable: number
   /** Whether the login is a superuser or may replicate. */
   admin: boolean
+  /**
+   * Tables whose row security the login is subject to: `hidden`, with no policy at all, of which it sees no row (a
+   * Supabase table's default); `limited`, with policies, of which it sees the rows they allow.
+   */
+  rowSecurity: { hidden: number; limited: number }
 }
 
 export interface RelationRow {
@@ -132,6 +137,16 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     SELECT count(*)::int AS count FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relkind IN ('r', 'p') AND ${SYSTEM}
       AND has_table_privilege(c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE')`)
+  // Row security applies to a login that can read the table, is not its owner (unless the table forces it on its
+  // owner too), and neither is a superuser nor has BYPASSRLS.
+  const rowSecurity = await client.query<{ hidden: number; limited: number }>(`
+    SELECT count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid))::int AS hidden,
+           count(*) FILTER (WHERE EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid))::int AS limited
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind IN ('r', 'p') AND ${SYSTEM} AND c.relrowsecurity
+      AND has_table_privilege(c.oid, 'SELECT')
+      AND (c.relforcerowsecurity OR NOT pg_has_role(c.relowner, 'USAGE'))
+      AND NOT EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = current_user AND (r.rolsuper OR r.rolbypassrls))`)
 
   return buildCatalog({
     relations: relations.rows,
@@ -148,6 +163,7 @@ export async function readCatalog(client: pg.Client): Promise<Catalog> {
     system: system.rows.map((r) => r.relname),
     writable: writable.rows[0]?.count ?? 0,
     admin: role.rows[0]?.admin ?? false,
+    rowSecurity: rowSecurity.rows[0] ?? { hidden: 0, limited: 0 },
   })
 }
 
@@ -185,6 +201,7 @@ export interface CatalogRows {
   system: string[]
   writable: number
   admin: boolean
+  rowSecurity?: { hidden: number; limited: number }
 }
 
 /** The neutral schema from catalog rows: field ids are table.column, or schema.table.column outside public. */
@@ -226,6 +243,7 @@ export function buildCatalog(rows: CatalogRows): Catalog {
     views: 0,
     writable: rows.writable,
     admin: rows.admin,
+    rowSecurity: rows.rowSecurity ?? { hidden: 0, limited: 0 },
   }
 
   const fieldsByOid = new Map<number, Map<number, Field>>()

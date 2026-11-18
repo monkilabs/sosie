@@ -397,6 +397,43 @@ describe('the guard', () => {
     await writer.close()
   })
 
+  it('says when row security hides rows from its login, as a Supabase table with no policy hides them all', async () => {
+    const { default: Pg } = await import('pg')
+    const admin = new URL(inject('admin'))
+    const reader = decodeURIComponent(new URL(inject('upstream')).username)
+    const name = `sosie_rls_${process.pid}`
+    const server = new URL(admin.href)
+    server.pathname = '/postgres'
+    const root = new Pg.Client({ connectionString: server.href })
+    await root.connect()
+    await root.query(`CREATE DATABASE ${name}`)
+    const at = (user: URL) => Object.assign(new URL(user.href), { pathname: `/${name}` })
+    const owner = new Pg.Client({ connectionString: at(admin).href })
+    await owner.connect()
+    try {
+      await owner.query(`
+        CREATE TABLE profiles (id int); ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+        CREATE TABLE ai_calls (id int); ALTER TABLE ai_calls ENABLE ROW LEVEL SECURITY;
+        CREATE TABLE notes (id int); ALTER TABLE notes ENABLE ROW LEVEL SECURITY; CREATE POLICY mine ON notes USING (true);
+        CREATE TABLE countries (code text);
+        GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${reader};`)
+      const limited = await startSosie({ upstream: at(new URL(inject('upstream'))) })
+      expect(limited.warnings).toEqual([
+        'Row security hides every row of 2 tables from the login: they have no policy, as a Supabase table has none until it is given one. Give the login BYPASSRLS, or a policy that lets it read.',
+        "Row security shows the login only the rows its policies allow in 1 table: Sosie's answers leave the rest out.",
+      ])
+      await limited.close()
+      // A login that bypasses it, as the owner and a superuser do, sees every row.
+      const bypassing = await startSosie({ upstream: at(admin) })
+      expect(bypassing.warnings.filter((w) => w.startsWith('Row security'))).toEqual([])
+      await bypassing.close()
+    } finally {
+      await owner.end()
+      await root.query(`DROP DATABASE ${name} WITH (FORCE)`)
+      await root.end()
+    }
+  })
+
   it('keeps no cursor past its transaction, whose query would run at COMMIT', async () => {
     const c = await sosie.client()
     const held = "DECLARE c CURSOR WITH HOLD FOR SELECT city::regoper FROM users WHERE external_id = 'd3adb33f-0000-4000-8000-c0ffee000001'"

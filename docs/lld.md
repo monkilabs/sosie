@@ -814,6 +814,12 @@ settings in the connection string itself (`statement_timeout`,
 `client_encoding`, `replication` and the like), which Postgres would apply
 after Sosie's, are dropped.
 
+At start, the terminal is told what of the login would mislead: a superuser or replication login, a login that can
+write, and row security. A table with row security on and no policy shows a login subject to it no row at all, which
+is a Supabase table's default (the app reads with a key that bypasses it): its answers would look like an empty
+table, so Sosie says how many such tables there are, and how many show only the rows their policies allow. The owner,
+a superuser and a login with `BYPASSRLS` are not subject to it.
+
 A simple query is run upstream with the extended protocol, statement by
 statement, executing at most `max-rows` + 1 rows: a result cut at the cap
 returns `max-rows` rows and a notice.
