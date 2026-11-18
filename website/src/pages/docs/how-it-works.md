@@ -54,7 +54,7 @@ Values a query computes are faked by their type, in a domain of their own.
 | ObjectId | 24 hex digits: its time shifted by up to a year, the rest random |
 | Boolean | Flipped or not, decided once per field |
 | Enum | A label of the same enum, by a fixed shuffle per field |
-| Date, time | Shifted by up to a year, the same shift for the same value; a fraction of a second as long, its digits drawn but the last |
+| Date, time | Shifted by up to a year, the same shift for the same value; a fraction of a second as long, its digits drawn but the last. A month in text (`2019-03`) by 1 to 12 months |
 | Interval | Another duration in the same form, each number of as many digits |
 | Bits | As many bits, each drawn, no two values of a field given one fake while it has bits to spare. A single bit is a flag: flipped or not, decided once per field, as a boolean is |
 | Range | Each bound faked as its type, then put in order |

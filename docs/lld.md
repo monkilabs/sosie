@@ -534,7 +534,7 @@ Values a query computes fake in `computed:<type>`.
 
 | Neutral type | Fake |
 | --- | --- |
-| `string` | The field's format when known. Otherwise shaped like the value: an email stays an email, a date a date, a number a number, a code like `AB-1234` keeps its letters, digits and punctuation, a word becomes a word of about the same length, and text becomes words of about the same length. Within `maxLength` |
+| `string` | The field's format when known. Otherwise shaped like the value: an email stays an email, a date a date, a month (`2019-03`, as JSON Resume writes a job's start) a month 1 to 12 months off, a number a number, a code like `AB-1234` keeps its letters, digits and punctuation, a word becomes a word of about the same length, and text becomes words of about the same length. Within `maxLength` |
 | `integer` | A number with the same sign and number of digits; never zero for a value that is not zero; within the column's size. A key whose digit range is crowded gets a digit more (see the store), and past the column's size, any number within it |
 | `decimal` | Digits replaced: the same sign, digits and scale. `NaN` and `Infinity` stay; other text is shaped |
 | `uuid` | A random UUID |

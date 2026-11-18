@@ -19,6 +19,8 @@ const NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/
 const DATE = /^(\d{4,})-(\d{2})-(\d{2})( BC)?$/
 const DATETIME = /^(\d{4,})-(\d{2})-(\d{2})([ T])(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}(?::?\d{2}){0,2})?( BC)?$/
 const TIME = /^(\d{2}):(\d{2}):(\d{2})(\.\d+)?([+-]\d{2}(?::?\d{2}){0,2})?$/
+/** A month, as JSON Resume and ISO 8601 write one with no day: 2019-03. */
+const MONTH = /^(\d{4})-(0[1-9]|1[0-2])$/
 
 /** The fake of one scalar value of a type, as text. */
 export function fakeScalar(
@@ -94,6 +96,7 @@ function guess(real: string, draw: Draw): string {
   if (UUID.test(real)) return matchCase(real, faker.string.uuid())
   if (NUMBER.test(real)) return decimal(real, random)
   if (DATE.test(real) || DATETIME.test(real) || TIME.test(real)) return shiftTime(real, random)
+  if (MONTH.test(real)) return shiftMonth(real, random)
   if (/\s/.test(real)) return text(real, faker)
   if (/^\p{L}{4,}$/u.test(real)) {
     const word = faker.word.sample({ length: { min: Math.max(1, real.length - 2), max: real.length + 2 }, strategy: 'closest' })
@@ -160,6 +163,13 @@ function fraction(real: string | undefined, random: Random): string {
   let digits = ''
   for (let i = 2; i < real.length; i++) digits += String(random.int(0, 9))
   return `.${digits}${real.at(-1)}`
+}
+
+/** A month shifted by 1 to 12 whole months, earlier or later, as a date is by up to a year: still a month, never the same. */
+function shiftMonth(real: string, random: Random): string {
+  const m = MONTH.exec(real)!
+  const at = +m[1]! * 12 + (+m[2]! - 1) + random.int(1, 12) * (random.next() < 0.5 ? -1 : 1)
+  return `${String(Math.floor(at / 12)).padStart(4, '0')}-${pad((at % 12) + 1)}`
 }
 
 function addDays(at: number, days: number): number {
