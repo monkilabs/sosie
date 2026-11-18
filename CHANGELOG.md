@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+SQL Server, a source of its own, and the eighth package: `@sosie/sqlserver`, which `@sosie/cli` depends on.
+
+- SQL Server 2019 and later, from a `sqlserver://` connection string or the one a developer has: ADO.NET's, ODBC's,
+  JDBC's and Prisma's are read as one. `sqlcmd`, ODBC Driver 18, JDBC, SqlClient and tedious read through it, with
+  their own drivers: batches, with or without semicolons between statements; parameters, as `sp_executesql` and
+  prepared statements send them; transactions; pooled connections, whose reset is done upstream; a cancel; and the
+  catalog, as JDBC's `getTables` and `getColumns` and SqlClient's `GetSchema` read it.
+- SQL Server's browse mode names the table and column of every value it returns, through views, synonyms, CTEs and
+  functions: each is faked by its field. Browse mode's hidden keys never reach the client. `FOR JSON` is faked as JSON.
+  A fake in a literal or a parameter compared with a column is turned back, a parameter widened where the real value
+  is longer than its type.
+- The endpoint serves TLS, as SQL Server's drivers ask for it: TDS 7.4's, inside its packets, and TDS 8's (strict),
+  first. Its certificate is from a CA Sosie makes in `SOSIE_HOME/tls/`; the address it prints says
+  `TrustServerCertificate=true`, and a client that trusts the CA checks the certificate, in strict mode too.
+- The guard refuses writes, procedures but the catalog's, `PRINT`, `TRY…CATCH`, cursors, `NOEXEC`, the dynamic
+  management views, password hashes, linked servers, `OPENROWSET` and what says where the server is. Only `sys` and
+  `INFORMATION_SCHEMA` are the catalog, in any database. A batch it would read apart from SQL Server, a reserved word
+  as a bare alias among them, is refused as a syntax error. A login is warned of when it can write.
+- Reviewed by a panel of three in three rounds before its release, which tried to get real values, writes and the
+  server's whereabouts past it, and to break a driver's session, against SQL Server 2022: what it found is fixed, each
+  with a test that failed before, and the last round passed.
+- A release now publishes eight packages: the npm token must be allowed to publish `@sosie/sqlserver`, a new package.
+
 ## 0.5.0, 14 November 2026
 
 The asks of a trial in front of a Spring Boot API

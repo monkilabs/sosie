@@ -26,7 +26,7 @@ tourne tel quel sur les vraies données. Les vrais enregistrements, identifiants
 ## État
 
 Sosie est publié sur npm sous le nom [`@sosie/cli`](https://www.npmjs.com/package/@sosie/cli). Il fonctionne de
-bout en bout devant PostgreSQL 15 à 18, MySQL 8.4 et 9, MongoDB 6.0 à 8.0, des API REST et des API GraphQL, sous Node 26
+bout en bout devant PostgreSQL 15 à 18, MySQL 8.4 et 9, MongoDB 6.0 à 8.0, SQL Server 2019 à 2025, des API REST et des API GraphQL, sous Node 26
 et 24. Le [MVP](../docs/mvp.md), la [conception générale](../docs/hld.md) et la [conception détaillée](../docs/lld.md)
 décrivent ce qu'il fait et comment.
 
@@ -154,8 +154,23 @@ collection dont elle provient, ou selon son type BSON quand une étape l'a calcu
 domaine, si bien que les références entre collections restent valides. MongoDB 6.0, 7.0 et 8.0 sont testés. Accordez au
 compte de connexion le rôle `read`.
 
-Postgres, MySQL, MongoDB, REST et GraphQL sont les premières sources. SQL Server vient ensuite ; chaque source est un
-package derrière la même interface ([comment Sosie s'étend](../docs/hld.md#how-sosie-grows)).
+### Devant SQL Server
+
+Une source avec une chaîne de connexion `sqlserver://`, ou celle que vous avez déjà : une chaîne de connexion ADO.NET,
+ODBC, JDBC ou Prisma est lue comme telle. `sqlcmd` et votre application lisent à travers elle avec leur propre pilote,
+ODBC Driver 18, JDBC, SqlClient ou tedious : des batchs, des paramètres tels que les envoient `sp_executesql` et les
+requêtes préparées, des transactions, des connexions d'un pool, et l'annulation d'une requête en cours. SQL Server nomme
+la table et la colonne de chaque valeur qu'il renvoie, à travers les vues et les synonymes aussi, et Sosie génère chaque
+valeur factice d'après elles. SQL Server 2019, 2022 et 2025 sont testés ; Azure SQL n'est pas encore essayé. Accordez au
+compte de connexion `db_datareader`.
+
+Les pilotes demandent TLS, et Sosie le sert : l'adresse qu'il affiche contient `TrustServerCertificate=true`. Un client
+qui doit vérifier le certificat, comme le fait toujours le chiffrement strict (TDS 8), fait confiance à l'autorité de
+certification que Sosie a créée dans `~/.sosie/tls/ca.pem`. Une valeur d'un type que Sosie ne sait pas falsifier
+(`xml`, `geography`, `hierarchyid`, `sql_variant`) revient en `NULL`.
+
+Postgres, MySQL, MongoDB, SQL Server, REST et GraphQL sont les sources à ce jour ; chaque source est un package derrière
+la même interface ([comment Sosie s'étend](../docs/hld.md#how-sosie-grows)).
 
 ### Dans votre assistant
 
@@ -213,7 +228,8 @@ Les tests de bout en bout démarrent un PostgreSQL 18 embarqué, ainsi que MySQL
 binaires, téléchargés au premier lancement. Pour les lancer sur d'autres serveurs, donnez à `SOSIE_TEST_DATABASE_URL`,
 `SOSIE_TEST_MYSQL_URL` et `SOSIE_TEST_MONGODB_URL` la chaîne de connexion d'un superutilisateur ou de root ; les tests
 créent leur propre base et leur propre compte, et les suppriment ensuite. Les tests `psql` tournent quand `psql` est
-dans le PATH, ou à l'emplacement indiqué par `PSQL`.
+dans le PATH, ou à l'emplacement indiqué par `PSQL`. Ceux de SQL Server tournent quand `SOSIE_TEST_SQLSERVER_URL` en
+désigne un, en tant que `sa` : aucun SQL Server ne tourne sans conteneur.
 
 ## Licence
 

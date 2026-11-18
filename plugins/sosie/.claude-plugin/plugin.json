@@ -13,6 +13,7 @@
     "postgres",
     "mysql",
     "mongodb",
+    "sqlserver",
     "rest",
     "graphql",
     "mcp",

@@ -1,0 +1,49 @@
+{
+  "name": "@sosie/sqlserver",
+  "version": "0.5.0",
+  "description": "The SQL Server source of Sosie: a read-only SQL Server endpoint that fakes every value.",
+  "keywords": [
+    "sqlserver",
+    "mssql",
+    "tds",
+    "ai",
+    "llm",
+    "privacy",
+    "fake-data",
+    "anonymization"
+  ],
+  "homepage": "https://monkilabs.github.io/sosie/",
+  "bugs": {
+    "url": "https://github.com/monkilabs/sosie/issues"
+  },
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monkilabs/sosie.git",
+    "directory": "packages/sqlserver"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@guanmingchiu/sqlparser-ts": "0.63.0",
+    "@sosie/core": "^0.5.0"
+  }
+}

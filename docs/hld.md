@@ -162,7 +162,7 @@ same for every source. The site and its docs grow too, into other languages
 | Next, also in v0.1 | REST and GraphQL, the team's own APIs | They mostly serve the same data, and format domains keep a person the same fake in both |
 | v0.2 | MySQL | The other database most teams run; its result metadata names each value's column, as Postgres's does |
 | After v0.2 | MongoDB | The most used database after the SQL ones, above all with the JavaScript developers `npx` reaches; its protocol is open, and its commands are documents, so its guard needs no parser |
-| Next | SQL Server, and Azure SQL with it | The database of most .NET and Microsoft teams. Its protocol is open but the largest yet, and its clients encrypt by default |
+| After MongoDB | SQL Server, and Azure SQL with it | The database of most .NET and Microsoft teams. Its protocol is open but the largest yet, and its clients encrypt by default |
 | Only on demand, and through MCP | Oracle | Its protocol is closed, and its results do not say which table a column came from, so it would be the one source that apps and tests cannot connect to unchanged |
 | Later | MariaDB; third-party APIs | On demand; many third-party APIs already offer a test mode |
 
@@ -190,7 +190,8 @@ kind of source as Postgres and MySQL, only bigger. Oracle, if ever, comes as an 
 Each starts with a spike before it is planned in detail. MongoDB's showed the drivers and `mongosh` take a server of
 Sosie's own, and that an ObjectId needs a type of its own in the core, faked in one domain wherever it is held; it is
 built (see the [low-level design](lld.md#mongodb-source)). SQL Server's asked what TLS each driver needs as it comes,
-and which metadata names a value's column.
+and which metadata names a value's column; it is built too, as the spike's answers say (see the
+[low-level design](lld.md#sql-server-source)).
 
 #### SQL Server's spike
 

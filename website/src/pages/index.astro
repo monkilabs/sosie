@@ -44,7 +44,7 @@ const columns = ['full_name', 'email', 'status', 'total'];
           <a class="btn btn--primary" href={url('docs/')}>Get started</a>
           <a class="btn" href={REPO} rel="noopener">GitHub</a>
         </div>
-        <p class="hero__note">Node 24 or 26 · PostgreSQL 15 to 18 · MySQL 8.4 and 9 · MongoDB 6.0 to 8.0 · your team's REST and GraphQL APIs</p>
+        <p class="hero__note">Node 24 or 26 · PostgreSQL 15 to 18 · MySQL 8.4 and 9 · MongoDB 6.0 to 8.0 · SQL Server 2019 to 2025 · your team's REST and GraphQL APIs</p>
 
         <div class="double">
           <div class="double__side double__side--real">
@@ -152,6 +152,7 @@ const columns = ['full_name', 'email', 'status', 'total'];
               <li>PostgreSQL<small>15 to 18</small></li>
               <li>MySQL<small>8.4 and 9</small></li>
               <li>MongoDB<small>6.0 to 8.0</small></li>
+              <li>SQL Server<small>2019 to 2025</small></li>
               <li>Your REST API<small>with or without OpenAPI</small></li>
               <li>Your GraphQL API<small>by introspection or a schema file</small></li>
             </ul>
@@ -172,19 +173,20 @@ const columns = ['full_name', 'email', 'status', 'total'];
         <div class="sources">
           <div class="source">
             <div class="source__text">
-              <h3>Postgres, MySQL, MongoDB</h3>
-              <p>Each database's own wire protocol. <code>psql</code>, <code>mysql</code>, mongosh and their drivers work unchanged, and Drizzle and Prisma 7 on Postgres.</p>
+              <h3>Postgres, MySQL, MongoDB, SQL Server</h3>
+              <p>Each database's own wire protocol. <code>psql</code>, <code>mysql</code>, mongosh, <code>sqlcmd</code> and their drivers work unchanged, and Drizzle and Prisma 7 on Postgres.</p>
               <p>
                 <a class="source__link" href={url('docs/postgres/')}>Postgres docs →</a> ·
                 <a class="source__link" href={url('docs/mysql/')}>MySQL →</a> ·
-                <a class="source__link" href={url('docs/mongodb/')}>MongoDB →</a>
+                <a class="source__link" href={url('docs/mongodb/')}>MongoDB →</a> ·
+                <a class="source__link" href={url('docs/sqlserver/')}>SQL Server →</a>
               </p>
             </div>
             <div class="term">
               <div class="term__bar"><i></i><i></i><i></i><span>sosie.yml</span></div>
               <pre>sources:
   shop:
-    upstream: {'${SHOP_URL}'}   <span class="dim"># postgres://, mysql:// or mongodb://</span></pre>
+    upstream: {'${SHOP_URL}'}   <span class="dim"># postgres://, mysql://, mongodb:// or sqlserver://</span></pre>
             </div>
           </div>
           <div class="source">

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { ConfigError, readConfig } from '@sosie/core'
 import { describe, expect, it } from 'vitest'
-import { init, sourceFor } from '../src/init.js'
+import { init, sourceFor, sqlServerUrl, upstreamUrl } from '../src/init.js'
 import { sources } from '../src/sources.js'
 
 /** sosie init in a folder of its own, answered as a terminal would be: each answer a line. */
@@ -60,7 +60,7 @@ describe('sosie init', () => {
     expect((written as Error).message).toBe('Nothing written.')
     expect(shown.split("Its connection string, or the API's URL (hidden): ")).toHaveLength(4)
     expect(shown).toContain('That is not a URL. It looks like postgres://user:password@host:5432/database, or https://api.example.com/v1.')
-    expect(shown).toContain('Sosie reads postgres://, postgresql://, mysql://, mongodb://, mongodb+srv://, http:// and https:// upstreams, for now; not ftp://.')
+    expect(shown).toContain('Sosie reads postgres://, postgresql://, mysql://, mongodb://, mongodb+srv://, sqlserver://, mssql://, http:// and https:// upstreams, for now; not ftp://.')
     expect(shown).not.toContain('s3cret')
     expect(text).toBeUndefined()
   })
@@ -154,5 +154,36 @@ describe('the source for an upstream', () => {
     expect(sourceFor(new URL('https://shop.internal/api'), 'graphql', sources).kind).toBe('graphql')
     expect(() => sourceFor(new URL('postgres://db/app'), 'graphql', sources)).toThrow(new Error('A graphql source reads http:// or https:// upstreams, not postgres://.'))
     expect(() => sourceFor(new URL('mongodb://db/app'), 'postgres', sources)).toThrow(new Error('A postgres source reads postgres:// or postgresql:// upstreams, not mongodb://.'))
+  })
+})
+
+describe('a SQL Server connection string', () => {
+  it.each([
+    ['ADO.NET', 'Server=tcp:db.internal,1433;Database=app;User Id=kim;Password="s3cr;t=x";Encrypt=True;TrustServerCertificate=True'],
+    ['ODBC', 'Driver={ODBC Driver 18 for SQL Server};Server=db.internal,1433;Database=app;UID=kim;PWD={s3cr;t=x};TrustServerCertificate=yes;Encrypt=yes'],
+    ['JDBC', 'jdbc:sqlserver://db.internal:1433;databaseName=app;user=kim;password={s3cr;t=x};encrypt=true;trustServerCertificate=true'],
+    ['Prisma', 'sqlserver://db.internal:1433;database=app;user=kim;password={s3cr;t=x};encrypt=true;trustServerCertificate=true'],
+  ])('reads %s’s as the URL it stands for', (_, text) => {
+    const url = upstreamUrl(text)
+    expect(url.protocol).toBe('sqlserver:')
+    expect(url.host).toBe('db.internal:1433')
+    expect(url.pathname).toBe('/app')
+    expect(decodeURIComponent(url.username)).toBe('kim')
+    expect(decodeURIComponent(url.password)).toBe('s3cr;t=x')
+    expect(url.searchParams.get('trustServerCertificate')).toBe('true')
+    expect(sourceFor(url, undefined, sources).kind).toBe('sqlserver')
+  })
+
+  it('reads a quoted value as ADO.NET does, and the default port where none is given', () => {
+    const url = sqlServerUrl(`Data Source=localhost;Initial Catalog=app;User ID=sa;Password="it's ""quoted"""`)!
+    expect(url.port).toBe('1433')
+    expect(decodeURIComponent(url.password)).toBe(`it's "quoted"`)
+  })
+
+  it('leaves a URL as it is, and asks a named instance for its port, quoting nothing', () => {
+    expect(sqlServerUrl('sqlserver://kim:secret@db:1433/app')).toBeUndefined()
+    const named = 'Server=db\\SQLEXPRESS;Database=app;User Id=kim;Password=secret'
+    expect(() => upstreamUrl(named)).toThrow(/^Give the named instance's port/)
+    expect(() => upstreamUrl(named)).not.toThrow(/secret/)
   })
 })

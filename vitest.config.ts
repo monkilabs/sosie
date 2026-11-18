@@ -10,6 +10,7 @@ export default defineConfig({
       '@sosie/postgres': src('postgres'),
       '@sosie/mysql': src('mysql'),
       '@sosie/mongodb': src('mongodb'),
+      '@sosie/sqlserver': src('sqlserver'),
       '@sosie/rest': src('rest'),
       '@sosie/graphql': src('graphql'),
     },
@@ -28,7 +29,7 @@ export default defineConfig({
         test: {
           name: 'e2e',
           include: ['test/e2e/**/*.test.ts'],
-          exclude: ['test/e2e/mysql/**', 'test/e2e/mongodb/**'],
+          exclude: ['test/e2e/mysql/**', 'test/e2e/mongodb/**', 'test/e2e/sqlserver/**'],
           globalSetup: ['test/e2e/database.ts'],
           testTimeout: 30_000,
           hookTimeout: 60_000,
@@ -43,6 +44,17 @@ export default defineConfig({
           testTimeout: 30_000,
           // A first run downloads MySQL's binaries.
           hookTimeout: 600_000,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'sqlserver',
+          include: ['test/e2e/sqlserver/**/*.test.ts'],
+          globalSetup: ['test/e2e/sqlserver/database.ts'],
+          testTimeout: 30_000,
+          // SQL Server's container may take a minute to accept logins.
+          hookTimeout: 120_000,
         },
       },
       {

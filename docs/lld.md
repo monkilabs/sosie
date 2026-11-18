@@ -20,6 +20,8 @@ Current versions as of October 2026.
 | GraphQL source | [`graphql`](https://github.com/graphql/graphql-js) 17: parsing, validation and introspection, as the API's own server does them |
 | MySQL source: upstream | [`mysql2`](https://github.com/sidorares/node-mysql2) 3.24, each value read as the server's text bytes |
 | MongoDB source: upstream | [`mongodb`](https://github.com/mongodb/node-mongodb-native) 7.8, the official driver; [`bson`](https://github.com/mongodb/js-bson) 7.3, each value read in its own BSON type |
+| SQL Server source: TDS | Sosie's own, both sides: the server side for clients and the client side upstream, with TDS's TLS (TLS 1.2 inside PRELOGIN packets, or TDS 8's TLS first), about 2,600 lines. The endpoint's certificate is DER that `certificate.ts` writes and `node:crypto` signs |
+| SQL Server source: SQL | The same sqlparser, its T-SQL dialect |
 | MySQL source: SQL | [`@guanmingchiu/sqlparser-ts`](https://github.com/guan404ming/sqlparser-ts) 0.63, pinned: the MySQL dialect of [sqlparser](https://github.com/apache/datafusion-sqlparser-rs) compiled to WebAssembly, which reads executable comments and joins adjacent strings as MySQL does |
 | The plugin | The [Agent Plugins](https://agent-plugins.org) 1.0 format, checked and compiled for each assistant by [OpenCastle](https://github.com/monkilabs/opencastle) 1.12 |
 | Upstream databases | PostgreSQL 15 to 18, each tested in CI. 19 when it is released (release candidate 1 on 15 October 2026) and the parser supports it. 14 is out: its support ends on 12 November 2026 |
@@ -33,7 +35,7 @@ been wrapped around the same code.
 
 ## Packages
 
-One repository, npm workspaces, seven packages:
+One repository, npm workspaces, eight packages:
 
 | Package | Published as | Holds |
 | --- | --- | --- |
@@ -42,6 +44,7 @@ One repository, npm workspaces, seven packages:
 | `packages/postgres` | `@sosie/postgres` | The Postgres source: endpoint, guard, rewriting, schema reading |
 | `packages/mysql` | `@sosie/mysql` | The MySQL source: endpoint, guard, rewriting, schema reading |
 | `packages/mongodb` | `@sosie/mongodb` | The MongoDB source: endpoint, guard, shapes, rewriting, faking documents |
+| `packages/sqlserver` | `@sosie/sqlserver` | The SQL Server source: TDS on both sides, its TLS, guard, rewriting, faking by browse mode |
 | `packages/rest` | `@sosie/rest` | The REST source: an HTTP endpoint for the team's own API, OpenAPI reading, JSON faking |
 | `packages/graphql` | `@sosie/graphql` | The GraphQL source: a GraphQL endpoint for the team's own API, schema by introspection, query checking and faking |
 
@@ -49,7 +52,7 @@ Later sources are packages of their own in the same scope. The `@sosie` scope is
 registered on 25 October 2026, so nobody else can take a name in it. Its team
 `developers` publishes.
 
-**A release** is a pull request: it moves the seven packages to one version, each depending on the others at `^` that
+**A release** is a pull request: it moves the eight packages to one version, each depending on the others at `^` that
 version, moves [the plugin](#the-plugin) with them, and dates the CHANGELOG's Unreleased section. Its merge publishes
 it. CI's `release` job runs on each push to `main`, once every other job passed on that commit:
 `scripts/release-plan.mjs` finds the packages' version, and when the push moved it and no tag names it, the job
@@ -1370,6 +1373,167 @@ this message, which may quote a value from your documents.` An upstream that can
 - A value in a `$unionWith`'s documents where the two collections name different fields is faked by its type.
 - No TLS and no login on Sosie's own address.
 
+## SQL Server source
+
+For SQL Server 2019 and later; 2019, 2022 and 2025 are tested. Its `upstream` is
+`sqlserver://user:password@host:1433/database` (or `mssql://`), its database named, with the drivers' own settings:
+`encrypt` (`true` by default, `false` or `strict`), `trustServerCertificate`, `hostNameInCertificate` and
+`applicationIntent`. The CLI reads an ADO.NET, ODBC, JDBC or Prisma connection string as that URL. Only a SQL login:
+Windows, Kerberos and Entra logins are not read.
+
+### Endpoint
+
+A client's first bytes say which TDS it speaks: a ClientHello (`0x16`) is TDS 8, TLS before anything; a PRELOGIN
+(`0x12`) is TDS 7.x. Sosie answers PRELOGIN with the upstream's version, no MARS, and TLS (ON) to a client that asks
+for it (ON or REQ); one that asks for none (OFF or NOT_SUP) gets none, NOT_SUP, and talks in clear. TDS 7.x carries
+TLS 1.2 at most, its handshake inside PRELOGIN packets, each flight one message; TDS 8 takes TLS 1.3, with ALPN
+`tds/8.0`. One port serves both.
+
+LOGIN7 takes any user and password; integrated security (SSPI) and federated authentication (Entra) get 18456, as do
+TDS versions before 7.2. Sosie then logs in upstream (a refusal reaches the client by its number, its words the
+terminal's, as Azure SQL's name the server), and answers the login itself: the database, collation and
+language as the upstream's session has them, a LOGINACK with the upstream's version, a FEATUREEXTACK for UTF-8 where
+the client asked, and the packet size the client asked for, from 512 to 32,767 bytes. Its address is
+`Server=127.0.0.1,<port>;Database=<database>;TrustServerCertificate=true`, a connection string drivers take as it is.
+
+The certificate is the endpoint's own, from a CA Sosie makes the first time in `SOSIE_HOME/tls/` (EC P-256, ten
+years): signed for `localhost`, `127.0.0.1`, `::1` and the host the endpoint listens on, for 397 days, made again a
+month before it ends or when the host changes. Its keys are only their owner's to read.
+
+Requests: SQL batches, RPCs and transaction manager requests (begin, commit, roll back, save). A bulk load gets 3906;
+any other request, an error. An attention cancels the request it follows: running upstream, it goes there; not yet
+sent, it goes with it; answered already, it is acknowledged at once. Drivers read one message for each they sent
+(tedious counts them), so the request's reply is one message and the acknowledgment, a DONE (never a DONEPROC) with
+`DONE_ATTN`, another after it; the server's own acknowledgment is not passed on. A message whose last packet says
+IGNORE, which a driver stopped sending, runs nothing and gets a DONE. A request with the reset bit (a pool's reset) resets the session
+upstream, with Sosie's settings set again in the request's own transaction (its ALL_HEADERS: `RESET_SKIP_TRAN` keeps
+one open), and the client gets the reset's acknowledgment: its prepared statements are gone. If the settings fail, the
+request is refused: it would run without browse mode or the cap on rows.
+
+### Upstream
+
+One session upstream per client, logged in with Sosie's login and the client's LOGIN7 otherwise: its TDS version up to
+7.4 (so the server sends only types the client reads), ODBC flag, language, LCID, read-only intent and UTF-8 support.
+A routing ENVCHANGE (Azure SQL's redirect) is followed, up to three times. Then:
+
+| Setting | Value |
+| --- | --- |
+| `NO_BROWSETABLE` | `ON` |
+| `ROWCOUNT` | One more than `max-rows` |
+
+SQL Server has no time limit of its own for a statement: past the source's `timeout`, Sosie sends an attention, as a
+driver's own timeout does, waits up to 5 s for its acknowledgment, and the client gets an error. What ran before the
+attention stands: a `USE` in the reply moves the session's database, Sosie's with it. A reply is read whole before it
+is faked.
+
+### Schema
+
+From `sys.objects`, `sys.columns`, `sys.indexes` and `sys.foreign_key_columns` of the connection string's database:
+tables and views, columns by their system type, keys and foreign keys of one column. A view's columns share a table's
+fakes where one table it reads (`INFORMATION_SCHEMA.VIEW_TABLE_USAGE`) has a column of that name: this is for
+`describe`, as browse mode names a query's columns' tables as it runs. An entity's id is its table's name in the login's
+default schema, `schema.table` in another. `HAS_PERMS_BY_NAME`, `IS_SRVROLEMEMBER('sysadmin')` and
+`IS_ROLEMEMBER('db_owner')` say whether to warn.
+
+### Guard
+
+A batch is parsed by sqlparser's T-SQL dialect. T-SQL needs no semicolon between statements and sqlparser reads none
+without one: where it stops at a word a statement starts with, the batch is read on from there. Anything else it cannot
+read is a syntax error, 102. sqlparser also stops, without an error, at an END where a statement could end (`END TRY`,
+`END CATCH`, `END CONVERSATION`), where SQL Server reads on: so each piece is parsed with a last statement of Sosie's
+own, a `SELECT` of a mark made for that parse, and a parse that does not end with it is a syntax error too. And
+sqlparser takes a reserved word for an alias where SQL Server takes none (`SELECT 1 REVOKE SELECT ON users FROM
+public` is to it `SELECT 1 AS REVOKE` and a second `SELECT`, to SQL Server a `SELECT` and a `REVOKE`): a bare alias
+that is one of the 179 words SQL Server 2022 refuses as one is a syntax error, `[revoke]` a name. Every statement is
+checked before any runs.
+
+Allowed: `SELECT` and `WITH`, without `INTO`, `FOR XML` or a hint that locks rows; `SET` of the session's options
+(`NOCOUNT`, the `ANSI_*` and `ARITH*` ones, `QUOTED_IDENTIFIER`, `TEXTSIZE`, `LANGUAGE`, `DATEFORMAT`, `LOCK_TIMEOUT`,
+`XACT_ABORT`, `STATISTICS IO` and `TIME`, the isolation level, a `ROWCOUNT` from 1 to one more than `max-rows`) and of
+a variable; `USE`, but `msdb`; `DECLARE`, but a cursor; `BEGIN TRAN`, `COMMIT`, `ROLLBACK`; `IF` and `ELSE`, every
+branch's statements checked; and the catalog's procedures (`sp_tables`, `sp_columns`, `sp_columns_100`, `sp_pkeys`,
+`sp_fkeys`, `sp_statistics`, `sp_special_columns`, `sp_help` and the like), by `EXEC` or as an RPC, whose results are
+the schema, whatever their arguments. `INSERT INTO @variable EXEC` one of them, which sqlparser does not read, is read
+by Sosie: a table variable is the session's, and filled from the catalog, it is the catalog, as JDBC's `getColumns`
+sends it.
+
+Refused, 3906 for a write, 229 for what would show what Sosie must not, 50000 for the rest: every write; `SELECT INTO`;
+any other procedure; `EXEC` of a string, and `EXEC sp_executesql` in a batch; `PRINT`, `RAISERROR`, `THROW`; `WHILE`;
+cursors; `OUTPUT` and Always Encrypted parameters; `NO_BROWSETABLE`, `SHOWPLAN_*`, `STATISTICS XML` and `PROFILE`,
+`IDENTITY_INSERT`. Catalog: `sys.dm_*`, `sys.sql_logins` and the compatibility views of logins, credentials, linked
+servers (`sys.servers`, their logins, external data sources), files (`sys.master_files`, `sys.database_files`,
+`sysdatabases`, `sp_helpdb`), the listener's address (`sys.tcp_endpoints`), Service Broker's queue of messages, traces,
+event sessions' files, audits, mirroring and availability replicas, `sysprocesses`, Query Store's text and plans,
+`msdb`, and a four-part name. Functions: `OPENROWSET`, `OPENQUERY`, `OPENDATASOURCE`, `OPENXML`, `fn_dblog` and its kind, `fn_get_audit_file`, `fn_xe_file_target_read_file`,
+`fn_trace_gettable`; `SERVERPROPERTY` and `CONNECTIONPROPERTY` of the machine, the instance, a path or an address;
+`@@SERVERNAME`, `@@SERVICENAME`. A query that reads only the catalog, or no table, reads no data; one that calls a
+function not SQL Server's own, or reads a variable, does. The catalog is `sys` and `INFORMATION_SCHEMA`, in any
+database: a table in `master` or `tempdb` (a global temp table among them) holds rows like any other. Which database
+the session is in does not decide it, as the server says which: a `USE` in a branch that never runs, or one that
+fails, leaves the session where it was.
+
+RPCs: `sp_executesql` (10), `sp_prepare` (11), `sp_execute` (12), `sp_prepexec` (13) and `sp_unprepare` (15), by number
+or by name, and the catalog's procedures, by name: a name in `sys`, `dbo` or no schema, as SQL Server finds its own
+(`app.sp_tables` is a procedure of yours, `remote.master.dbo.sp_tables` a linked server's, and both are refused, as by
+`EXEC`); their parameters of every type (`text`, `ntext` and `image` as an RPC sends them, a length and the bytes).
+A call that asks for no metadata (`fNoMetaData`, as SqlClient sends every one, its prepared statements' executions
+among them) goes upstream asking for it: without it the server sends no TABNAME or COLINFO, which say each value's
+column and which are hidden keys. The client reads the COLMETADATA as it reads any. The statement is checked as a batch; sp_prepare's and sp_prepexec's handle is the upstream's, returned to
+the client, and kept with its statement's reading and the scope that turned its fakes back, so each sp_execute's
+parameters are turned back by it, and a message that quotes a real value the prepare put in shows its fake. Cursors (1 to
+9) and sp_prepexecrpc are refused.
+
+### Rewriting
+
+A literal compared with a column (`=`, `<>`, `IN`) is looked up in that column's domain, through aliases, schemas,
+views, subqueries, derived tables, CTEs and `APPLY`, and turned back where it is a fake, `N'…'` as the client wrote it.
+A parameter compared the same way (`@P1`, by its name, or by its place in the declaration) is turned back in its own
+type. Where the real value does not fit the parameter's type, as SqlClient sizes one to its value, the parameter goes
+in a type that holds it, and its declaration with it: text as `nvarchar(max)` (or `varchar(max)`), a decimal at
+precision 38 with the scale it needs (12.5 is `decimal(3,1)`, 1234.56 goes as `decimal(38,2)`), an integer past its
+size as `bigint`. An sp_execute whose parameter must widen runs as sp_executesql, its statement and declaration kept
+from its prepare.
+
+### Faking
+
+Browse mode sends, after a result's metadata, its tables (TABNAME) and, for each column, its table, its own name and
+whether it is an expression or a hidden key (COLINFO). A column of a table Sosie knows is faked by its field, the table
+resolved as the text that named it wrote it (`users`, `dbo.users`, `app.dbo.users`): a bare name is the one schema's
+that has a table of that name, or the login's default schema's. Browse mode's hidden keys are dropped from the
+metadata, every row and ORDER (which keeps the columns before the first hidden key, and is dropped when none is
+left), and TABNAME and COLINFO with them. A column of the
+catalog (`sys`, `INFORMATION_SCHEMA`) passes, and one of a table Sosie cannot find is faked by its type: from `master`, a
+view of yours names its table as its text wrote it (`dbo.users`), which is no table of master's; an expression is faked by its type, unless the batch reads no data, or the guard read it as a
+`COUNT(…)` or a literal in the select list, matched to the result sets the batch gives in order. A statement that fails
+gives no result set, and those after it would take the places of the ones before: after an error, a call's expressions
+are faked by their type. `NOEXEC` and `PARSEONLY`, which skip statements without an error, are refused. A `FOR JSON` result's
+rows, at most 2,033 characters each, are joined, faked as one JSON value, and cut again.
+
+A value is faked as text and written back in its type: integers within their size (a `tinyint` from 0 to 255),
+decimals and money within their precision and scale, dates from 0001 to 9999, `datetimeoffset` with its offset,
+`uniqueidentifier` with its first three groups little-endian, `char(n)` and `binary(n)` padded to their length, text in
+its collation's code page (UTF-8 for a `_UTF8` collation; a character the page has none for is `?`), cut where it is
+longer than its column between characters, never inside one of UTF-8's or a double-byte page's. `xml`, the CLR
+types (`geography`, `geometry`, `hierarchyid`) and `sql_variant` come back null, their column marked nullable. An
+output parameter holds what a statement put in it, and is faked by its type; a statement's handle passes. Rows past
+`max-rows` are dropped, the DONE's count with them, and an INFO says so.
+
+### Errors
+
+A message about the statement and the schema (syntax, a name, a permission, a login, a lock, a session's settings) is
+shown, scrubbed of what Sosie substituted and with anything quoted the client did not write, and the schema does not
+name, masked; any other, by its number only. Every message's server is `Sosie`. ENVCHANGEs that say where the server
+is (routing, a mirror's partner, the DTC's address) or what only Sosie negotiated (its packet size) are not passed on.
+
+### Limits
+
+- A table named without its schema, where two schemas have one of that name, is read in the login's default schema,
+  which is SQL Server's own reading of a query's name but may not be a view's.
+- `FOR JSON` fakes its values by their type, not their column.
+- Azure SQL is not tried: browse mode's place there is still to see.
+- T-SQL sqlparser does not read is refused: `DELETE` without `FROM`, `WHILE`, `SAVE TRANSACTION`, `MERGE` with some
+  clauses. Strict TDS 8 upstream needs the server's own certificate set up for it.
+
 ## REST source
 
 For the team's own HTTP API, where the database's people come back as JSON.
@@ -1790,7 +1954,7 @@ returns and every value a client sends. What each planned source maps:
 | GraphQL (built, above) | A local HTTP address, at the API's path | Queries only, no mutations | The schema, by introspection or a file |
 | MySQL (built, above) | MySQL's protocol: statements as text, and prepared | Reads only, read-only session | Its result metadata, as with Postgres |
 | MongoDB (built, above) | Its wire protocol, `OP_MSG`; a standalone server to the driver | Commands and stages allowed by name; writes, `$out`, `$merge` and server-side JavaScript refused; the `read` role | The collection and the dotted path, read from the find or the pipeline |
-| SQL Server (next) | TDS 7.4 and 8 on one port: batches and RPC, with TLS inside PRELOGIN or first | sqlparser's T-SQL dialect; the login's grants, as there is no read-only session | Browse mode (`SET NO_BROWSETABLE ON`), its hidden keys dropped; `sp_describe_first_result_set` where it is refused |
+| SQL Server (built, above) | TDS 7.4 and 8 on one port: batches, RPC and transaction requests, with TLS inside PRELOGIN or first | sqlparser's T-SQL dialect; the login's grants, as there is no read-only session | Browse mode (`SET NO_BROWSETABLE ON`), its hidden keys dropped |
 | Oracle (on demand) | None: MCP's `describe` and `query` only | sqlparser's Oracle dialect; `SET TRANSACTION READ ONLY` | The parse alone |
 
 Rules, domains, fakes, the store, `scan` and `describe` are the core's, and a source adds to them only what its
@@ -1819,6 +1983,20 @@ source learns. Format domains make a person's email the same fake from the datab
   and 8.0; mongosh was checked by hand. `Long`, `Decimal128`, a timestamp, a DBRef and code are faked in the
   package's unit tests; `MinKey` and `MaxKey` were checked by hand; a regular expression and a symbol
   are not tested.
+- **SQL Server, end to end.** The server in `SOSIE_TEST_SQLSERVER_URL`, as `sa`, which makes its own database: no
+  SQL Server runs without a container, so without one these tests are skipped. Seeded with the same canary people, a
+  schema of its own, a view, and a table of every type SQL Server has; read by a `db_datareader` login. tedious reads
+  through Sosie (batches, `sp_executesql`, prepared statements, transactions, a reset, a cancel at its own time limit,
+  TLS 1.2, TDS 8 with the CA trusted, and no TLS), and Sosie's own TDS client sends what SqlClient does (a prepared
+  statement run again, asking for no metadata); the built CLI starts in front of it, its `query` tool reading through
+  that. Every answer and error is searched for each canary. CI runs SQL Server 2019, 2022 and 2025. ODBC Driver 18
+  (`sqlcmd`), JDBC 13.6 and SqlClient 7.1 were checked by hand: metadata, prepared statements run twice, parameters
+  turned back, transactions, a pool's reset, and a timeout's cancel followed by the next query.
+- **SQL Server's session, without SQL Server.** In `packages/sqlserver/test/session.test.ts`, a stand-in server
+  answers a real `Session` as SQL Server would, and tedious, or a client of raw TDS, drives it: an attention's
+  acknowledgment and its order, an ignored message, a pool's reset in a transaction, a prepared statement's messages,
+  parameters widened, an RPC's options and procedure names, a login refused, and requests no driver sends. The guard,
+  the parser's reading of a batch, replies and types are tested on their own in the package's other tests.
 - **Postgres, end to end.** An embedded PostgreSQL 18, or the server in
   `SOSIE_TEST_DATABASE_URL`, seeded with canary values: unique emails, names,
   phone numbers, keys and numbers; values with nothing to fake (`''`, `-`,

@@ -98,6 +98,7 @@ sends back is turned back by the same flip.
 | [Postgres](../postgres/) | The Postgres wire protocol | Statements are parsed; only reads run, on a read-only session | The table and column Postgres reports for each result column |
 | [MySQL](../mysql/) | MySQL's protocol: statements as text, and prepared | Statements are parsed as MySQL reads them; only reads run, on a read-only session | The database, table and column MySQL reports for each result column |
 | [MongoDB](../mongodb/) | MongoDB's wire protocol | Commands are allowed by name: reads only, no stage that writes, no JavaScript on the server | The collection and path each value comes from, read from the find or the pipeline |
+| [SQL Server](../sqlserver/) | TDS, over TLS: batches, parameters and prepared statements | Batches are parsed as SQL Server reads them; only reads and the catalog's procedures run | The table and column SQL Server names for each value, in browse mode |
 | [REST](../rest/) | HTTP, at the API's own paths | `GET` and `HEAD` only | The OpenAPI document, or where each value sits |
 | [GraphQL](../graphql/) | GraphQL over HTTP | Queries only, checked against the schema | The schema, by introspection or a file |
 

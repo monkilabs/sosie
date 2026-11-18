@@ -48,7 +48,7 @@ your first source and writes one, as `npx @sosie/cli init` does.
 | --- | --- | --- | --- |
 | `sources` | the top | none: at least one | Each source by its name: lowercase letters, digits, `-` and `_`, a letter first |
 | `upstream` | a source | none: required | `${NAME}`: the variable that holds its connection string or base URL |
-| `kind` | a source | from the URL | `postgres`, `mysql`, `mongodb`, `rest` or `graphql`, for a URL that does not say: GraphQL at `/query` |
+| `kind` | a source | from the URL | `postgres`, `mysql`, `mongodb`, `sqlserver`, `rest` or `graphql`, for a URL that does not say: GraphQL at `/query` |
 | `schema` | a REST or GraphQL source | the API's own: its OpenAPI document if it serves one, or introspection | A file, by its path from `sosie.yml`, or a URL: an OpenAPI document, or GraphQL SDL or an introspection result as JSON |
 | `headers` | a REST or GraphQL source | none | Headers Sosie sends the API: `Authorization: Bearer ${TOKEN}` |
 | `refuse` | a REST source | none | Paths Sosie never sends a request to, each with every path under it: `[/oauth/*, /billing/portal]` |
@@ -110,6 +110,7 @@ terminal it asks nothing, and a new value needs a restart.
 | Postgres | `table.column`, or `schema.table.column` outside `public` |
 | MySQL | `table.column`, or `database.table.column` outside the database the connection string names |
 | MongoDB | `collection.path`, a nested field's path dotted (`users.address.city`), or `database.collection.path` outside the database the connection string names |
+| SQL Server | `table.column`, or `schema.table.column` outside the login's default schema (`dbo`) |
 | REST, with a document | `Schema.property`, nested properties dotted: `User.address.city` |
 | REST, without one | The entity its path names, singular, and the key: `user.email` |
 | GraphQL | `Type.field`: `User.email` |
