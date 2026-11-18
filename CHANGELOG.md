@@ -18,9 +18,11 @@ SQL Server, a source of its own, and the eighth package: `@sosie/sqlserver`, whi
   `TrustServerCertificate=true`, and a client that trusts the CA checks the certificate, in strict mode too.
 - The guard refuses writes, procedures but the catalog's, `PRINT`, `TRY…CATCH`, cursors, `NOEXEC`, the dynamic
   management views, password hashes, linked servers, `OPENROWSET` and what says where the server is. Only `sys` and
-  `INFORMATION_SCHEMA` are the catalog, in any database. A login is warned of when it can write.
-- Reviewed by a panel of three before its release, which tried to get real values, writes and the server's whereabouts
-  past it, and to break a driver's session: what it found is fixed, each with a test that failed before.
+  `INFORMATION_SCHEMA` are the catalog, in any database. A batch it would read apart from SQL Server, a reserved word
+  as a bare alias among them, is refused as a syntax error. A login is warned of when it can write.
+- Reviewed by a panel of three in three rounds before its release, which tried to get real values, writes and the
+  server's whereabouts past it, and to break a driver's session, against SQL Server 2022: what it found is fixed, each
+  with a test that failed before, and the last round passed.
 - A release now publishes eight packages: the npm token must be allowed to publish `@sosie/sqlserver`, a new package.
 
 ## 0.5.0, 14 November 2026
