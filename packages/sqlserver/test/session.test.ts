@@ -5,10 +5,10 @@ import type { Faker } from '@sosie/core'
 import { loadParser } from '../src/guard.js'
 import { ENCRYPT, login7, OPTION, prelogin, versionBytes } from '../src/login.js'
 import { buildCatalog } from '../src/schema.js'
-import { readRpc, textParam, type Call } from '../src/rpc.js'
+import { PROC, readRpc, textParam, writeRpc, type Call } from '../src/rpc.js'
 import { Session } from '../src/session.js'
-import { textOf } from '../src/types.js'
-import { allHeaders, Messages, PACKET, packets, STATUS, type Message } from '../src/tds.js'
+import { readTypeInfo, textOf, TYPE } from '../src/types.js'
+import { allHeaders, Cursor, Messages, PACKET, packets, STATUS, type Message } from '../src/tds.js'
 import { DONE, done, ENV, envBytes, envText, loginAck, message, readTokens, TOKEN } from '../src/tokens.js'
 
 beforeAll(() => loadParser())
@@ -251,6 +251,17 @@ describe('parameters', () => {
     const [{ params }] = readRpc(up.rpcs.at(-1)!, up.rpcs.at(-1)!.readUInt32LE(0)).calls as [Call]
     expect(textParam(params[1])).toBe('@b decimal(38,2)')
     expect(textOf(params[2]!.type, params[2]!.value.bytes!)).toBe('1234.56')
+  })
+
+  it('go upstream asking for the metadata a client asked to be spared, as browse mode’s is how Sosie reads a reply', async () => {
+    const up = await standIn()
+    const { socket, messages } = await raw(await sosie(up.port))
+    const nvarchar = readTypeInfo(new Cursor(Buffer.from([TYPE.NVARCHAR, 0xff, 0xff, 0x09, 0x04, 0xd0, 0x00, 0x34])))
+    const statement = { name: '', status: 0, type: nvarchar, value: { bytes: Buffer.from('SELECT 1 AS one', 'utf16le') } }
+    // fNoMetaData (0x02), as SqlClient sends every RPC; fWithRecomp (0x01) is kept.
+    socket.write(packets(PACKET.RPC, writeRpc({ headers: allHeaders(), calls: [{ proc: PROC.EXECUTESQL, options: 0x03, params: [statement] }], separators: [] })))
+    await messages.next()
+    expect(readRpc(up.rpcs.at(-1)!, up.rpcs.at(-1)!.readUInt32LE(0)).calls[0]!.options).toBe(0x01)
   })
 
   it('read text, ntext and image as an RPC sends them, and turn them back', async () => {

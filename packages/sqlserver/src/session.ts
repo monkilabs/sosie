@@ -46,6 +46,9 @@ interface Prepared {
 
 const NO_ANALYSIS: Analysis = { catalogOnly: true, consts: [], params: new Map() }
 
+/** An RPC call's options (MS-TDS 2.2.6.6): recompile, send no metadata, reuse the metadata. */
+const RPC_OPTION = { WITH_RECOMPILE: 0x01, NO_METADATA: 0x02, REUSE_METADATA: 0x04 } as const
+
 /** An attention's acknowledgment: a DONE, never a DONEPROC, as drivers read it in a message of its own. */
 const ACKNOWLEDGED = done(DONE.ATTN)
 
@@ -309,7 +312,10 @@ export class Session {
       const handled = this.#call(call)
       if ('refusal' in handled) return this.#refused(prefix, handled.refusal)
       if ('syntax' in handled) return this.#syntax(prefix, handled.syntax)
-      rpc.calls[i] = handled.call
+      // A client may ask for no metadata (SqlClient always does): the server would send none, and so no browse mode's
+      // tables and column info, which say what each value is and which columns are hidden keys. Sosie asks for it, and
+      // the client reads a COLMETADATA as it reads any.
+      rpc.calls[i] = { ...handled.call, options: handled.call.options & ~(RPC_OPTION.NO_METADATA | RPC_OPTION.REUSE_METADATA) }
       request.analyses.push(handled.analysis)
       request.sent.push(handled.sent)
       request.handles.push(handled.handles)

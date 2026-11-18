@@ -4,6 +4,11 @@ import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { canariesIn } from '../canaries.js'
 import { ask, startSosie, type Answer, type Row } from './sosie.js'
 import { connect } from './database.js'
+import { PARAM, PROC, writeRpc, type Param } from '../../../packages/sqlserver/src/rpc.js'
+import { allHeaders, Cursor, PACKET } from '../../../packages/sqlserver/src/tds.js'
+import { readTokens } from '../../../packages/sqlserver/src/tokens.js'
+import { readTypeInfo, textOf, TYPE } from '../../../packages/sqlserver/src/types.js'
+import { Upstream } from '../../../packages/sqlserver/src/upstream.js'
 
 const upstream = inject('sqlserverUpstream')
 
@@ -177,6 +182,33 @@ describe.skipIf(!upstream)('SQL Server through Sosie', () => {
         })
         request.removeAllListeners('row')
         expect(counted).toEqual([1])
+      }
+    })
+
+    it('answers a prepared statement run again as SqlClient runs it, asking for no metadata, as the first time', async () => {
+      // SqlClient sends every RPC with fNoMetaData; the server's answer then has no COLINFO to drop hidden keys by.
+      const tds = await Upstream.open({ host: '127.0.0.1', port: sosie.port, database: sosie.database, user: 'kim', password: 'x', encrypt: 'on', verify: false, readOnlyIntent: false })
+      try {
+        const nvarchar = readTypeInfo(new Cursor(Buffer.from([TYPE.NVARCHAR, 0xff, 0xff, 0x09, 0x04, 0xd0, 0x00, 0x34])))
+        const int = readTypeInfo(new Cursor(Buffer.from([TYPE.INTN, 4])))
+        const text = (value: string): Param => ({ name: '', status: 0, type: nvarchar, value: { bytes: Buffer.from(value, 'utf16le') } })
+        const call = (proc: number, options: number, params: Param[]) => writeRpc({ headers: allHeaders(), calls: [{ proc, options, params }], separators: [] })
+        const read = (payload: Buffer) => {
+          const tokens = [...readTokens(payload)]
+          const columns = tokens.flatMap((t) => (t.kind === 'colmetadata' && t.columns ? [t.columns] : []))[0]
+          const rows = tokens.flatMap((t) => (t.kind === 'row' ? [t.values.map((v, i) => (v.bytes === null ? null : textOf(columns![i]!.type, v.bytes)))] : []))
+          const handle = tokens.flatMap((t) => (t.kind === 'returnvalue' && t.value.bytes ? [t.value.bytes.readInt32LE()] : []))[0]
+          return { names: columns?.map((c) => c.name), rows, handle }
+        }
+        const sql = "SELECT TOP 2 u.full_name, u.country, 'x' AS a FROM users u JOIN countries c ON c.code = u.country ORDER BY u.id"
+        const first = read((await tds.request(PACKET.RPC, call(PROC.PREPEXEC, 0, [{ name: '', status: PARAM.BY_REF, type: int, value: { bytes: null } }, text(''), text(sql)]))).payload)
+        const again = read((await tds.request(PACKET.RPC, call(PROC.EXECUTE, 0x02, [{ name: '', status: 0, type: int, value: { bytes: Buffer.from(new Int32Array([first.handle!]).buffer) } }]))).payload)
+        seen.push(first.rows, again.rows)
+        expect(first.names).toEqual(['full_name', 'country', 'a'])
+        expect(again.names).toEqual(first.names)
+        expect(again.rows).toEqual(first.rows)
+      } finally {
+        tds.close()
       }
     })
   })

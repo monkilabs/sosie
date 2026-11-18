@@ -1470,7 +1470,10 @@ the session is in does not decide it, as the server says which: a `USE` in a bra
 fails, leaves the session where it was.
 
 RPCs: `sp_executesql` (10), `sp_prepare` (11), `sp_execute` (12), `sp_prepexec` (13) and `sp_unprepare` (15), by number
-or by name, their parameters of every type (`text`, `ntext` and `image` as an RPC sends them, a length and the bytes). The statement is checked as a batch; sp_prepare's and sp_prepexec's handle is the upstream's, returned to
+or by name, their parameters of every type (`text`, `ntext` and `image` as an RPC sends them, a length and the bytes).
+A call that asks for no metadata (`fNoMetaData`, as SqlClient sends every one, its prepared statements' executions
+among them) goes upstream asking for it: without it the server sends no TABNAME or COLINFO, which say each value's
+column and which are hidden keys. The client reads the COLMETADATA as it reads any. The statement is checked as a batch; sp_prepare's and sp_prepexec's handle is the upstream's, returned to
 the client, and kept with its statement's reading and the scope that turned its fakes back, so each sp_execute's
 parameters are turned back by it, and a message that quotes a real value the prepare put in shows its fake. Cursors (1 to
 9) and sp_prepexecrpc are refused.
