@@ -178,6 +178,21 @@ describe('fakes by type', async () => {
     expect(faker.computed('2019-13', { kind: 'string' })).toMatch(/^\d{4}-\d{2}$/)
   })
 
+  it('looks in transcripts for real values, not for structure: no key that looks like a word, no name in the schema', async () => {
+    const { faker, store } = await serve()
+    // A key a query built: a word is the query's structure, an email is a value.
+    faker.computed('{"label": "Quillon", "quill.vantablack@canary-mail.test": 1}', { kind: 'json' })
+    const city = data.schema.entities[0]!.fields.find((f) => f.name === 'city')!
+    // A real value that is a table's name, which any transcript of a query on it holds.
+    faker.value('Orders', city)
+    faker.value('Vantaville', city)
+    const index = store.scanIndex()
+    expect(index.find('label')).toBeUndefined()
+    expect(index.find('quill.vantablack@canary-mail.test')).toBeDefined()
+    expect(index.find('orders')).toBeUndefined()
+    expect(index.find('vantaville')).toBeDefined()
+  })
+
   it('json: the same structure, every leaf faked', () => {
     for (const [real, fake] of pairs('profile')) {
       const r = JSON.parse(real as string)

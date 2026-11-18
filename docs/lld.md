@@ -631,7 +631,10 @@ for: values of text, numbers, uuids, IP addresses and ObjectIds (never a boolean
 words and at least four characters, and numbers of six digits or more, so years, ports and line numbers are not
 findings. A line is one finding however many values it holds; a symbolic link inside a folder is not followed. A run that is also
 a fake is not counted: it is what the agent was shown. An API's own words in
-paths and query names are structure, and not looked for. A real value that is
+paths and query names are structure, and not looked for; nor is a JSON key a query built that looks like a word
+(`paid`, a key of `json_object_agg(status, n)`), nor a real value that is a name in the
+schema (a category `Data` beside a column `data`), which every transcript of a query on it holds. A key that is no
+word (an email, a name) is looked for. A real value that is
 a common word held as text rather than an enum (a role `admin`, a status
 `paid`) is looked for like any other, so a transcript that uses the word is a
 finding: such a field belongs under `pass` in `sosie.yml`, and a field that

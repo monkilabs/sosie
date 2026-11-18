@@ -213,6 +213,8 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
   const names = new Set(
     schema.entities.flatMap((e) => [e.id, e.name, ...e.fields.flatMap((f) => [f.id, f.name, `${e.name}.${f.name}`])]),
   )
+  /** The schema's names lowercased, as sosie scan compares. */
+  const schemaNames = new Set([...names].map((n) => n.toLowerCase()))
   /** A name in the schema, or alias.column as Postgres hints it, when the client wrote that alias. */
   const named = (text: string, sent: string) => {
     if (names.has(text)) return true
@@ -248,7 +250,10 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
     }
     // Bytes can be large and are never looked up: derived, not stored.
     if (type.kind === 'bytes') return draw(store.seed(domain, real), 0)
-    return store.fake(domain, real, { unique: plan.unique, scannable: SCANNABLE.has(type.kind) && !plan.words }, draw)
+    // A value that is a name in the schema (a category `Data`, beside a column `data`) is in every transcript of a
+    // query on it: sosie scan does not look for it, or it would find it everywhere.
+    const scannable = SCANNABLE.has(type.kind) && !plan.words && !schemaNames.has(real.toLowerCase())
+    return store.fake(domain, real, { unique: plan.unique, scannable }, draw)
   }
 
   /**
@@ -276,7 +281,9 @@ export function createFaker({ schema, rules, store }: { schema: Schema; rules: R
         const out: [string, unknown][] = []
         for (const [k, v] of Object.entries(node)) {
           if (structure(k)) out.push([k, yield* walk(v, `${path}.${k}`, k)])
-          else out.push([scalar(k, { kind: 'string' }, `${domain}.$${path}.*key`, { unique: true }), yield* walk(v, `${path}.*`, '')])
+          // A key faked as a value: one that looks like a word is the query's structure, which sosie scan does not
+          // look for in transcripts; any other (an email, a name) it does.
+          else out.push([scalar(k, { kind: 'string' }, `${domain}.$${path}.*key`, { unique: true, words: KEY_WORD.test(k) }), yield* walk(v, `${path}.*`, '')])
         }
         return Object.fromEntries(out)
       }

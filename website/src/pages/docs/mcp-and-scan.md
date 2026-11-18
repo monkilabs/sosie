@@ -106,7 +106,10 @@ finds one.
 - **Only distinctive values:** one to four words of at least four characters, and numbers of six digits or more. Years,
   ports and line numbers are not findings.
 - **A fake is not a finding.** It is what the agent was shown.
-- **Fields that pass are not looked for**, and neither are an API's own words in its paths and query names.
+- **Fields that pass are not looked for**, and neither are an API's own words in its paths and query names, a JSON key
+  that looks like a word (`label`), or a value that is a name in the schema (`Data`, beside a column `data`): a
+  transcript of a query holds those. A field that passes now, faked before its rule, is still looked for until
+  `SOSIE_HOME`'s store is cleared.
 
 A common word held as text rather than an enum, a role `admin` or a status `paid`, is looked for like any other value,
 so a transcript that uses the word is a finding. Such a field belongs under `pass` in `sosie.yml`.
