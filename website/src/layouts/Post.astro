@@ -1,0 +1,32 @@
+---
+/** A post written in Markdown: its title, its byline and date, and the post, with no docs sidebar. */
+import Base from './Base.astro';
+import { url } from '../url';
+
+interface Props {
+  frontmatter: { title: string; description: string; lead?: string; author: string; date: string };
+}
+
+const { frontmatter } = Astro.props;
+const base = url();
+const path = decodeURI(Astro.url.pathname).slice(base.length).replace(/\/?$/, '/');
+const date = new Date(`${frontmatter.date}T12:00:00Z`);
+---
+
+<Base title={`${frontmatter.title} · Sosie`} description={frontmatter.description} path={path}>
+  <div class="wrap">
+    <main class="docs__main">
+      <article class="prose">
+        <h1>{frontmatter.title}</h1>
+        <p class="post__byline">
+          {frontmatter.author} · <time datetime={frontmatter.date}>{date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}</time>
+        </p>
+        {frontmatter.lead && <p class="lead">{frontmatter.lead}</p>}
+        <slot />
+      </article>
+      <nav class="docs__pager" aria-label="Next">
+        <a class="next" href={url('docs/')}><small>Next</small>Getting started</a>
+      </nav>
+    </main>
+  </div>
+</Base>

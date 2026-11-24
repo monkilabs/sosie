@@ -927,6 +927,11 @@ kbd {
   color: var(--text-2);
   font-size: 1.15rem;
 }
+.prose .post__byline {
+  margin: 0 0 20px;
+  color: var(--text-3);
+  font-size: 0.9rem;
+}
 .prose h2 {
   margin: 48px 0 12px;
   padding-top: 8px;
