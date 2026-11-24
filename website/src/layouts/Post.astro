@@ -4,13 +4,17 @@ import Base from './Base.astro';
 import { url } from '../url';
 
 interface Props {
-  frontmatter: { title: string; description: string; lead?: string; author: string; date: string };
+  frontmatter: { title: string; description: string; lead?: string; author: string; date: string | Date };
 }
 
 const { frontmatter } = Astro.props;
 const base = url();
 const path = decodeURI(Astro.url.pathname).slice(base.length).replace(/\/?$/, '/');
-const date = new Date(`${frontmatter.date}T12:00:00Z`);
+// YAML reads an unquoted 2026-11-25 as a date at midnight UTC, which reaches the layout as a Date or its ISO string;
+// a quoted one stays the bare day.
+const given = String(frontmatter.date instanceof Date ? frontmatter.date.toISOString() : frontmatter.date);
+const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(given) ? `${given}T00:00:00Z` : given);
+const day = date.toISOString().slice(0, 10);
 ---
 
 <Base title={`${frontmatter.title} · Sosie`} description={frontmatter.description} path={path}>
@@ -19,7 +23,7 @@ const date = new Date(`${frontmatter.date}T12:00:00Z`);
       <article class="prose">
         <h1>{frontmatter.title}</h1>
         <p class="post__byline">
-          {frontmatter.author} · <time datetime={frontmatter.date}>{date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}</time>
+          {frontmatter.author} · <time datetime={day}>{date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}</time>
         </p>
         {frontmatter.lead && <p class="lead">{frontmatter.lead}</p>}
         <slot />
