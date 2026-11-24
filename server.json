@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.monkilabs/sosie",
+  "title": "Sosie",
+  "description": "Your AI agent sees a double of your data, never the real thing.",
+  "websiteUrl": "https://monkilabs.github.io/sosie/",
+  "repository": {
+    "url": "https://github.com/monkilabs/sosie",
+    "source": "github",
+    "subfolder": "packages/cli"
+  },
+  "version": "0.6.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@sosie/cli",
+      "version": "0.6.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

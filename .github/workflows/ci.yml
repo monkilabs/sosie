@@ -109,7 +109,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write # the tag and the GitHub Release
-      id-token: write # npm's provenance: the commit and the run that built each package
+      id-token: write # npm's provenance: the commit and the run that built each package; the MCP Registry's login
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -154,6 +154,38 @@ jobs:
             echo "::error::A 404 on the PUT of a package that exists means the token may not publish it: check that it lists every @sosie package with read and write."
             exit 1
           fi
+      # The MCP Registry lists the version just published: server.json names it, and the registry checks that the CLI's
+      # package on npm gives the same mcpName. Its login is the run's own token, for io.github.monkilabs; no secret.
+      # Before the tag, as a re-run releases the version again: a version the registry lists already is passed over.
+      - name: Is the version in the MCP Registry?
+        id: registry
+        if: steps.plan.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' "https://registry.modelcontextprotocol.io/v0.1/servers/io.github.monkilabs%2Fsosie/versions/${VERSION}")
+          echo "listed=$([ "$status" = 200 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - if: steps.plan.outputs.release == 'true' && steps.registry.outputs.listed != 'true'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: List the version in the MCP Registry
+        if: steps.plan.outputs.release == 'true' && steps.registry.outputs.listed != 'true'
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.1
+        run: |
+          set -euo pipefail
+          archive=mcp-publisher_linux_amd64.tar.gz
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
       # One call makes both, on the commit published: a run that stops before it leaves no tag, so its re-run releases
       # the version still, passing over the packages on npm already.
       - name: Tag the release, and make its GitHub Release from the CHANGELOG

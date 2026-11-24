@@ -168,6 +168,15 @@ describe('a release', () => {
   it('dates the CHANGELOG’s section for that version, which becomes its notes', () => {
     expect(changelog).toMatch(new RegExp(`^## ${version.replaceAll('.', '\\.')}(,|$)`, 'm'))
   })
+
+  // CI lists each release in the MCP Registry, which checks that the package on npm names the server it lists.
+  it('lists that version of @sosie/cli in the MCP Registry, under the name the package gives', () => {
+    const { mcpName } = manifest('packages/cli') as { mcpName: string }
+    const server = JSON.parse(readFileSync(join(root, 'server.json'), 'utf8'))
+    expect(server.name).toBe(mcpName)
+    expect(server.version).toBe(version)
+    expect(server.packages).toEqual([expect.objectContaining({ registryType: 'npm', identifier: '@sosie/cli', version })])
+  })
 })
 
 describe('the release plan, after a push to main', () => {
