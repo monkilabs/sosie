@@ -1026,6 +1026,56 @@ kbd {
   margin: 40px 0;
 }
 
+/* A comparison: Sosie's column tinted, the rows where it does better marked, the first column kept in view. */
+.compare table {
+  font-size: 0.85rem;
+}
+.compare th,
+.compare td {
+  min-width: 150px;
+  white-space: normal;
+}
+.compare th:first-child,
+.compare td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 170px;
+  background: var(--bg);
+  color: var(--text);
+}
+.compare th:nth-child(2),
+.compare td:nth-child(2) {
+  background: var(--fake-soft);
+  color: var(--text);
+}
+.compare th:nth-child(2) {
+  color: var(--fake);
+}
+.compare td:first-child strong,
+.compare tr:has(td:first-child strong) td:nth-child(2) {
+  color: var(--fake);
+}
+.compare td:first-child strong::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 8px 2px 0;
+  border-radius: 50%;
+  background: var(--fake);
+}
+@media (max-width: 759px) {
+  .compare th,
+  .compare td {
+    min-width: 130px;
+  }
+  .compare th:first-child,
+  .compare td:first-child {
+    min-width: 120px;
+  }
+}
+
 /* ── Not found ── */
 
 .missing {
